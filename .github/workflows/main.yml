@@ -1,0 +1,57 @@
+name: Deploy WordPress Plugin to Contabo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy WordPress Plugin via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -euxo pipefail
+
+            BASE_DIR="/home/olama/htdocs/olama.online/wp-content/plugins"
+            PLUGIN_DIR="$BASE_DIR/olama-registration"
+            REPO_URL="https://github.com/mossab99/olama-registration.git"
+
+            if [ ! -d "$BASE_DIR" ]; then
+              echo "ERROR: WordPress plugins directory not found"
+              exit 1
+            fi
+
+            if [ ! -d "$PLUGIN_DIR/.git" ]; then
+              echo "Plugin not found. Cloning..."
+
+              cd "$BASE_DIR"
+
+              rm -rf "$PLUGIN_DIR"
+
+              git clone "$REPO_URL"
+            else
+              echo "Updating existing plugin..."
+
+              cd "$PLUGIN_DIR"
+
+              git config --global --add safe.directory "$PLUGIN_DIR"
+
+              git fetch origin
+              git reset --hard origin/main
+              git clean -fd
+            fi
+
+            chown -R www-data:www-data "$PLUGIN_DIR"
+
+            find "$PLUGIN_DIR" -type d -exec chmod 755 {} \;
+            find "$PLUGIN_DIR" -type f -exec chmod 644 {} \;
+
+            echo "Deployment completed successfully"
