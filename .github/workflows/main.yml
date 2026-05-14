@@ -3,7 +3,7 @@ name: Deploy WordPress Plugin to Contabo
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   deploy:
