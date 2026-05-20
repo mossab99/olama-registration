@@ -44,6 +44,10 @@
         $('.olama-reg-tab-pane').removeClass('active').hide();
         $('#tab-' + tab).addClass('active').show();
 
+        if (tab === 'financial' && typeof loadFamilyBilling === 'function') {
+            loadFamilyBilling();
+        }
+
         // Update URL hash
         if (history.replaceState) {
             const url = new URL(window.location.href);
@@ -460,6 +464,735 @@
         ajax('olama_reg_delete_history_row', { id })
             .done(res => { if (res.success) $tr.remove(); });
     });
+    // ── Billing - Fee Templates ──────────────────────────────────────────────
+
+    function calculateFeeTotals() {
+        let total = 0;
+        $('.olama-reg-fee-amount-input').each(function () {
+            total += parseFloat($(this).val()) || 0;
+        });
+        $('#olama-reg-fee-total-label').text(total.toFixed(2));
+    }
+
+    function reindexFeeItems() {
+        const $tbody = $('#olama-reg-fee-items-table tbody');
+        const $rows = $tbody.find('tr');
+        $rows.each(function (idx) {
+            $(this).find('input[name*="[description]"]').attr('name', `items[${idx}][description]`);
+            $(this).find('input[name*="[amount]"]').attr('name', `items[${idx}][amount]`);
+        });
+        calculateFeeTotals();
+    }
+
+    $(document).on('click', '#olama-reg-add-fee-row-btn', function () {
+        const $tbody = $('#olama-reg-fee-items-table tbody');
+        const newRow = `
+        <tr>
+            <td>
+                <input type="text" name="items[temp][description]" class="olama-reg-inline-input" required placeholder="مثال: رسوم التسجيل، رسوم الباص...">
+            </td>
+            <td>
+                <input type="number" step="0.01" name="items[temp][amount]" value="0.00" class="olama-reg-inline-input olama-reg-fee-amount-input" required>
+            </td>
+            <td>
+                <button type="button" class="button button-small olama-reg-remove-fee-row-btn" style="color:#c62828;">x</button>
+            </td>
+        </tr>`;
+        $tbody.append(newRow);
+        reindexFeeItems();
+    });
+
+    $(document).on('click', '.olama-reg-remove-fee-row-btn', function () {
+        const $tbody = $('#olama-reg-fee-items-table tbody');
+        if ($tbody.find('tr').length > 1) {
+            $(this).closest('tr').remove();
+            reindexFeeItems();
+        } else {
+            alert('يجب أن يحتوي نموذج الرسوم على بند واحد على الأقل.');
+        }
+    });
+
+    $(document).on('input change', '.olama-reg-fee-amount-input', function () {
+        calculateFeeTotals();
+    });
+
+    $(document).on('submit', '#olama-reg-fee-template-form', function (e) {
+        e.preventDefault();
+        const $btn = $('#olama-reg-save-fee-template-btn');
+        const formData = {};
+        $(this).find('[name]').each(function () {
+            formData[this.name] = $(this).val();
+        });
+
+        ajax('olama_reg_save_fee_template', formData, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(R.strings.saved);
+                    setTimeout(() => {
+                        window.location.href = R.ajaxurl.replace('admin-ajax.php', 'admin.php') + '?page=olama-registration-fees';
+                    }, 1000);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
+    $(document).on('click', '.olama-reg-delete-fee-template-btn', function () {
+        if (!confirm(R.strings.confirmDelete)) return;
+        const $btn = $(this);
+        const id = $btn.data('id');
+        const $tr = $btn.closest('tr');
+        ajax('olama_reg_delete_fee_template', { id }, $btn)
+            .done(res => {
+                if (res.success) {
+                    $tr.fadeOut(300, function () { $(this).remove(); });
+                    showNotice(R.strings.saved);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    // ── Billing - Invoices & Modal ───────────────────────────────────────────
+
+    function calculateInvoiceTotals() {
+        let subtotal = 0;
+        $('#olama-reg-invoice-items-table tbody tr').not('.olama-reg-empty-items-row').each(function () {
+            const qty = parseFloat($(this).find('.inv-item-qty').val()) || 0;
+            const price = parseFloat($(this).find('.inv-item-price').val()) || 0;
+            const lineTotal = qty * price;
+            $(this).find('.inv-item-line-total').text(lineTotal.toFixed(2));
+            subtotal += lineTotal;
+        });
+
+        const discount = parseFloat($('#inv-discount-input').val()) || 0;
+        const grandTotal = Math.max(0, subtotal - discount);
+
+        $('#inv-subtotal-label').text(subtotal.toFixed(2));
+        $('#inv-grand-total-label').text(grandTotal.toFixed(2));
+    }
+
+    function reindexInvoiceItems() {
+        const $tbody = $('#olama-reg-invoice-items-table tbody');
+        const $rows = $tbody.find('tr').not('.olama-reg-empty-items-row');
+        if ($rows.length === 0) {
+            $tbody.find('.olama-reg-empty-items-row').show();
+        } else {
+            $tbody.find('.olama-reg-empty-items-row').hide();
+            $rows.each(function (idx) {
+                $(this).find('.inv-item-desc').attr('name', `items[${idx}][description]`);
+                $(this).find('.inv-item-qty').attr('name', `items[${idx}][quantity]`);
+                $(this).find('.inv-item-price').attr('name', `items[${idx}][unit_price]`);
+            });
+        }
+        calculateInvoiceTotals();
+    }
+
+    $(document).on('click', '#olama-reg-open-invoice-modal-btn', function () {
+        $('#olama-reg-invoice-modal').fadeIn(200);
+
+        // Select2 for family select with AJAX search
+        if (typeof $.fn.select2 !== 'undefined' && $('#inv_family_uid').length && !$('#inv_family_uid').hasClass('select2-hidden-accessible')) {
+            $('#inv_family_uid').select2({
+                dir: 'rtl',
+                width: '100%',
+                dropdownParent: $('#olama-reg-invoice-modal'),
+                ajax: {
+                    url: R.ajaxurl,
+                    dataType: 'json',
+                    delay: 250,
+                    type: 'POST',
+                    data: function (params) {
+                        return {
+                            action: 'olama_reg_search',
+                            nonce: R.nonce,
+                            q: params.term
+                        };
+                    },
+                    processResults: function (data) {
+                        if (data.success && data.data.families) {
+                            return {
+                                results: data.data.families.map(f => ({
+                                    id: f.family_uid,
+                                    text: `${f.father_first_name} ${f.father_family_name} (${f.family_uid})`
+                                }))
+                            };
+                        }
+                        return { results: [] };
+                    },
+                    cache: true
+                },
+                placeholder: 'ابحث عن عائلة باستخدام رقم الملف أو الاسم...',
+                minimumInputLength: 2
+            });
+        }
+    });
+
+    $(document).on('click', '.olama-reg-modal-close', function () {
+        $('#olama-reg-invoice-modal').fadeOut(200);
+    });
+
+    $(document).on('change', '#inv_family_uid', function () {
+        const familyUid = $(this).val();
+        const $studentSelect = $('#inv_student_uid');
+        $studentSelect.empty().append('<option value="">فاتورة عامة للعائلة</option>');
+        if (!familyUid) return;
+
+        ajax('olama_reg_get_family', { family_uid: familyUid })
+            .done(res => {
+                if (res.success && res.data.students) {
+                    res.data.students.forEach(s => {
+                        $studentSelect.append(`<option value="${s.student_uid}">${s.student_name} (${s.student_uid})</option>`);
+                    });
+                }
+            });
+    });
+
+    $(document).on('change', '#inv_fee_template_id', function () {
+        const $opt = $(this).find('option:selected');
+        const inst = parseInt($opt.data('inst')) || 1;
+        const itemsRaw = $opt.data('items');
+
+        $('#inv_installments').val(inst);
+
+        const $tbody = $('#olama-reg-invoice-items-table tbody');
+        $tbody.find('tr').not('.olama-reg-empty-items-row').remove();
+
+        let items = [];
+        if (typeof itemsRaw === 'string') {
+            try { items = JSON.parse(itemsRaw); } catch(e) {}
+        } else if (Array.isArray(itemsRaw)) {
+            items = itemsRaw;
+        }
+
+        if (items.length) {
+            items.forEach((item, idx) => {
+                const row = `
+                <tr>
+                    <td>
+                        <input type="text" name="items[${idx}][description]" value="${item.description}" class="olama-reg-inline-input inv-item-desc" required>
+                    </td>
+                    <td>
+                        <input type="number" name="items[${idx}][quantity]" value="1" min="1" class="olama-reg-inline-input inv-item-qty" style="width:70px; text-align:center;" required>
+                    </td>
+                    <td>
+                        <input type="number" step="0.01" name="items[${idx}][unit_price]" value="${parseFloat(item.amount).toFixed(2)}" class="olama-reg-inline-input inv-item-price" style="width:110px;" required>
+                    </td>
+                    <td>
+                        <span class="inv-item-line-total" style="font-weight:700;">${parseFloat(item.amount).toFixed(2)}</span>
+                    </td>
+                    <td>
+                        <button type="button" class="button button-small inv-remove-item-row-btn" style="color:#c62828;">x</button>
+                    </td>
+                </tr>`;
+                $tbody.append(row);
+            });
+        }
+
+        reindexInvoiceItems();
+    });
+
+    $(document).on('click', '#inv-add-item-row-btn', function () {
+        const $tbody = $('#olama-reg-invoice-items-table tbody');
+        const idx = $tbody.find('tr').not('.olama-reg-empty-items-row').length;
+        const row = `
+        <tr>
+            <td>
+                <input type="text" name="items[${idx}][description]" class="olama-reg-inline-input inv-item-desc" placeholder="بند رسوم مخصص..." required>
+            </td>
+            <td>
+                <input type="number" name="items[${idx}][quantity]" value="1" min="1" class="olama-reg-inline-input inv-item-qty" style="width:70px; text-align:center;" required>
+            </td>
+            <td>
+                <input type="number" step="0.01" name="items[${idx}][unit_price]" value="0.00" class="olama-reg-inline-input inv-item-price" style="width:110px;" required>
+            </td>
+            <td>
+                <span class="inv-item-line-total" style="font-weight:700;">0.00</span>
+            </td>
+            <td>
+                <button type="button" class="button button-small inv-remove-item-row-btn" style="color:#c62828;">x</button>
+            </td>
+        </tr>`;
+        $tbody.append(row);
+        reindexInvoiceItems();
+    });
+
+    $(document).on('click', '.inv-remove-item-row-btn', function () {
+        $(this).closest('tr').remove();
+        reindexInvoiceItems();
+    });
+
+    $(document).on('input change', '.inv-item-qty, .inv-item-price', function () {
+        calculateInvoiceTotals();
+    });
+
+    $(document).on('input change', '#inv-discount-input', function () {
+        calculateInvoiceTotals();
+    });
+
+    $(document).on('submit', '#olama-reg-invoice-form', function (e) {
+        e.preventDefault();
+        const $tbody = $('#olama-reg-invoice-items-table tbody');
+        if ($tbody.find('tr').not('.olama-reg-empty-items-row').length === 0) {
+            alert('يرجى إضافة بند واحد على الأقل للفاتورة.');
+            return;
+        }
+
+        const $btn = $('#olama-reg-save-invoice-btn');
+        const formData = {};
+        $(this).find('[name]').each(function () {
+            formData[this.name] = $(this).val();
+        });
+
+        ajax('olama_reg_create_invoice', formData, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(R.strings.saved);
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
+    // ── Billing - Invoice Details Drawer ─────────────────────────────────────
+
+    $(document).on('click', '.olama-reg-view-invoice-btn', function () {
+        const id = $(this).data('id');
+        const $btn = $(this);
+
+        ajax('olama_reg_get_invoice', { id }, $btn)
+            .done(res => {
+                if (res.success && res.data.invoice) {
+                    const inv = res.data.invoice;
+
+                    $('#drawer-invoice-number').text(inv.invoice_number);
+                    $('#drawer-total-val').text(parseFloat(inv.total).toFixed(2) + ' د.أ');
+                    $('#drawer-paid-val').text(parseFloat(inv.amount_paid).toFixed(2) + ' د.أ');
+                    $('#drawer-balance-val').text(parseFloat(inv.balance).toFixed(2) + ' د.أ');
+                    $('#drawer-family-uid').text(inv.family_uid);
+                    $('#drawer-issue-date').text(inv.issue_date);
+                    $('#drawer-due-date').text(inv.due_date || '—');
+
+                    let statusClass = 'olama-reg-badge--inactive';
+                    let statusLabel = 'مسودة';
+                    switch (inv.status) {
+                        case 'issued':
+                            statusClass = 'olama-reg-badge--active';
+                            statusLabel = 'صادرة';
+                            break;
+                        case 'partial':
+                            statusClass = 'olama-reg-badge--active';
+                            statusLabel = 'جزئية';
+                            break;
+                        case 'paid':
+                            statusClass = 'olama-reg-badge--active';
+                            statusLabel = 'مدفوعة';
+                            break;
+                        case 'overdue':
+                            statusClass = 'olama-reg-badge--blacklist';
+                            statusLabel = 'متأخرة';
+                            break;
+                        case 'cancelled':
+                            statusClass = 'olama-reg-badge--inactive';
+                            statusLabel = 'ملغاة';
+                            break;
+                    }
+                    $('#drawer-status-badge').html(`<span class="olama-reg-badge ${statusClass}">${statusLabel}</span>`);
+
+                    // Populate items
+                    const $itemsBody = $('#drawer-items-table tbody');
+                    $itemsBody.empty();
+                    if (inv.items && inv.items.length) {
+                        inv.items.forEach(item => {
+                            $itemsBody.append(`
+                            <tr>
+                                <td>${item.description}</td>
+                                <td style="text-align:center;">${parseFloat(item.quantity).toFixed(0)}</td>
+                                <td>${parseFloat(item.unit_price).toFixed(2)}</td>
+                                <td style="font-weight:700;">${parseFloat(item.line_total).toFixed(2)}</td>
+                            </tr>`);
+                        });
+                    }
+
+                    // Populate installments
+                    const $instBody = $('#drawer-installments-table tbody');
+                    $instBody.empty();
+                    if (inv.installments && inv.installments.length) {
+                        inv.installments.forEach(inst => {
+                            let instStatusClass = 'olama-reg-badge--inactive';
+                            let instStatusLabel = 'معلق';
+                            switch (inst.status) {
+                                case 'paid':
+                                    instStatusClass = 'olama-reg-badge--active';
+                                    instStatusLabel = 'مسدد';
+                                    break;
+                                case 'partial':
+                                    instStatusClass = 'olama-reg-badge--active';
+                                    instStatusLabel = 'جزئي';
+                                    break;
+                                case 'overdue':
+                                    instStatusClass = 'olama-reg-badge--blacklist';
+                                    instStatusLabel = 'متأخر';
+                                    break;
+                            }
+
+                            $instBody.append(`
+                            <tr>
+                                <td>${inst.installment_no}</td>
+                                <td>${inst.due_date}</td>
+                                <td style="font-weight:700;">${parseFloat(inst.amount_due).toFixed(2)}</td>
+                                <td>${parseFloat(inst.amount_paid).toFixed(2)}</td>
+                                <td><span class="olama-reg-badge ${instStatusClass}">${instStatusLabel}</span></td>
+                            </tr>`);
+                        });
+                    }
+
+                    // Payment record trigger
+                    const $drawerActions = $('#olama-reg-invoice-drawer').find('.olama-reg-form-actions');
+                    $drawerActions.find('.olama-reg-pay-invoice-trigger').remove();
+                    if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                        $drawerActions.prepend(`
+                            <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger" 
+                                    data-id="${inv.id}" data-no="${inv.invoice_number}" data-bal="${inv.balance}" data-family="${inv.family_uid}">
+                                تسجيل دفعة ماليّة
+                            </button>
+                        `);
+                    }
+
+                    $('#olama-reg-invoice-drawer').fadeIn(200);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    $(document).on('click', '.olama-reg-drawer-close', function () {
+        $('#olama-reg-invoice-drawer').fadeOut(200);
+    });
+
+    // ── Billing - Payments & Receipts ────────────────────────────────────────
+
+    const paymentModalHtml = `
+    <div id="olama-reg-payment-modal" class="olama-reg-modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.4); padding-top:80px;">
+        <div class="olama-reg-form-wrapper" style="background:#fff; margin:0 auto 50px; width:90%; max-width:500px; border-radius:10px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+            <div style="background:#FFF3E0; padding:15px 20px; border-bottom:1px solid #E0C090; display:flex; justify-content:space-between; align-items:center;">
+                <h2 style="margin:0; font-size:18px; font-weight:800; color:#C4780A; display:flex; align-items:center; gap:8px;">
+                    <span class="dashicons dashicons-money-alt"></span>
+                    تسجيل دفعة جديدة
+                </h2>
+                <button type="button" class="olama-reg-pay-modal-close" style="background:none; border:none; font-size:24px; cursor:pointer; color:#C4780A;">&times;</button>
+            </div>
+            <form id="olama-reg-payment-form" style="margin:0;">
+                <input type="hidden" name="invoice_id" id="pay_invoice_id">
+                <input type="hidden" name="family_uid" id="pay_family_uid">
+                <div style="padding:20px;">
+                    <div class="olama-reg-field" style="margin-bottom:12px; display:flex; gap:6px;">
+                        <label style="font-weight:700; color:#6B7280;">رقم الفاتورة:</label>
+                        <span id="pay_invoice_no_lbl" style="font-weight:800; color:#1a1a2e;"></span>
+                    </div>
+                    <div class="olama-reg-field" style="margin-bottom:12px; display:flex; gap:6px;">
+                        <label style="font-weight:700; color:#6B7280;">المتبقي غير المدفوع:</label>
+                        <span id="pay_invoice_bal_lbl" style="font-weight:800; color:#E8920A;">0.00 د.أ</span>
+                    </div>
+                    <div class="olama-reg-field olama-reg-field--required" style="margin-bottom:12px;">
+                        <label for="pay_amount">قيمة الدفعة المقبوضة (د.أ)</label>
+                        <input type="number" step="0.01" min="0.01" id="pay_amount" name="amount" required style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px;">
+                    </div>
+                    <div class="olama-reg-field olama-reg-field--required" style="margin-bottom:12px;">
+                        <label for="pay_method">طريقة الدفع</label>
+                        <select id="pay_method" name="method" required style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;">
+                            <option value="cash">نقدي (كاش)</option>
+                            <option value="bank_transfer">تحويل بنكي</option>
+                            <option value="cheque">شيك بنكي</option>
+                            <option value="online">دفع إلكتروني</option>
+                        </select>
+                    </div>
+                    <div class="olama-reg-field" style="margin-bottom:12px;" id="pay_reference_wrap">
+                        <label for="pay_reference">رقم المرجع / الشيك</label>
+                        <input type="text" id="pay_reference" name="reference" style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px;" placeholder="رقم المعاملة أو رقم الشيك...">
+                    </div>
+                    <div class="olama-reg-field" style="margin-bottom:12px;">
+                        <label for="pay_date">تاريخ القبض</label>
+                        <input type="text" id="pay_date" name="payment_date" class="olama-reg-datepicker" required style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px;">
+                    </div>
+                    <div class="olama-reg-field">
+                        <label for="pay_notes">ملاحظات</label>
+                        <textarea id="pay_notes" name="notes" rows="2" style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;"></textarea>
+                    </div>
+                </div>
+                <div class="olama-reg-form-actions">
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="olama-reg-save-payment-btn">حفظ وتسجيل السند</button>
+                    <button type="button" class="button button-large olama-reg-pay-modal-close">إلغاء</button>
+                </div>
+            </form>
+        </div>
+    </div>`;
+
+    $(document).on('click', '.olama-reg-pay-invoice-trigger', function() {
+        const id = $(this).data('id');
+        const no = $(this).data('no');
+        const bal = parseFloat($(this).data('bal')) || 0;
+        const family = $(this).data('family');
+
+        $('#pay_invoice_id').val(id);
+        $('#pay_family_uid').val(family);
+        $('#pay_invoice_no_lbl').text(no);
+        $('#pay_invoice_bal_lbl').text(bal.toFixed(2) + ' د.أ');
+        $('#pay_amount').val(bal.toFixed(2)).attr('max', bal.toFixed(2));
+
+        const today = new Date().toISOString().split('T')[0];
+        $('#pay_date').val(today);
+
+        $('#olama-reg-invoice-drawer').fadeOut(100);
+        $('#olama-reg-payment-modal').fadeIn(200);
+        initDatepickers($('#olama-reg-payment-modal'));
+    });
+
+    $(document).on('click', '.olama-reg-pay-modal-close', function () {
+        $('#olama-reg-payment-modal').fadeOut(200);
+    });
+
+    $(document).on('submit', '#olama-reg-payment-form', function (e) {
+        e.preventDefault();
+        const $btn = $('#olama-reg-save-payment-btn');
+        const formData = {};
+        $(this).find('[name]').each(function () {
+            formData[this.name] = $(this).val();
+        });
+
+        ajax('olama_reg_record_payment', formData, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(R.strings.saved);
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
+    // ── Billing - Family Account Tab Overlay ─────────────────────────────────
+
+    function renderFamilyBilling(data, familyUid, yearId) {
+        const $sec = $('#olama-reg-family-billing-section');
+        $sec.empty();
+
+        const sum = data.summary || { total_invoiced: 0, total_paid: 0, balance: 0 };
+        const totalInvoiced = parseFloat(sum.total_invoiced || 0).toFixed(2);
+        const totalPaid = parseFloat(sum.total_paid || 0).toFixed(2);
+        const balance = parseFloat(sum.balance || 0).toFixed(2);
+
+        let summaryHtml = `
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-bottom:25px; margin-top:20px;">
+            <div style="background:#FFFBF3; border:1.5px solid #E0C090; border-radius:10px; padding:16px; text-align:center; box-shadow: 0 2px 6px rgba(232,146,10,0.05);">
+                <div style="font-size:12px; font-weight:700; color:#C4780A; margin-bottom:6px;">إجمالي الفواتير والمطالبات</div>
+                <div style="font-size:24px; font-weight:800; color:#1a1a2e;">${totalInvoiced} د.أ</div>
+            </div>
+            <div style="background:#E8F5E9; border:1.5px solid #a5d6a7; border-radius:10px; padding:16px; text-align:center; box-shadow: 0 2px 6px rgba(46,125,50,0.05);">
+                <div style="font-size:12px; font-weight:700; color:#2E7D32; margin-bottom:6px;">إجمالي السداد الفعلي</div>
+                <div style="font-size:24px; font-weight:800; color:#2E7D32;">${totalPaid} د.أ</div>
+            </div>
+            <div style="background:#FFF3E0; border:1.5px solid #ffcc80; border-radius:10px; padding:16px; text-align:center; box-shadow: 0 2px 6px rgba(232,146,10,0.1);">
+                <div style="font-size:12px; font-weight:700; color:#E8920A; margin-bottom:6px;">المتبقي ذمة مستحقة</div>
+                <div style="font-size:24px; font-weight:800; color:#E8920A;">${balance} د.أ</div>
+            </div>
+        </div>`;
+
+        $sec.append(summaryHtml);
+
+        let invoicesHtml = `
+        <div class="olama-reg-section" style="margin-bottom: 25px;">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-media-text"></span>
+                الفواتير والمطالبات المصدرة
+            </h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <thead>
+                        <tr>
+                            <th>رقم الفاتورة</th>
+                            <th>تاريخ الإصدار</th>
+                            <th>العام الدراسي</th>
+                            <th>الإجمالي</th>
+                            <th>المدفوع</th>
+                            <th>المتبقي</th>
+                            <th>الحالة</th>
+                            <th>الخيارات</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+        if (!data.invoices || data.invoices.length === 0) {
+            invoicesHtml += `
+                        <tr>
+                            <td colspan="8" class="olama-reg-empty-state">لا يوجد فواتير مصدرة لهذه العائلة خلال العام الدراسي المحدد.</td>
+                        </tr>`;
+        } else {
+            data.invoices.forEach(inv => {
+                let statusClass = 'olama-reg-badge--inactive';
+                let statusLabel = 'مسودة';
+                switch (inv.status) {
+                    case 'issued':
+                        statusClass = 'olama-reg-badge--active';
+                        statusLabel = 'صادرة';
+                        break;
+                    case 'partial':
+                        statusClass = 'olama-reg-badge--active';
+                        statusLabel = 'جزئية';
+                        break;
+                    case 'paid':
+                        statusClass = 'olama-reg-badge--active';
+                        statusLabel = 'مدفوعة';
+                        break;
+                    case 'overdue':
+                        statusClass = 'olama-reg-badge--blacklist';
+                        statusLabel = 'متأخرة';
+                        break;
+                    case 'cancelled':
+                        statusClass = 'olama-reg-badge--inactive';
+                        statusLabel = 'ملغاة';
+                        break;
+                }
+
+                const adminUrl = R.ajaxurl.replace('admin-ajax.php', 'admin.php');
+                invoicesHtml += `
+                        <tr>
+                            <td><strong>${inv.invoice_number}</strong></td>
+                            <td>${inv.issue_date}</td>
+                            <td>${inv.academic_year_name || '—'}</td>
+                            <td style="font-weight:700;">${parseFloat(inv.total).toFixed(2)}</td>
+                            <td style="color:#2e7d32; font-weight:700;">${parseFloat(inv.amount_paid).toFixed(2)}</td>
+                            <td class="olama-reg-balance-cell">${parseFloat(inv.balance).toFixed(2)}</td>
+                            <td><span class="olama-reg-badge ${statusClass}">${statusLabel}</span></td>
+                            <td>
+                                <button class="button button-small olama-reg-view-invoice-btn" data-id="${inv.id}">
+                                    <span class="dashicons dashicons-visibility" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                </button>
+                                <a href="${adminUrl}?page=olama-registration-invoices&action=print&id=${inv.id}" target="_blank" class="button button-small">
+                                    <span class="dashicons dashicons-printer" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                </a>
+                            </td>
+                        </tr>`;
+            });
+        }
+
+        invoicesHtml += `
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+        $sec.append(invoicesHtml);
+
+        let paymentsHtml = `
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-money-alt"></span>
+                السندات والمدفوعات المستلمة
+            </h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <thead>
+                        <tr>
+                            <th>رقم السند</th>
+                            <th>تاريخ القبض</th>
+                            <th>الفاتورة المربوطة</th>
+                            <th>طريقة الدفع</th>
+                            <th>رقم المرجع / الشيك</th>
+                            <th>القيمة المقبوضة</th>
+                            <th>المستلم</th>
+                            <th>إيصال</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+        if (!data.payments || data.payments.length === 0) {
+            paymentsHtml += `
+                        <tr>
+                            <td colspan="8" class="olama-reg-empty-state">لا يوجد دفعات مسجلة لهذه العائلة.</td>
+                        </tr>`;
+        } else {
+            const payMethods = {
+                cash: 'نقدي',
+                bank_transfer: 'تحويل بنكي',
+                cheque: 'شيك',
+                online: 'دفع إلكتروني'
+            };
+
+            const adminUrl = R.ajaxurl.replace('admin-ajax.php', 'admin.php');
+            data.payments.forEach(pay => {
+                paymentsHtml += `
+                        <tr>
+                            <td>#${pay.id}</td>
+                            <td>${pay.payment_date}</td>
+                            <td><strong>${pay.invoice_number || '—'}</strong></td>
+                            <td>${payMethods[pay.method] || pay.method}</td>
+                            <td>${pay.reference || '—'}</td>
+                            <td style="font-weight:700; color:#2e7d32;">${parseFloat(pay.amount).toFixed(2)}</td>
+                            <td>${pay.received_by_name || '—'}</td>
+                            <td>
+                                <a href="${adminUrl}?page=olama-registration-payments&action=print_receipt&id=${pay.id}" target="_blank" class="button button-small">
+                                    <span class="dashicons dashicons-printer" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                </a>
+                            </td>
+                        </tr>`;
+            });
+        }
+
+        paymentsHtml += `
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+        $sec.append(paymentsHtml);
+    }
+
+    function loadFamilyBilling() {
+        const familyUid = $('#olama-reg-family-uid').val();
+        const yearId    = $('#olama-reg-fin-year').val() || 0;
+        if (!familyUid) return;
+
+        if ($('#olama-reg-family-billing-section').length === 0) {
+            $('#tab-financial').append('<div id="olama-reg-family-billing-section" style="margin-top: 30px;"></div>');
+        }
+
+        const $sec = $('#olama-reg-family-billing-section');
+        $sec.html('<div class="olama-reg-empty-state"><span class="dashicons dashicons-update spin"></span> جاري تحميل الحساب المالي...</div>');
+
+        ajax('olama_reg_get_family_billing', { family_uid: familyUid, academic_year_id: yearId })
+            .done(res => {
+                if (res.success) {
+                    renderFamilyBilling(res.data, familyUid, yearId);
+                } else {
+                    $sec.html(`<div class="olama-reg-notice olama-reg-notice--error" style="display:block;">${res.data?.message || 'خطأ في تحميل البيانات الماليّة.'}</div>`);
+                }
+            })
+            .fail(() => {
+                $sec.html('<div class="olama-reg-notice olama-reg-notice--error" style="display:block;">خطأ في الاتصال بالخادم.</div>');
+            });
+    }
+
+    // Reload family billing in sync when the year changes
+    $(document).on('change', '#olama-reg-fin-year', function () {
+        const familyUid = $(this).data('family-uid');
+        const yearId    = $(this).val();
+        ajax('olama_reg_get_financial', { family_uid: familyUid, academic_year_id: yearId })
+            .done(res => {
+                if (res.success) {
+                    renderFinTable(res.data.rows, res.data.totals, familyUid, yearId);
+                    loadFamilyBilling();
+                }
+            });
+    });
 
     // ── Init Helpers ──────────────────────────────────────────────────────────
 
@@ -484,8 +1217,16 @@
     // ── Page Init ─────────────────────────────────────────────────────────────
 
     $(document).ready(function () {
+        if ($('#olama-reg-payment-modal').length === 0) {
+            $('body').append(paymentModalHtml);
+        }
+
         initDatepickers($('.olama-reg-wrap'));
         initSelect2($('.olama-reg-wrap'));
+
+        if ($('.olama-reg-tab.active[data-tab="financial"]').length) {
+            loadFamilyBilling();
+        }
     });
 
 })(jQuery);

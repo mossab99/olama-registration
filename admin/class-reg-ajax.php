@@ -22,6 +22,14 @@ class Olama_Reg_Ajax {
             'olama_reg_get_financial',
             'olama_reg_search',
             'olama_reg_upload_photo',
+            'olama_reg_save_fee_template',
+            'olama_reg_delete_fee_template',
+            'olama_reg_create_invoice',
+            'olama_reg_update_invoice',
+            'olama_reg_get_invoice',
+            'olama_reg_record_payment',
+            'olama_reg_get_receipt',
+            'olama_reg_get_family_billing',
         ];
 
         foreach ( $actions as $action ) {
@@ -316,6 +324,126 @@ class Olama_Reg_Ajax {
             'attachment_id' => $attachment_id,
             'url'           => wp_get_attachment_url( $attachment_id ),
             'thumb'         => wp_get_attachment_image_url( $attachment_id, 'thumbnail' ),
+        ] );
+    }
+
+    // ── Billing - Fee Templates ──────────────────────────────────────────────
+
+    public function ajax_save_fee_template(): void {
+        $this->guard();
+        $result = Olama_Reg_Billing_Fees::save_template( $_POST );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => __( 'Template saved successfully.', 'olama-registration' ),
+            'id'      => $result,
+        ] );
+    }
+
+    public function ajax_delete_fee_template(): void {
+        $this->guard();
+        $id     = (int) ( $_POST['id'] ?? 0 );
+        $result = Olama_Reg_Billing_Fees::delete_template( $id );
+
+        if ( ! $result ) {
+            wp_send_json_error( [ 'message' => __( 'Could not delete template.', 'olama-registration' ) ] );
+        }
+
+        wp_send_json_success( [ 'message' => __( 'Template deleted successfully.', 'olama-registration' ) ] );
+    }
+
+    // ── Billing - Invoices ────────────────────────────────────────────────────
+
+    public function ajax_create_invoice(): void {
+        $this->guard();
+        $result = Olama_Reg_Billing_Invoice::create( $_POST );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message'    => __( 'Invoice created successfully.', 'olama-registration' ),
+            'invoice_id' => $result,
+        ] );
+    }
+
+    public function ajax_update_invoice(): void {
+        $this->guard();
+        $id     = (int) ( $_POST['id'] ?? 0 );
+        $result = Olama_Reg_Billing_Invoice::update( $id, $_POST );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => __( 'Invoice updated successfully.', 'olama-registration' ),
+        ] );
+    }
+
+    public function ajax_get_invoice(): void {
+        $this->guard();
+        $id      = (int) ( $_POST['id'] ?? 0 );
+        $invoice = Olama_Reg_Billing_Invoice::get_invoice( $id );
+
+        if ( ! $invoice ) {
+            wp_send_json_error( [ 'message' => __( 'Invoice not found.', 'olama-registration' ) ] );
+        }
+
+        wp_send_json_success( [ 'invoice' => $invoice ] );
+    }
+
+    // ── Billing - Payments ────────────────────────────────────────────────────
+
+    public function ajax_record_payment(): void {
+        $this->guard();
+        $result = Olama_Reg_Billing_Payment::record( $_POST );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message'    => __( 'Payment recorded successfully.', 'olama-registration' ),
+            'payment_id' => $result,
+        ] );
+    }
+
+    public function ajax_get_receipt(): void {
+        $this->guard();
+        $payment_id = (int) ( $_POST['id'] ?? 0 );
+        $data       = Olama_Reg_Billing_Payment::generate_receipt_data( $payment_id );
+
+        if ( empty( $data ) ) {
+            wp_send_json_error( [ 'message' => __( 'Receipt data not found.', 'olama-registration' ) ] );
+        }
+
+        wp_send_json_success( $data );
+    }
+
+    // ── Billing - Family Billing Tab overlay ──────────────────────────────────
+
+    public function ajax_get_family_billing(): void {
+        $this->guard();
+        $family_uid = sanitize_text_field( $_POST['family_uid'] ?? '' );
+        $year_id    = (int) ( $_POST['academic_year_id'] ?? 0 );
+
+        if ( ! $family_uid ) {
+            wp_send_json_error( [ 'message' => __( 'Family UID is required.', 'olama-registration' ) ] );
+        }
+
+        $invoices = Olama_Reg_Billing_Invoice::get_family_invoices( $family_uid, $year_id );
+        $payments = Olama_Reg_Billing_Payment::get_family_payments( $family_uid, $year_id );
+        $summary  = Olama_Reg_Billing_Invoice::get_invoice_summary( $family_uid, $year_id );
+
+        wp_send_json_success( [
+            'invoices' => $invoices,
+            'payments' => $payments,
+            'summary'  => $summary,
         ] );
     }
 }

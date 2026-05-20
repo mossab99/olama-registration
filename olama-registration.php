@@ -3,7 +3,7 @@
  * Plugin Name: Olama Registration
  * Plugin URI:  https://olama.online/olama-registration
  * Description: Family-centric student registration system for Olama School. Requires Olama School System plugin.
- * Version:     1.0.1
+ * Version:     1.0.2
  * Author:      د. مصعب الحنيطي
  * Author URI:  https://olama.online
  * Text Domain: olama-registration
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-define( 'OLAMA_REG_VERSION',             '1.0.1' );
+define( 'OLAMA_REG_VERSION',             '1.0.2' );
 define( 'OLAMA_REG_MIN_SCHOOL_VERSION',  '2.3.9' );
 define( 'OLAMA_REG_PATH',               plugin_dir_path( __FILE__ ) );
 define( 'OLAMA_REG_URL',                plugin_dir_url( __FILE__ ) );
@@ -58,6 +58,10 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-academic-history.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-transport.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-financial.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-billing-fees.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-billing-invoice.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-billing-payment.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-billing-reports.php';
 
     // ── Load admin ───────────────────────────────────────────────────────────
     if ( is_admin() ) {

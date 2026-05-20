@@ -1,50 +1,63 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Olama Registration — RTL Admin Stylesheet
-   Color palette: orange/amber (#E8920A) on white
+   Olama Registration — Redesigned RTL CSS Design System
+   Based on the premium layout & consistency standards of OLAMASKILL.md
+   Color Palette: Warm Orange/Amber (#E8920A) & Sleek Slate (#1A1A2E)
    ═══════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap');
 
-/* ── Root Variables ─────────────────────────────────────────────── */
+/* ── 1. Root variables matching OLAMASKILL.md standards ───────────── */
 :root {
     --reg-primary:       #E8920A;
     --reg-primary-dark:  #C4780A;
-    --reg-primary-light: #FFF3E0;
+    --reg-primary-light: #FFF8E7;
     --reg-accent:        #FFA726;
+    --reg-success:       #2E7D32;
+    --reg-warning:       #D63638;
+    --reg-bg:            #F4F5F7;
+    --reg-card-bg:       #FFFFFF;
+    --reg-border:        #E2E8F0;
+    --reg-border-focus:  #E8920A;
     --reg-text:          #1A1A2E;
     --reg-text-muted:    #6B7280;
-    --reg-border:        #E0C090;
-    --reg-bg:            #FAFAFA;
-    --reg-white:         #FFFFFF;
-    --reg-success:       #2E7D32;
-    --reg-danger:        #C62828;
-    --reg-danger-light:  #FFEBEE;
-    --reg-shadow:        0 2px 12px rgba(232,146,10,0.12);
     --reg-radius:        10px;
     --reg-radius-sm:     6px;
-    --reg-transition:    0.2s ease;
+    --reg-shadow:        0 4px 15px rgba(232, 146, 10, 0.06);
+    --reg-shadow-hover:  0 10px 25px rgba(232, 146, 10, 0.12);
+    --reg-font:          'Tajawal', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --reg-transition:    all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ── Global Wrap ─────────────────────────────────────────────────── */
+/* ── 2. Global Wrapper Reset ──────────────────────────────────────── */
 .olama-reg-wrap {
-    font-family: 'Tajawal', 'Segoe UI', sans-serif;
+    font-family: var(--reg-font);
     direction: rtl;
     color: var(--reg-text);
     max-width: 1400px;
+    margin: 20px 20px 20px 0;
+    padding-left: 20px;
+    box-sizing: border-box;
 }
 
-/* ── Page Header ─────────────────────────────────────────────────── */
+.olama-reg-wrap * {
+    box-sizing: border-box;
+}
+
+/* ── 3. Premium Page Header ────────────────────────────────────────── */
 .olama-reg-page-header {
     display: flex;
     align-items: center;
-    gap: 14px;
-    margin-bottom: 20px;
+    justify-content: space-between;
+    margin-bottom: 25px;
     flex-wrap: wrap;
+    gap: 15px;
+    padding-bottom: 12px;
+    border-bottom: 1.5px dashed var(--reg-border);
 }
 
 .olama-reg-page-header h1 {
-    font-size: 22px;
-    font-weight: 800;
+    font-size: 24px;
+    font-weight: 900;
     color: var(--reg-text);
     display: flex;
     align-items: center;
@@ -52,138 +65,171 @@
     margin: 0;
 }
 
+.olama-reg-page-header h1 .dashicons {
+    font-size: 28px;
+    width: 28px;
+    height: 28px;
+    color: var(--reg-primary);
+}
+
 .olama-reg-back-btn {
     color: var(--reg-primary-dark);
     text-decoration: none;
-    font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    transition: color var(--reg-transition);
-}
-
-.olama-reg-back-btn:hover { color: var(--reg-primary); }
-
-/* ── Buttons ─────────────────────────────────────────────────────── */
-.olama-reg-btn {
+    font-weight: 700;
+    font-size: 14px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 18px;
-    font-family: 'Tajawal', sans-serif;
+    transition: var(--reg-transition);
+}
+
+.olama-reg-back-btn:hover {
+    color: var(--reg-primary);
+    transform: translateX(4px);
+}
+
+/* ── 4. Premium Buttons ───────────────────────────────────────────── */
+.olama-reg-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 20px;
+    font-family: var(--reg-font);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
     border-radius: var(--reg-radius-sm);
-    transition: background var(--reg-transition), transform var(--reg-transition);
+    border: 1.5px solid transparent;
+    transition: var(--reg-transition);
+    text-decoration: none;
 }
 
 .olama-reg-btn--primary {
     background: linear-gradient(135deg, var(--reg-primary) 0%, var(--reg-primary-dark) 100%);
-    color: #fff !important;
-    border: none;
-    box-shadow: 0 4px 14px rgba(232,146,10,0.35);
+    color: #ffffff !important;
+    box-shadow: 0 4px 14px rgba(232, 146, 10, 0.25);
 }
 
 .olama-reg-btn--primary:hover {
     background: linear-gradient(135deg, var(--reg-accent) 0%, var(--reg-primary) 100%);
-    transform: translateY(-1px);
-    color: #fff !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(232, 146, 10, 0.35);
+    color: #ffffff !important;
 }
 
-/* ── UID Badges ──────────────────────────────────────────────────── */
+.olama-reg-btn--primary:active {
+    transform: translateY(0);
+}
+
+/* ── 5. UID Badges ────────────────────────────────────────────────── */
 .olama-reg-uid-badge {
     display: inline-block;
-    background: var(--reg-primary);
-    color: #fff;
-    font-size: 15px;
+    background: linear-gradient(135deg, var(--reg-primary) 0%, var(--reg-primary-dark) 100%);
+    color: #ffffff;
+    font-size: 13px;
     font-weight: 800;
-    padding: 4px 12px;
+    padding: 5px 14px;
     border-radius: 20px;
-    letter-spacing: 1.5px;
+    letter-spacing: 1px;
     cursor: pointer;
-    transition: transform var(--reg-transition), box-shadow var(--reg-transition);
+    box-shadow: 0 2px 8px rgba(232, 146, 10, 0.15);
+    transition: var(--reg-transition);
 }
 
 .olama-reg-uid-badge:hover {
-    transform: scale(1.04);
-    box-shadow: 0 4px 12px rgba(232,146,10,0.4);
+    transform: scale(1.05);
+    box-shadow: 0 5px 15px rgba(232, 146, 10, 0.3);
 }
 
 .olama-reg-uid-badge--lg {
-    font-size: 20px;
-    padding: 6px 18px;
+    font-size: 18px;
+    padding: 7px 22px;
 }
 
 .olama-reg-uid-badge--student {
     background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.olama-reg-uid-badge--family { background: var(--reg-primary); }
-
-.olama-reg-uid-pending {
-    background: #9E9E9E;
-    font-size: 13px;
-    font-weight: 500;
-    opacity: 0.8;
-}
-
-/* ── Status Badges ───────────────────────────────────────────────── */
-.olama-reg-badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
     font-size: 12px;
     font-weight: 700;
 }
 
-.olama-reg-badge--active     { background: #E8F5E9; color: #2E7D32; }
-.olama-reg-badge--inactive   { background: #F5F5F5; color: #757575; }
-.olama-reg-badge--blacklist  { background: #FFEBEE; color: #C62828; }
+.olama-reg-uid-pending {
+    background: #9E9E9E;
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0.8;
+}
 
-/* ── Notice Area ─────────────────────────────────────────────────── */
+/* ── 6. Status Badges ─────────────────────────────────────────────── */
+.olama-reg-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 800;
+    text-align: center;
+}
+
+.olama-reg-badge--active     { background: #E8F5E9; color: #2E7D32; border: 1px solid #C8E6C9; }
+.olama-reg-badge--inactive   { background: #F5F5F5; color: #757575; border: 1px solid #E0E0E0; }
+.olama-reg-badge--blacklist  { background: #FFEBEE; color: #C62828; border: 1px solid #FFCDD2; }
+
+/* ── 7. Notice Area / Empty States ────────────────────────────────── */
 .olama-reg-notice {
-    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
     border-radius: var(--reg-radius-sm);
-    margin-bottom: 16px;
-    font-weight: 600;
+    margin-bottom: 20px;
+    font-weight: 700;
     font-size: 14px;
-    border-right: 4px solid var(--reg-primary);
+    border-right: 5px solid var(--reg-primary);
     background: var(--reg-primary-light);
     color: var(--reg-primary-dark);
-    animation: slideInDown 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+    animation: slideInDown 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .olama-reg-notice--error {
-    border-color: var(--reg-danger);
-    background: var(--reg-danger-light);
-    color: var(--reg-danger);
+    border-color: var(--reg-warning);
+    background: #FDF2F2;
+    color: var(--reg-warning);
 }
 
 @keyframes slideInDown {
-    from { opacity: 0; transform: translateY(-10px); }
+    from { opacity: 0; transform: translateY(-15px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Tab Navigation ──────────────────────────────────────────────── */
-.olama-reg-form-wrapper { background: var(--reg-white); border-radius: var(--reg-radius); box-shadow: var(--reg-shadow); overflow: hidden; }
+/* ── 8. Form Wrapper & Tabs ──────────────────────────────────────── */
+.olama-reg-form-wrapper {
+    background: var(--reg-card-bg);
+    border-radius: var(--reg-radius);
+    box-shadow: var(--reg-shadow);
+    border: 1px solid var(--reg-border);
+    overflow: hidden;
+    transition: var(--reg-transition);
+}
+
+.olama-reg-form-wrapper:hover {
+    box-shadow: var(--reg-shadow-hover);
+}
 
 .olama-reg-tabs {
     display: flex;
     border-bottom: 2px solid var(--reg-border);
-    background: var(--reg-bg);
-    padding: 0 16px;
-    gap: 2px;
+    background: #F8FAFC;
+    padding: 0 20px;
+    gap: 4px;
 }
 
 .olama-reg-tab {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 14px 20px;
-    font-family: 'Tajawal', sans-serif;
+    padding: 16px 24px;
+    font-family: var(--reg-font);
     font-size: 15px;
     font-weight: 700;
     color: var(--reg-text-muted);
@@ -192,68 +238,131 @@
     border-bottom: 3px solid transparent;
     margin-bottom: -2px;
     cursor: pointer;
-    transition: color var(--reg-transition), border-color var(--reg-transition);
+    transition: var(--reg-transition);
     position: relative;
+    bottom: -2px;
 }
 
-.olama-reg-tab:hover { color: var(--reg-primary); }
+.olama-reg-tab:hover {
+    color: var(--reg-primary);
+}
 
 .olama-reg-tab.active {
     color: var(--reg-primary-dark);
     border-bottom-color: var(--reg-primary);
+    background: var(--reg-card-bg);
+    border-right: 1px solid var(--reg-border);
+    border-left: 1px solid var(--reg-border);
+    border-top-left-radius: var(--reg-radius-sm);
+    border-top-right-radius: var(--reg-radius-sm);
 }
 
-.olama-reg-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+.olama-reg-tab:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
 
 .olama-reg-count-badge {
     background: var(--reg-primary);
-    color: #fff;
+    color: #ffffff;
     font-size: 11px;
-    font-weight: 800;
-    padding: 1px 7px;
-    border-radius: 10px;
+    font-weight: 900;
+    padding: 2px 8px;
+    border-radius: 20px;
 }
 
-/* ── Tab Pane ────────────────────────────────────────────────────── */
-.olama-reg-tab-pane { display: none; padding: 24px; }
-.olama-reg-tab-pane.active { display: block; }
+.olama-reg-tab-pane {
+    display: none;
+    padding: 30px;
+}
 
-/* ── Section ─────────────────────────────────────────────────────── */
+.olama-reg-tab-pane.active {
+    display: block;
+}
+
+/* ── 9. Redesigned Card Component (OLAMASKILL.md Spec) ─────────────── */
 .olama-reg-section {
-    margin-bottom: 28px;
-    border: 1px solid var(--reg-border);
+    background: var(--reg-card-bg);
+    margin-bottom: 30px;
+    border: 1.5px solid var(--reg-border);
     border-radius: var(--reg-radius);
+    box-shadow: var(--reg-shadow);
     overflow: hidden;
+    transition: var(--reg-transition);
+}
+
+.olama-reg-section:hover {
+    box-shadow: var(--reg-shadow-hover);
+    border-color: var(--reg-border-focus);
 }
 
 .olama-reg-section-title {
-    background: var(--reg-primary-light);
-    color: var(--reg-primary-dark);
-    font-size: 15px;
-    font-weight: 700;
-    padding: 10px 16px;
+    background: linear-gradient(135deg, var(--reg-primary) 0%, var(--reg-primary-dark) 100%);
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 800;
+    padding: 15px 20px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin: 0;
-    border-bottom: 1px solid var(--reg-border);
+    border-bottom: none;
 }
 
-/* ── Form Grid ───────────────────────────────────────────────────── */
+.olama-reg-section-title .dashicons {
+    color: #ffffff;
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+}
+
+/* ── 10. Exquisite Forms and Grid System ─────────────────────────── */
 .olama-reg-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 14px 16px;
-    padding: 18px;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px 24px;
+    padding: 24px;
 }
 
-.olama-reg-field { display: flex; flex-direction: column; gap: 5px; }
-.olama-reg-field label { font-size: 13px; font-weight: 600; color: var(--reg-text-muted); }
-.olama-reg-field.olama-reg-field--required label { color: var(--reg-primary-dark); }
-.olama-reg-field.olama-reg-field--wide { grid-column: span 2; }
-.olama-reg-field.olama-reg-field--checkbox { justify-content: flex-end; }
-.olama-reg-field.olama-reg-field--inline { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.olama-reg-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
 
+.olama-reg-field label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #4A5568;
+    transition: var(--reg-transition);
+}
+
+.olama-reg-field.olama-reg-field--required label {
+    color: var(--reg-primary-dark);
+}
+
+.olama-reg-field.olama-reg-field--required label::after {
+    content: ' *';
+    color: var(--reg-warning);
+    font-weight: 900;
+}
+
+.olama-reg-field.olama-reg-field--wide {
+    grid-column: span 2;
+}
+
+.olama-reg-field.olama-reg-field--checkbox {
+    justify-content: flex-end;
+}
+
+.olama-reg-field.olama-reg-field--inline {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Form Inputs Redesign */
 .olama-reg-field input[type="text"],
 .olama-reg-field input[type="tel"],
 .olama-reg-field input[type="email"],
@@ -261,119 +370,214 @@
 .olama-reg-field input[type="date"],
 .olama-reg-field select,
 .olama-reg-field textarea {
-    border: 1.5px solid var(--reg-border);
+    border: 1.5px solid #CBD5E1;
     border-radius: var(--reg-radius-sm);
-    padding: 8px 10px;
-    font-family: 'Tajawal', sans-serif;
+    padding: 10px 14px;
+    font-family: var(--reg-font);
     font-size: 14px;
-    background: #FFFBF3;
+    background: #FFFFFF;
     color: var(--reg-text);
-    transition: border-color var(--reg-transition), box-shadow var(--reg-transition);
+    transition: var(--reg-transition);
     width: 100%;
+}
+
+.olama-reg-field input[type="text"]::placeholder,
+.olama-reg-field textarea::placeholder {
+    color: #94A3B8;
 }
 
 .olama-reg-field input:focus,
 .olama-reg-field select:focus,
 .olama-reg-field textarea:focus {
     outline: none;
-    border-color: var(--reg-primary);
-    box-shadow: 0 0 0 3px rgba(232,146,10,0.15);
+    border-color: var(--reg-border-focus);
+    box-shadow: 0 0 0 3px rgba(232, 146, 10, 0.15);
+    background: #FFFDF9;
 }
 
-.olama-reg-field input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--reg-primary); }
+.olama-reg-field input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--reg-primary);
+    cursor: pointer;
+}
 
-.required { color: var(--reg-danger); }
+.required {
+    color: var(--reg-warning);
+    font-weight: 800;
+}
 
-.olama-reg-radio-group { display: flex; gap: 16px; align-items: center; padding: 8px 0; }
-.olama-reg-radio-group label { font-size: 14px; font-weight: 500; color: var(--reg-text); display: flex; gap: 6px; align-items: center; }
+.olama-reg-radio-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    padding: 8px 0;
+}
 
-/* ── Form Actions ────────────────────────────────────────────────── */
+.olama-reg-radio-group label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--reg-text);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    cursor: pointer;
+}
+
+.olama-reg-radio-group input[type="radio"] {
+    accent-color: var(--reg-primary);
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+/* Form Actions Row */
 .olama-reg-form-actions {
     display: flex;
-    gap: 12px;
+    gap: 16px;
     align-items: center;
-    padding: 16px 18px;
-    background: var(--reg-bg);
-    border-top: 1px solid var(--reg-border);
+    padding: 20px 24px;
+    background: #F8FAFC;
+    border-top: 1.5px solid var(--reg-border);
     flex-wrap: wrap;
 }
 
-/* ── Photo Upload ────────────────────────────────────────────────── */
-.olama-reg-photo-upload { display: flex; align-items: center; gap: 12px; }
-.olama-reg-photo-preview { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 2px solid var(--reg-border); }
+/* ── 11. Premium Photo Upload Component ───────────────────────────── */
+.olama-reg-photo-upload {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
 
-/* ── Students Header ─────────────────────────────────────────────── */
+.olama-reg-photo-preview {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid var(--reg-border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: var(--reg-transition);
+}
+
+.olama-reg-photo-upload:hover .olama-reg-photo-preview {
+    border-color: var(--reg-primary);
+    transform: scale(1.03);
+}
+
+/* ── 12. Student Accordion UI Redesign ────────────────────────────── */
 .olama-reg-students-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
-    padding: 12px 16px;
+    margin-bottom: 20px;
+    padding: 14px 20px;
     background: var(--reg-primary-light);
+    border: 1px solid var(--reg-border);
     border-radius: var(--reg-radius-sm);
 }
 
-.olama-reg-students-count { font-size: 15px; font-weight: 700; color: var(--reg-primary-dark); }
+.olama-reg-students-count {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--reg-primary-dark);
+}
 
-/* ── Student Accordion ───────────────────────────────────────────── */
 .olama-reg-student-row {
     border: 1.5px solid var(--reg-border);
     border-radius: var(--reg-radius);
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     overflow: hidden;
-    transition: box-shadow var(--reg-transition);
+    transition: var(--reg-transition);
+    background: var(--reg-card-bg);
 }
 
-.olama-reg-student-row.open { box-shadow: 0 4px 16px rgba(232,146,10,0.2); border-color: var(--reg-primary); }
+.olama-reg-student-row.open {
+    box-shadow: var(--reg-shadow-hover);
+    border-color: var(--reg-primary);
+}
 
 .olama-reg-student-row-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
-    background: var(--reg-bg);
+    padding: 16px 20px;
+    background: #F8FAFC;
     cursor: pointer;
     user-select: none;
-    gap: 12px;
-    transition: background var(--reg-transition);
+    gap: 16px;
+    transition: var(--reg-transition);
 }
 
-.olama-reg-student-row.open .olama-reg-student-row-header { background: var(--reg-primary-light); }
+.olama-reg-student-row-header:hover {
+    background: var(--reg-primary-light);
+}
 
-.olama-reg-student-row-info { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.olama-reg-student-row.open .olama-reg-student-row-header {
+    background: var(--reg-primary-light);
+    border-bottom: 1.5px solid var(--reg-border);
+}
 
-.olama-reg-student-thumb { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--reg-border); }
+.olama-reg-student-row-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
 
-.olama-reg-student-name { font-size: 15px; font-weight: 700; }
+.olama-reg-student-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--reg-border);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
 
-.olama-reg-meta { font-size: 12px; color: var(--reg-text-muted); background: #eee; padding: 2px 8px; border-radius: 10px; }
+.olama-reg-student-name {
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.olama-reg-meta {
+    font-size: 12px;
+    color: #475569;
+    background: #E2E8F0;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 700;
+}
 
 .olama-reg-student-toggle {
     background: none;
     border: none;
     cursor: pointer;
     color: var(--reg-primary);
-    font-size: 18px;
-    transition: transform var(--reg-transition);
-    padding: 4px;
+    font-size: 20px;
+    transition: var(--reg-transition);
+    padding: 6px;
 }
 
-.olama-reg-student-row.open .olama-reg-student-toggle { transform: rotate(180deg); }
+.olama-reg-student-row.open .olama-reg-student-toggle {
+    transform: rotate(180deg);
+}
 
-.olama-reg-student-body { padding: 16px; background: var(--reg-white); }
+.olama-reg-student-body {
+    padding: 24px;
+    background: var(--reg-card-bg);
+}
 
-/* ── Sub-tabs ────────────────────────────────────────────────────── */
+/* ── 13. Sub-tabs Navigation ───────────────────────────────────────── */
 .olama-reg-sub-tabs {
     display: flex;
-    gap: 4px;
+    gap: 6px;
     border-bottom: 2px solid var(--reg-border);
-    margin-bottom: 16px;
+    margin-bottom: 20px;
 }
 
 .olama-reg-sub-tab {
-    padding: 8px 16px;
-    font-family: 'Tajawal', sans-serif;
-    font-size: 13px;
+    padding: 10px 20px;
+    font-family: var(--reg-font);
+    font-size: 14px;
     font-weight: 700;
     color: var(--reg-text-muted);
     background: none;
@@ -381,121 +585,567 @@
     border-bottom: 3px solid transparent;
     margin-bottom: -2px;
     cursor: pointer;
-    transition: color var(--reg-transition), border-color var(--reg-transition);
+    transition: var(--reg-transition);
 }
 
-.olama-reg-sub-tab.active { color: var(--reg-primary-dark); border-bottom-color: var(--reg-primary); }
-
-/* ── Inline Table Inputs ─────────────────────────────────────────── */
-.olama-reg-inline-input {
-    width: 100%;
-    min-width: 70px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    padding: 4px 6px;
-    font-family: 'Tajawal', sans-serif;
-    font-size: 13px;
-    background: #FFFBF3;
+.olama-reg-sub-tab:hover {
+    color: var(--reg-primary);
 }
 
-.olama-reg-inline-input:focus { outline: none; border-color: var(--reg-primary); }
+.olama-reg-sub-tab.active {
+    color: var(--reg-primary-dark);
+    border-bottom-color: var(--reg-primary);
+}
 
-/* ── Financial Table ─────────────────────────────────────────────── */
-.olama-reg-table-wrap { overflow-x: auto; }
+/* ── 14. High-Fidelity Tables (Scrollable container standard) ──────── */
+.olama-reg-table-wrap {
+    overflow-x: auto;
+    border-radius: 0 0 var(--reg-radius) var(--reg-radius);
+}
 
 .olama-reg-fin-table,
 .olama-reg-history-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 14px;
+    background: var(--reg-card-bg);
 }
 
 .olama-reg-fin-table th,
 .olama-reg-history-table th {
-    background: var(--reg-primary-light);
+    background: linear-gradient(135deg, var(--reg-primary-light) 0%, #FFF3E0 100%);
     color: var(--reg-primary-dark);
-    font-weight: 700;
-    padding: 10px 8px;
+    font-weight: 800;
+    padding: 14px 16px;
     text-align: right;
-    border: 1px solid var(--reg-border);
+    border-bottom: 2px solid var(--reg-border);
+    border-top: 1px solid var(--reg-border);
     white-space: nowrap;
 }
 
 .olama-reg-fin-table td,
 .olama-reg-history-table td {
-    border: 1px solid #eee;
-    padding: 6px 8px;
+    border-bottom: 1.5px solid #F1F5F9;
+    padding: 12px 16px;
     text-align: right;
     vertical-align: middle;
+    color: var(--reg-text);
+    transition: var(--reg-transition);
 }
 
-.olama-reg-fin-table tr:nth-child(even) td { background: #FFFBF3; }
+.olama-reg-fin-table tr:last-child td,
+.olama-reg-history-table tr:last-child td {
+    border-bottom: none;
+}
 
-.olama-reg-fin-balance { background: #FFF3E0 !important; font-weight: 700; color: var(--reg-primary-dark); }
+.olama-reg-fin-table tr:hover td,
+.olama-reg-history-table tr:hover td {
+    background-color: #FDFBF7;
+}
 
-.olama-reg-balance-cell { font-weight: 700; color: var(--reg-primary-dark); background: var(--reg-primary-light) !important; }
+/* Balance overlays and special cells */
+.olama-reg-fin-balance {
+    background: #FFF8E7 !important;
+    font-weight: 800;
+    color: var(--reg-primary-dark);
+}
+
+.olama-reg-balance-cell {
+    font-weight: 800;
+    color: var(--reg-primary-dark);
+    background: var(--reg-primary-light) !important;
+}
 
 .olama-reg-fin-totals td {
-    background: var(--reg-primary-light);
-    font-weight: 700;
+    background: var(--reg-primary-light) !important;
+    font-weight: 800;
     color: var(--reg-primary-dark);
-    border-top: 2px solid var(--reg-border);
+    border-top: 2px solid var(--reg-border) !important;
+    padding: 14px 16px;
 }
 
-.olama-reg-total { text-align: center; }
+.olama-reg-total {
+    text-align: center;
+}
 
-/* ── Financial Toolbar ───────────────────────────────────────────── */
+/* Inline input fields inside tables */
+.olama-reg-inline-input {
+    width: 100%;
+    min-width: 90px;
+    border: 1.5px solid #E2E8F0;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: var(--reg-font);
+    font-size: 13px;
+    background: #FFFFFF;
+    transition: var(--reg-transition);
+}
+
+.olama-reg-inline-input:focus {
+    outline: none;
+    border-color: var(--reg-border-focus);
+    box-shadow: 0 0 0 2px rgba(232, 146, 10, 0.1);
+    background: #FFFDF9;
+}
+
+/* ── 15. Financial Toolbar ────────────────────────────────────────── */
 .olama-reg-fin-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 14px;
-    gap: 12px;
+    margin-bottom: 20px;
+    gap: 16px;
     flex-wrap: wrap;
 }
 
-/* ── Blacklist Reason ────────────────────────────────────────────── */
-.olama-reg-blacklist-reason { margin-top: 8px; }
-
-/* ── Empty State ─────────────────────────────────────────────────── */
+/* ── 16. Empty State Redesign ─────────────────────────────────────── */
 .olama-reg-empty-state {
     text-align: center;
-    padding: 40px;
+    padding: 60px 40px;
     color: var(--reg-text-muted);
 }
 
-.olama-reg-empty-state .dashicons { color: var(--reg-border); margin-bottom: 8px; }
-
-/* ── Student Save Bar ────────────────────────────────────────────── */
-.olama-reg-student-save-bar {
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px dashed var(--reg-border);
+.olama-reg-empty-state .dashicons {
+    color: #CBD5E1;
+    font-size: 48px;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 14px;
 }
 
-/* ── Saving Spinner ──────────────────────────────────────────────── */
+.olama-reg-empty-state p {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0;
+}
+
+/* ── 17. Interactive Detail Drawers & Modals ──────────────────────── */
+.olama-reg-modal {
+    transition: var(--reg-transition);
+}
+
+.olama-reg-form-actions button,
+.olama-reg-form-actions a {
+    min-height: 38px;
+}
+
+/* ── 18. Micro Spinner (OLAMASKILL.md Spec) ────────────────────────── */
 .olama-reg-saving::after {
     content: '';
     display: inline-block;
-    width: 12px;
-    height: 12px;
-    border: 2px solid #fff;
-    border-top-color: transparent;
+    width: 14px;
+    height: 14px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #ffffff;
     border-radius: 50%;
-    animation: spin 0.6s linear infinite;
+    animation: os-spin 0.7s linear infinite;
     margin-right: 8px;
     vertical-align: middle;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes os-spin {
+    to { transform: rotate(360deg); }
+}
 
-/* ── WP_List_Table overrides ─────────────────────────────────────── */
+.spin {
+    animation: os-spin 1s linear infinite;
+}
+
+/* ── 18.1. Premium Filters Bar ───────────────────────────────────── */
+.olama-reg-filter-bar {
+    background: #ffffff;
+    border: 1.5px solid var(--reg-border);
+    border-radius: var(--reg-radius);
+    box-shadow: var(--reg-shadow);
+    padding: 18px 24px;
+    margin-bottom: 25px;
+    transition: var(--reg-transition);
+}
+.olama-reg-filter-bar:hover {
+    box-shadow: var(--reg-shadow-hover);
+    border-color: var(--reg-border-focus);
+}
+.olama-reg-filter-form {
+    display: flex;
+    gap: 16px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin: 0;
+    width: 100%;
+}
+.olama-reg-filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.olama-reg-filter-group label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--reg-text-muted);
+}
+.olama-reg-filter-input {
+    border: 1.5px solid #CBD5E1;
+    border-radius: var(--reg-radius-sm);
+    padding: 8px 14px;
+    font-family: var(--reg-font);
+    font-size: 14px;
+    background: #FFFFFF;
+    color: var(--reg-text);
+    transition: var(--reg-transition);
+    height: 38px;
+}
+.olama-reg-filter-input:focus {
+    outline: none;
+    border-color: var(--reg-border-focus);
+    box-shadow: 0 0 0 3px rgba(232, 146, 10, 0.15);
+    background: #FFFDF9;
+}
+.olama-reg-filter-bar select.olama-reg-filter-input {
+    padding: 8px 14px !important;
+}
+
+/* ── 18.2. KPI Metrics Dashboard Grid ────────────────────────────── */
+.olama-reg-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+.olama-reg-metric-card {
+    background: #ffffff;
+    border: 1.5px solid var(--reg-border);
+    border-radius: var(--reg-radius);
+    padding: 20px;
+    box-shadow: var(--reg-shadow);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: var(--reg-transition);
+}
+.olama-reg-metric-card:hover {
+    box-shadow: var(--reg-shadow-hover);
+    transform: translateY(-2px);
+}
+.olama-reg-metric-card--primary { border-color: #E0C090; }
+.olama-reg-metric-card--success { border-color: #A5D6A7; }
+.olama-reg-metric-card--warning { border-color: #FFCC80; }
+.olama-reg-metric-card--danger  { border-color: #EF9A9A; }
+
+.olama-reg-metric-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--reg-transition);
+}
+.olama-reg-metric-card--primary .olama-reg-metric-icon { background: #FFF3E0; color: var(--reg-primary); }
+.olama-reg-metric-card--success .olama-reg-metric-icon { background: #E8F5E9; color: var(--reg-success); }
+.olama-reg-metric-card--warning .olama-reg-metric-icon { background: #FFF8E7; color: var(--reg-accent); }
+.olama-reg-metric-card--danger  .olama-reg-metric-icon { background: #FFEBEE; color: var(--reg-warning); }
+
+.olama-reg-metric-icon .dashicons {
+    font-size: 26px;
+    width: 26px;
+    height: 26px;
+}
+.olama-reg-metric-content {
+    display: flex;
+    flex-direction: column;
+}
+.olama-reg-metric-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--reg-text-muted);
+}
+.olama-reg-metric-card--success .olama-reg-metric-title { color: var(--reg-success); }
+.olama-reg-metric-card--danger  .olama-reg-metric-title { color: var(--reg-warning); }
+
+.olama-reg-metric-value {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--reg-text);
+    margin-top: 4px;
+}
+.olama-reg-metric-card--success .olama-reg-metric-value { color: var(--reg-success); }
+.olama-reg-metric-card--danger  .olama-reg-metric-value { color: var(--reg-warning); }
+
+/* ── 18.3. Premium Modals & Drawers ──────────────────────────────── */
+.olama-reg-modal-dialog {
+    background: #ffffff;
+    margin: 40px auto 50px;
+    width: 95%;
+    max-width: 800px;
+    border-radius: var(--reg-radius);
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(26, 26, 46, 0.15);
+    border: 1.5px solid var(--reg-border);
+    animation: modalSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.olama-reg-drawer-dialog {
+    max-width: 750px;
+}
+@keyframes modalSlideIn {
+    from { opacity: 0; transform: translateY(-30px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.olama-reg-modal-header {
+    background: linear-gradient(135deg, var(--reg-primary) 0%, var(--reg-primary-dark) 100%);
+    padding: 16px 24px;
+    border-bottom: 1.5px solid var(--reg-primary-dark);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.olama-reg-modal-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.olama-reg-modal-title .dashicons {
+    color: #ffffff;
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+}
+.olama-reg-modal-close,
+.olama-reg-drawer-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    font-weight: 700;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.8);
+    transition: var(--reg-transition);
+    line-height: 1;
+}
+.olama-reg-modal-close:hover,
+.olama-reg-drawer-close:hover {
+    color: #ffffff;
+    transform: scale(1.1);
+}
+.olama-reg-modal-body {
+    padding: 24px;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+
+/* ── 18.4. Split Layout Grid ─────────────────────────────────────── */
+.olama-reg-split-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 30px;
+}
+@media (max-width: 1100px) {
+    .olama-reg-split-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ── 18.5. Aging Receivables Grid & Cards ────────────────────────── */
+.olama-reg-aging-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    padding: 20px;
+    background: #ffffff;
+}
+@media (max-width: 782px) {
+    .olama-reg-aging-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+@media (max-width: 480px) {
+    .olama-reg-aging-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.olama-reg-aging-card {
+    border-right-width: 4px;
+    border-right-style: solid;
+    padding: 12px 16px;
+    border-radius: var(--reg-radius-sm);
+    transition: var(--reg-transition);
+}
+.olama-reg-aging-card:hover {
+    transform: translateY(-2px);
+}
+.olama-reg-aging-card--30 {
+    border-right-color: #FFA726;
+    background: #FFF8E1;
+}
+.olama-reg-aging-card--30 .olama-reg-aging-title { color: #FFA726; }
+.olama-reg-aging-card--30 .olama-reg-aging-val { color: #E65100; }
+
+.olama-reg-aging-card--60 {
+    border-right-color: #FB8C00;
+    background: #FFF3E0;
+}
+.olama-reg-aging-card--60 .olama-reg-aging-title { color: #FB8C00; }
+.olama-reg-aging-card--60 .olama-reg-aging-val { color: #E65100; }
+
+.olama-reg-aging-card--90 {
+    border-right-color: #F4511E;
+    background: #FBE9E7;
+}
+.olama-reg-aging-card--90 .olama-reg-aging-title { color: #F4511E; }
+.olama-reg-aging-card--90 .olama-reg-aging-val { color: #BF360C; }
+
+.olama-reg-aging-card--90-plus {
+    border-right-color: #D84315;
+    background: #FFEBEE;
+}
+.olama-reg-aging-card--90-plus .olama-reg-aging-title { color: #C62828; }
+.olama-reg-aging-card--90-plus .olama-reg-aging-val { color: #C62828; }
+
+.olama-reg-aging-title {
+    font-size: 12px;
+    font-weight: 700;
+}
+.olama-reg-aging-val {
+    font-size: 18px;
+    font-weight: 800;
+    margin-top: 6px;
+}
+
+/* ── 18.6. Premium Utility Styles ────────────────────────────────── */
+.olama-reg-section-body {
+    padding: 20px;
+}
+.olama-reg-col-actions {
+    width: 50px;
+    text-align: center !important;
+}
+.olama-reg-btn-danger {
+    color: var(--reg-warning) !important;
+}
+.olama-reg-btn-danger:hover {
+    color: #b71c1c !important;
+}
+.olama-reg-form-actions-inline {
+    margin-top: 15px;
+}
+.olama-reg-text--bold {
+    font-weight: 800;
+}
+.olama-reg-text--danger {
+    color: var(--reg-warning) !important;
+    font-weight: 700;
+}
+.olama-reg-row--highlight {
+    background: var(--reg-primary-light) !important;
+    color: var(--reg-primary-dark);
+}
+.olama-reg-row--highlight td,
+.olama-reg-row--highlight strong {
+    font-weight: 800;
+    font-size: 15px;
+    color: var(--reg-primary-dark);
+}
+.olama-reg-input--inline {
+    width: 100%;
+    max-width: 110px;
+    font-weight: 700;
+    color: var(--reg-warning);
+    border: 1.5px solid #CBD5E1;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: var(--reg-font);
+    font-size: 13px;
+    background: #FFFFFF;
+    transition: var(--reg-transition);
+}
+.olama-reg-input--inline:focus {
+    outline: none;
+    border-color: var(--reg-border-focus);
+    box-shadow: 0 0 0 2px rgba(232, 146, 10, 0.1);
+    background: #FFFDF9;
+}
+
+/* ── 19. WP List Table Overrides ──────────────────────────────────── */
 .olama-reg-wrap .wp-list-table th,
-.olama-reg-wrap .wp-list-table td { text-align: right; }
+.olama-reg-wrap .wp-list-table td {
+    text-align: right;
+    font-family: var(--reg-font);
+}
 
-.olama-reg-wrap .tablenav .tablenav-pages { direction: ltr; }
+.olama-reg-wrap .wp-list-table th {
+    font-weight: 800;
+    font-size: 14px;
+}
 
-.olama-reg-search-form { margin-bottom: 12px; }
+.olama-reg-wrap .tablenav .tablenav-pages {
+    direction: ltr;
+}
 
-/* Select2 RTL */
-.select2-container { direction: rtl; text-align: right; }
+.olama-reg-search-form {
+    margin-bottom: 16px;
+}
+
+/* Select2 Custom Premium Styling */
+.select2-container--default .select2-selection--single {
+    border: 1.5px solid #CBD5E1 !important;
+    border-radius: var(--reg-radius-sm) !important;
+    height: 41px !important;
+    padding: 6px 12px !important;
+    font-family: var(--reg-font) !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 39px !important;
+    left: 8px !important;
+    right: auto !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 26px !important;
+    text-align: right !important;
+    color: var(--reg-text) !important;
+}
+
+.select2-dropdown {
+    border: 1.5px solid var(--reg-primary) !important;
+    border-radius: var(--reg-radius-sm) !important;
+    box-shadow: var(--reg-shadow-hover) !important;
+    font-family: var(--reg-font) !important;
+}
+
+.select2-results__option {
+    text-align: right !important;
+    padding: 8px 12px !important;
+}
+
+/* ── 20. Print Stylesheet (OLAMASKILL.md Spec) ────────────────────── */
+@media print {
+    #adminmenu, #adminmenumain, #wpadminbar, #wpfooter,
+    .olama-reg-tabs, .olama-reg-form-actions,
+    .olama-reg-students-header,
+    .no-print {
+        display: none !important;
+    }
+    body {
+        background: #ffffff;
+        color: #000000;
+    }
+    .olama-reg-wrap {
+        margin: 0;
+        padding: 0;
+        max-width: 100%;
+    }
+    .olama-reg-section {
+        box-shadow: none !important;
+        border: 1px solid #000000 !important;
+        page-break-inside: avoid;
+    }
+    .olama-reg-section-title {
+        background: #f0f0f0 !important;
+        color: #000000 !important;
+        border-bottom: 1.5px solid #000000 !important;
+    }
+}

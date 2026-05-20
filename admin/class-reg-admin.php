@@ -43,6 +43,42 @@ class Olama_Reg_Admin {
             'olama-registration-students',
             [ $this, 'render_students' ]
         );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Fee Templates', 'olama-registration' ),
+            __( 'نماذج الرسوم', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-fees',
+            [ $this, 'render_fees' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Invoices', 'olama-registration' ),
+            __( 'الفواتير', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-invoices',
+            [ $this, 'render_invoices' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Payments', 'olama-registration' ),
+            __( 'السندات والمدفوعات', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-payments',
+            [ $this, 'render_payments' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Billing Reports', 'olama-registration' ),
+            __( 'التقارير المالية', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-reports',
+            [ $this, 'render_reports' ]
+        );
     }
 
     // ── Page Renderers ────────────────────────────────────────────────────────
@@ -67,11 +103,38 @@ class Olama_Reg_Admin {
         include OLAMA_REG_PATH . 'admin/views/page-student-list.php';
     }
 
+    public function render_fees(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-fee-templates.php';
+    }
+
+    public function render_invoices(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-invoices.php';
+    }
+
+    public function render_payments(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-payments.php';
+    }
+
+    public function render_reports(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-billing-reports.php';
+    }
+
     // ── Assets ────────────────────────────────────────────────────────────────
 
     public function enqueue_assets( string $hook ): void {
 
-        $reg_pages = [ 'toplevel_page_olama-registration', 'registration_page_olama-registration-students' ];
+        $reg_pages = [
+            'toplevel_page_olama-registration',
+            'registration_page_olama-registration-students',
+            'registration_page_olama-registration-fees',
+            'registration_page_olama-registration-invoices',
+            'registration_page_olama-registration-payments',
+            'registration_page_olama-registration-reports',
+        ];
         if ( ! in_array( $hook, $reg_pages, true ) ) return;
 
         // Select2

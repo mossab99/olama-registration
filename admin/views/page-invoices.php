@@ -1,0 +1,638 @@
+<?php
+/**
+ * Invoices List and Generator View
+ */
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+global $wpdb;
+
+$action = sanitize_text_field( $_GET['action'] ?? '' );
+$id     = absint( $_GET['id'] ?? 0 );
+
+// ── PRINT INVOICE MODE ────────────────────────────────────────────────────────
+if ( $action === 'print' && $id ) {
+    $invoice = Olama_Reg_Billing_Invoice::get_invoice( $id );
+    if ( ! $invoice ) {
+        wp_die( esc_html__( 'Invoice not found.', 'olama-registration' ) );
+    }
+
+    $family = $wpdb->get_row( $wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}olama_families WHERE family_uid = %s",
+        $invoice->family_uid
+    ) );
+    
+    $student = null;
+    if ( $invoice->student_uid ) {
+        $student = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}olama_students WHERE student_uid = %s",
+            $invoice->student_uid
+        ) );
+    }
+
+    $year_name = '—';
+    if ( class_exists( 'Olama_School_Academic' ) ) {
+        $ay = $wpdb->get_row( $wpdb->prepare(
+            "SELECT year_name FROM {$wpdb->prefix}olama_academic_years WHERE id = %d",
+            $invoice->academic_year_id
+        ) );
+        if ( $ay ) $year_name = $ay->year_name;
+    }
+    ?>
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title><?php echo esc_html( $invoice->invoice_number ); ?></title>
+        <style>
+            body { font-family: 'Tajawal', sans-serif; margin: 40px; color: #1a1a2e; }
+            .print-wrap { max-width: 800px; margin: 0 auto; border: 1px solid #e0c090; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(232,146,10,0.1); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .header-table td { vertical-align: top; }
+            .logo-title { font-size: 24px; font-weight: 800; color: #E8920A; }
+            .invoice-title { font-size: 28px; font-weight: 800; text-align: left; color: #1a1a2e; }
+            .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+            .meta-table td { padding: 6px; border-bottom: 1px solid #f0f0f0; }
+            .label { font-weight: 700; color: #6B7280; width: 150px; }
+            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+            .items-table th { background: #FFF3E0; color: #C4780A; font-weight: 700; padding: 10px; border: 1px solid #e0c090; text-align: right; }
+            .items-table td { padding: 10px; border: 1px solid #eee; }
+            .totals-table { width: 250px; margin-right: auto; margin-left: 0; border-collapse: collapse; }
+            .totals-table td { padding: 8px; border-bottom: 1px dashed #e0c090; }
+            .totals-table tr.grand-total td { font-weight: 800; font-size: 16px; color: #E8920A; border-bottom: 2px solid #E8920A; }
+            .installments-title { font-size: 16px; font-weight: 700; color: #C4780A; margin-top: 30px; margin-bottom: 10px; }
+            .installments-table { width: 100%; border-collapse: collapse; }
+            .installments-table th { background: #f9f9f9; padding: 8px; border: 1px solid #eee; text-align: right; }
+            .installments-table td { padding: 8px; border: 1px solid #eee; }
+            .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 15px; }
+            @media print {
+                body { margin: 0; }
+                .print-wrap { border: none; box-shadow: none; padding: 0; }
+                .no-print { display: none; }
+            }
+        </style>
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap" rel="stylesheet">
+    </head>
+    <body>
+        <div class="no-print" style="max-width: 800px; margin: 0 auto 20px; text-align: left;">
+            <button onclick="window.print();" style="padding: 10px 20px; font-weight: 700; background: #E8920A; color:#fff; border:none; border-radius:4px; cursor:pointer;">طباعة الفاتورة</button>
+        </div>
+        <div class="print-wrap">
+            <table class="header-table">
+                <tr>
+                    <td>
+                        <div class="logo-title">مدارس أوتاد الإبداع</div>
+                        <div style="font-size: 12px; color: #6B7280; margin-top:4px;">قسم الشؤون المالية والرسوم</div>
+                    </td>
+                    <td style="text-align: left;">
+                        <div class="invoice-title">فاتورة رسوم</div>
+                        <div style="font-weight: 700; color: #6B7280; margin-top:4px;"><?php echo esc_html( $invoice->invoice_number ); ?></div>
+                    </td>
+                </tr>
+            </table>
+
+            <table class="meta-table">
+                <tr>
+                    <td class="label">اسم ولي الأمر:</td>
+                    <td><?php echo esc_html( $family ? $family->father_first_name . ' ' . $family->father_family_name : $invoice->family_uid ); ?></td>
+                    <td class="label">تاريخ الإصدار:</td>
+                    <td><?php echo esc_html( $invoice->issue_date ); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">رقم ملف العائلة:</td>
+                    <td><strong style="color:#E8920A;"><?php echo esc_html( $invoice->family_uid ); ?></strong></td>
+                    <td class="label">تاريخ الاستحقاق:</td>
+                    <td><?php echo esc_html( $invoice->due_date ?: '—' ); ?></td>
+                </tr>
+                <?php if ( $student ): ?>
+                    <tr>
+                        <td class="label">الطالب المستهدف:</td>
+                        <td><?php echo esc_html( $student->student_name ); ?> (<?php echo esc_html( $student->student_uid ); ?>)</td>
+                        <td class="label">العام الدراسي:</td>
+                        <td><?php echo esc_html( $year_name ); ?></td>
+                    </tr>
+                <?php else: ?>
+                    <tr>
+                        <td class="label">العام الدراسي:</td>
+                        <td colspan="3"><?php echo esc_html( $year_name ); ?></td>
+                    </tr>
+                <?php endif; ?>
+                <tr>
+                    <td class="label">حالة الفاتورة:</td>
+                    <td colspan="3">
+                        <strong>
+                            <?php 
+                            $status_labels = [
+                                'draft'     => 'مسودة',
+                                'issued'    => 'صادرة / غير مدفوعة',
+                                'partial'   => 'مدفوعة جزئياً',
+                                'paid'      => 'مدفوعة بالكامل',
+                                'overdue'   => 'متأخرة السداد',
+                                'cancelled' => 'ملغاة',
+                            ];
+                            echo esc_html( $status_labels[ $invoice->status ] ?? $invoice->status );
+                            ?>
+                        </strong>
+                    </td>
+                </tr>
+            </table>
+
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th>البند / الوصف</th>
+                        <th style="width: 80px; text-align: center;">الكمية</th>
+                        <th style="width: 120px; text-align: left;">سعر الوحدة</th>
+                        <th style="width: 120px; text-align: left;">الإجمالي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ( $invoice->items as $item ): ?>
+                        <tr>
+                            <td><?php echo esc_html( $item->description ); ?></td>
+                            <td style="text-align: center;"><?php echo esc_html( number_format( $item->quantity, 0 ) ); ?></td>
+                            <td style="text-align: left;"><?php echo esc_html( number_format( $item->unit_price, 2 ) ); ?></td>
+                            <td style="text-align: left; font-weight: 700;"><?php echo esc_html( number_format( $item->line_total, 2 ) ); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+
+            <table class="totals-table">
+                <tr>
+                    <td class="label">المجموع الفرعي:</td>
+                    <td style="text-align: left; font-weight:700;"><?php echo esc_html( number_format( $invoice->subtotal, 2 ) ); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">الخصم الممنوح:</td>
+                    <td style="text-align: left; color:#c62828; font-weight:700;">- <?php echo esc_html( number_format( $invoice->discount, 2 ) ); ?></td>
+                </tr>
+                <tr class="grand-total">
+                    <td class="label">الإجمالي النهائي:</td>
+                    <td style="text-align: left;"><?php echo esc_html( number_format( $invoice->total, 2 ) ); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">المبلغ المدفوع:</td>
+                    <td style="text-align: left; color:#2e7d32; font-weight:700;"><?php echo esc_html( number_format( $invoice->amount_paid, 2 ) ); ?></td>
+                </tr>
+                <tr>
+                    <td class="label">المتبقي المستحق:</td>
+                    <td style="text-align: left; font-weight:800; color:#E8920A;"><?php echo esc_html( number_format( $invoice->balance, 2 ) ); ?></td>
+                </tr>
+            </table>
+
+            <?php if ( ! empty( $invoice->installments ) ): ?>
+                <div class="installments-title">جدول أقساط السداد المتفق عليه</div>
+                <table class="installments-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">رقم القسط</th>
+                            <th>تاريخ الاستحقاق</th>
+                            <th style="text-align: left; width: 130px;">المبلغ المستحق</th>
+                            <th style="text-align: left; width: 130px;">المبلغ المدفوع</th>
+                            <th style="width: 100px;">الحالة</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $invoice->installments as $inst ): ?>
+                            <tr>
+                                <td><?php echo esc_html( $inst->installment_no ); ?></td>
+                                <td><?php echo esc_html( $inst->due_date ); ?></td>
+                                <td style="text-align: left; font-weight: 700;"><?php echo esc_html( number_format( $inst->amount_due, 2 ) ); ?></td>
+                                <td style="text-align: left;"><?php echo esc_html( number_format( $inst->amount_paid, 2 ) ); ?></td>
+                                <td>
+                                    <?php 
+                                    $inst_labels = [
+                                        'pending' => 'معلق',
+                                        'partial' => 'جزئي',
+                                        'paid'    => 'مسدد',
+                                        'overdue' => 'متأخر',
+                                    ];
+                                    echo esc_html( $inst_labels[ $inst->status ] ?? $inst->status );
+                                    ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+
+            <?php if ( ! empty( $invoice->notes ) ): ?>
+                <div style="margin-top:30px; border-top: 1px solid #eee; padding-top:15px;">
+                    <strong style="color:#6B7280; font-size:13px;">ملاحظات إضافية:</strong>
+                    <p style="font-size:13px; margin:6px 0; color:#555;"><?php echo nl2br( esc_html( $invoice->notes ) ); ?></p>
+                </div>
+            <?php endif; ?>
+
+            <div class="footer">
+                شكراً لثقتكم بنا وبمدارسنا. لأي استفسارات مالية، يرجى مراجعة قسم الشؤون المالية.
+            </div>
+        </div>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+// ── REGULAR LIST / CREATE VIEW ────────────────────────────────────────────────
+$filter_status = sanitize_text_field( $_GET['status'] ?? '' );
+$filter_year   = absint( $_GET['year_id'] ?? 0 );
+$search_q      = sanitize_text_field( $_GET['s'] ?? '' );
+
+$where = "1=1";
+$params = [];
+
+if ( $filter_status ) {
+    $where .= " AND i.status = %s";
+    $params[] = $filter_status;
+}
+if ( $filter_year ) {
+    $where .= " AND i.academic_year_id = %d";
+    $params[] = $filter_year;
+}
+if ( $search_q ) {
+    $like = '%' . $wpdb->esc_like( $search_q ) . '%';
+    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.father_first_name LIKE %s OR f.father_family_name LIKE %s)";
+    $params[] = $like;
+    $params[] = $like;
+    $params[] = $like;
+    $params[] = $like;
+}
+
+$query = "SELECT i.*, f.father_first_name, f.father_family_name
+          FROM " . $wpdb->prefix . "olama_invoices i
+          LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = i.family_uid
+          WHERE {$where}
+          ORDER BY i.issue_date DESC, i.id DESC";
+
+if ( ! empty( $params ) ) {
+    $invoices = $wpdb->get_results( $wpdb->prepare( $query, ...$params ) ) ?: [];
+} else {
+    $invoices = $wpdb->get_results( $query ) ?: [];
+}
+
+// Get years for dropdown
+$years = [];
+if ( class_exists( 'Olama_School_Academic' ) ) {
+    $years = Olama_School_Academic::get_years();
+}
+
+$fee_templates = Olama_Reg_Billing_Fees::get_templates();
+?>
+<div class="wrap olama-reg-wrap" dir="rtl">
+
+    <div class="olama-reg-page-header">
+        <h1>
+            <span class="dashicons dashicons-media-text"></span>
+            <?php esc_html_e( 'الفواتير والمستحقات المالية', 'olama-registration' ); ?>
+        </h1>
+        <button class="page-title-action olama-reg-btn olama-reg-btn--primary" id="olama-reg-open-invoice-modal-btn">
+            + <?php esc_html_e( 'إصدار فاتورة جديدة', 'olama-registration' ); ?>
+        </button>
+    </div>
+
+    <!-- Notice area -->
+    <div id="olama-reg-notice" class="olama-reg-notice" style="display:none;"></div>
+
+    <!-- ── FILTERS BAR ─────────────────────────────────────────────── -->
+    <div class="olama-reg-filter-bar">
+        <form method="get" class="olama-reg-filter-form">
+            <input type="hidden" name="page" value="olama-registration-invoices">
+            
+            <div class="olama-reg-filter-group">
+                <label><?php esc_html_e( 'البحث السريع', 'olama-registration' ); ?></label>
+                <input type="text" name="s" value="<?php echo esc_attr( $search_q ); ?>" placeholder="<?php esc_html_e( 'رقم الفاتورة، العائلة...', 'olama-registration' ); ?>" class="olama-reg-filter-input">
+            </div>
+
+            <div class="olama-reg-filter-group">
+                <label><?php esc_html_e( 'حالة الفاتورة', 'olama-registration' ); ?></label>
+                <select name="status" class="olama-reg-filter-input">
+                    <option value=""><?php esc_html_e( 'جميع الحالات', 'olama-registration' ); ?></option>
+                    <option value="draft" <?php selected( $filter_status, 'draft' ); ?>><?php esc_html_e( 'مسودة', 'olama-registration' ); ?></option>
+                    <option value="issued" <?php selected( $filter_status, 'issued' ); ?>><?php esc_html_e( 'صادرة', 'olama-registration' ); ?></option>
+                    <option value="partial" <?php selected( $filter_status, 'partial' ); ?>><?php esc_html_e( 'مدفوعة جزئياً', 'olama-registration' ); ?></option>
+                    <option value="paid" <?php selected( $filter_status, 'paid' ); ?>><?php esc_html_e( 'مدفوعة بالكامل', 'olama-registration' ); ?></option>
+                    <option value="overdue" <?php selected( $filter_status, 'overdue' ); ?>><?php esc_html_e( 'متأخرة السداد', 'olama-registration' ); ?></option>
+                    <option value="cancelled" <?php selected( $filter_status, 'cancelled' ); ?>><?php esc_html_e( 'ملغاة', 'olama-registration' ); ?></option>
+                </select>
+            </div>
+
+            <div class="olama-reg-filter-group">
+                <label><?php esc_html_e( 'العام الدراسي', 'olama-registration' ); ?></label>
+                <select name="year_id" class="olama-reg-filter-input">
+                    <option value=""><?php esc_html_e( 'جميع الأعوام', 'olama-registration' ); ?></option>
+                    <?php foreach ( $years as $y ): ?>
+                        <option value="<?php echo esc_attr( $y->id ); ?>" <?php selected( $filter_year, $y->id ); ?>>
+                            <?php echo esc_html( $y->year_name ); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="olama-reg-filter-group">
+                <button type="submit" class="olama-reg-btn olama-reg-btn--primary" style="height: 38px; padding: 0 20px;">
+                    <?php esc_html_e( 'تطبيق التصفية', 'olama-registration' ); ?>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- ── LIST TABLE ─────────────────────────────────────────────── -->
+    <div class="olama-reg-section">
+        <h3 class="olama-reg-section-title">
+            <span class="dashicons dashicons-list-view"></span>
+            <?php esc_html_e( 'الفواتير المصدرة', 'olama-registration' ); ?>
+        </h3>
+        <div class="olama-reg-table-wrap">
+            <table class="olama-reg-fin-table">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e( 'رقم الفاتورة', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'رقم الملف', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'ولي الأمر', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'تاريخ الإصدار', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'الإجمالي', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'المدفوع', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'المتبقي', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'الحالة', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'الخيارات', 'olama-registration' ); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ( empty( $invoices ) ): ?>
+                        <tr>
+                            <td colspan="9" class="olama-reg-empty-state">
+                                <span class="dashicons dashicons-info"></span><br>
+                                <?php esc_html_e( 'لم يتم العثور على أي فواتير مطابقة.', 'olama-registration' ); ?>
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ( $invoices as $inv ): ?>
+                            <tr>
+                                <td><strong><?php echo esc_html( $inv->invoice_number ); ?></strong></td>
+                                <td><span class="olama-reg-uid-badge"><?php echo esc_html( $inv->family_uid ); ?></span></td>
+                                <td><?php echo esc_html( $inv->father_first_name . ' ' . $inv->father_family_name ); ?></td>
+                                <td><?php echo esc_html( $inv->issue_date ); ?></td>
+                                <td class="olama-reg-text--bold"><?php echo esc_html( number_format( $inv->total, 2 ) ); ?></td>
+                                <td style="color:var(--reg-success); font-weight:700;"><?php echo esc_html( number_format( $inv->amount_paid, 2 ) ); ?></td>
+                                <td class="olama-reg-balance-cell"><?php echo esc_html( number_format( $inv->balance, 2 ) ); ?></td>
+                                <td>
+                                    <?php 
+                                    $badge_class = 'olama-reg-badge--inactive';
+                                    $status_lbl  = 'مسودة';
+                                    switch ( $inv->status ) {
+                                        case 'issued':
+                                            $badge_class = 'olama-reg-badge--active';
+                                            $status_lbl  = 'صادرة';
+                                            break;
+                                        case 'partial':
+                                            $badge_class = 'olama-reg-badge--active';
+                                            $status_lbl  = 'جزئية';
+                                            break;
+                                        case 'paid':
+                                            $badge_class = 'olama-reg-badge--active';
+                                            $status_lbl  = 'مدفوعة';
+                                            break;
+                                        case 'overdue':
+                                            $badge_class = 'olama-reg-badge--blacklist';
+                                            $status_lbl  = 'متأخرة';
+                                            break;
+                                        case 'cancelled':
+                                            $badge_class = 'olama-reg-badge--inactive';
+                                            $status_lbl  = 'ملغاة';
+                                            break;
+                                    }
+                                    ?>
+                                    <span class="olama-reg-badge <?php echo esc_attr( $badge_class ); ?>">
+                                        <?php echo esc_html( $status_lbl ); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="button button-small olama-reg-view-invoice-btn" data-id="<?php echo esc_attr( $inv->id ); ?>">
+                                        <span class="dashicons dashicons-visibility" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                    </button>
+                                    <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'print', 'id' => $inv->id ], admin_url( 'admin.php?page=olama-registration-invoices' ) ) ); ?>" target="_blank" class="button button-small">
+                                        <span class="dashicons dashicons-printer" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ── INVOICE GENERATOR MODAL ─────────────────────────────────── -->
+    <div id="olama-reg-invoice-modal" class="olama-reg-modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);">
+        <div class="olama-reg-modal-dialog">
+            <div class="olama-reg-modal-header">
+                <h2 class="olama-reg-modal-title">
+                    <span class="dashicons dashicons-media-text"></span>
+                    <?php esc_html_e( 'إصدار فاتورة جديدة', 'olama-registration' ); ?>
+                </h2>
+                <button type="button" class="olama-reg-modal-close">&times;</button>
+            </div>
+            
+            <form id="olama-reg-invoice-form" style="margin:0;">
+                <div class="olama-reg-modal-body">
+                    
+                    <div class="olama-reg-section">
+                        <h3 class="olama-reg-section-title"><?php esc_html_e( 'بيانات المستهدفين والربط', 'olama-registration' ); ?></h3>
+                        <div class="olama-reg-grid">
+                            <div class="olama-reg-field olama-reg-field--required">
+                                <label for="inv_family_uid"><?php esc_html_e( 'رقم ملف العائلة', 'olama-registration' ); ?></label>
+                                <select id="inv_family_uid" name="family_uid" style="width:100%;" required></select>
+                            </div>
+                            <div class="olama-reg-field">
+                                <label for="inv_student_uid"><?php esc_html_e( 'الطالب المستهدف (اختياري)', 'olama-registration' ); ?></label>
+                                <select id="inv_student_uid" name="student_uid" style="width:100%;">
+                                    <option value=""><?php esc_html_e( 'فاتورة عامة للعائلة', 'olama-registration' ); ?></option>
+                                </select>
+                            </div>
+                            <div class="olama-reg-field olama-reg-field--required">
+                                <label for="inv_academic_year_id"><?php esc_html_e( 'العام الدراسي', 'olama-registration' ); ?></label>
+                                <select id="inv_academic_year_id" name="academic_year_id" required>
+                                    <?php foreach ( $years as $y ): ?>
+                                        <option value="<?php echo esc_attr( $y->id ); ?>"><?php echo esc_html( $y->year_name ); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="olama-reg-section">
+                        <h3 class="olama-reg-section-title"><?php esc_html_e( 'النموذج والجدولة الافتراضية', 'olama-registration' ); ?></h3>
+                        <div class="olama-reg-grid">
+                            <div class="olama-reg-field">
+                                <label for="inv_fee_template_id"><?php esc_html_e( 'استيراد بنود نموذج رسوم', 'olama-registration' ); ?></label>
+                                <select id="inv_fee_template_id" name="fee_template_id">
+                                    <option value=""><?php esc_html_e( '— بنود مخصصة (لا شيء) —', 'olama-registration' ); ?></option>
+                                    <?php foreach ( $fee_templates as $tpl ): ?>
+                                        <option value="<?php echo esc_attr( $tpl->id ); ?>" data-items="<?php echo esc_attr( wp_json_encode( $tpl->items ) ); ?>" data-inst="<?php echo esc_attr( $tpl->installments ); ?>">
+                                            <?php echo esc_html( $tpl->template_name ); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="olama-reg-field">
+                                <label for="inv_installments"><?php esc_html_e( 'عدد أقساط السداد', 'olama-registration' ); ?></label>
+                                <input type="number" id="inv_installments" name="installments" min="1" max="12" value="1">
+                            </div>
+                            <div class="olama-reg-field">
+                                <label for="inv_status"><?php esc_html_e( 'حالة الفاتورة عند الإصدار', 'olama-registration' ); ?></label>
+                                <select id="inv_status" name="status">
+                                    <option value="issued"><?php esc_html_e( 'صادرة (غير مدفوعة)', 'olama-registration' ); ?></option>
+                                    <option value="draft"><?php esc_html_e( 'مسودة', 'olama-registration' ); ?></option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="olama-reg-section">
+                        <h3 class="olama-reg-section-title"><?php esc_html_e( 'بنود الفاتورة المفصلة', 'olama-registration' ); ?></h3>
+                        <div style="padding:16px;">
+                            <table class="olama-reg-fin-table" id="olama-reg-invoice-items-table">
+                                <thead>
+                                    <tr>
+                                        <th><?php esc_html_e( 'الوصف', 'olama-registration' ); ?></th>
+                                        <th style="width:80px;"><?php esc_html_e( 'الكمية', 'olama-registration' ); ?></th>
+                                        <th style="width:120px;"><?php esc_html_e( 'سعر الوحدة', 'olama-registration' ); ?></th>
+                                        <th style="width:120px;"><?php esc_html_e( 'الإجمالي', 'olama-registration' ); ?></th>
+                                        <th style="width:50px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="olama-reg-empty-items-row">
+                                        <td colspan="5" style="text-align:center; color:#999; padding:15px;">
+                                            <?php esc_html_e( 'قم بإضافة بنود لتظهر هنا أو قم باستيراد نموذج رسوم.', 'olama-registration' ); ?>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="3" class="olama-reg-text--bold"><?php esc_html_e( 'المجموع الفرعي:', 'olama-registration' ); ?></td>
+                                        <td colspan="2"><strong id="inv-subtotal-label">0.00</strong></td>
+                                    </tr>
+                                    <tr>
+                                        <td colspan="3" class="olama-reg-text--bold"><?php esc_html_e( 'خصم ممنوح:', 'olama-registration' ); ?></td>
+                                        <td colspan="2">
+                                            <input type="number" step="0.01" name="discount" id="inv-discount-input" value="0.00" class="olama-reg-input--inline olama-reg-text--danger">
+                                        </td>
+                                    </tr>
+                                    <tr class="olama-reg-row--highlight">
+                                        <td colspan="3" class="olama-reg-text--bold"><?php esc_html_e( 'الإجمالي النهائي المستحق:', 'olama-registration' ); ?></td>
+                                        <td colspan="2"><strong id="inv-grand-total-label">0.00</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                            <div style="margin-top:12px;">
+                                <button type="button" class="button" id="inv-add-item-row-btn">+ <?php esc_html_e( 'إضافة بند مخصص', 'olama-registration' ); ?></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="olama-reg-section">
+                        <h3 class="olama-reg-section-title"><?php esc_html_e( 'ملاحظات إضافية (تطبع على الفاتورة)', 'olama-registration' ); ?></h3>
+                        <div style="padding:14px;">
+                            <textarea name="notes" rows="3" style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;" placeholder="<?php esc_html_e( 'شروط السداد، خصومات التميز، أو تفاصيل أخرى...', 'olama-registration' ); ?>"></textarea>
+                        </div>
+                    </div>
+
+                </div>
+                
+                <div class="olama-reg-form-actions">
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="olama-reg-save-invoice-btn">
+                        <?php esc_html_e( 'حفظ وإصدار الفاتورة', 'olama-registration' ); ?>
+                    </button>
+                    <button type="button" class="button button-large olama-reg-modal-close"><?php esc_html_e( 'إلغاء', 'olama-registration' ); ?></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── INVOICE DETAILS DRAWER / OVERLAY ────────────────────────── -->
+    <div id="olama-reg-invoice-drawer" class="olama-reg-modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);">
+        <div class="olama-reg-modal-dialog olama-reg-drawer-dialog">
+            <div class="olama-reg-modal-header">
+                <h2 class="olama-reg-modal-title">
+                    <span class="dashicons dashicons-visibility"></span>
+                    <?php esc_html_e( 'تفاصيل الفاتورة', 'olama-registration' ); ?>
+                    <span id="drawer-invoice-number" style="font-weight:900; color:#ffffff; margin-right:8px;"></span>
+                </h2>
+                <button type="button" class="olama-reg-drawer-close">&times;</button>
+            </div>
+            
+            <div class="olama-reg-modal-body">
+                <!-- Header metrics -->
+                <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 20px;">
+                    <div class="olama-reg-metric-card olama-reg-metric-card--primary" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                        <div class="olama-reg-metric-title"><?php esc_html_e( 'قيمة الفاتورة', 'olama-registration' ); ?></div>
+                        <div id="drawer-total-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                    </div>
+                    <div class="olama-reg-metric-card olama-reg-metric-card--success" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                        <div class="olama-reg-metric-title"><?php esc_html_e( 'المجموع المدفوع', 'olama-registration' ); ?></div>
+                        <div id="drawer-paid-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                    </div>
+                    <div class="olama-reg-metric-card olama-reg-metric-card--warning" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                        <div class="olama-reg-metric-title"><?php esc_html_e( 'المتبقي المستحق', 'olama-registration' ); ?></div>
+                        <div id="drawer-balance-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                    </div>
+                </div>
+
+                <!-- Info grid -->
+                <div class="olama-reg-section">
+                    <h3 class="olama-reg-section-title"><?php esc_html_e( 'الارتباط والتواريخ', 'olama-registration' ); ?></h3>
+                    <div class="olama-reg-section-body" style="font-size:14px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                        <div><strong><?php esc_html_e( 'رقم العائلة المربوطة:', 'olama-registration' ); ?></strong> <span id="drawer-family-uid" class="olama-reg-uid-badge"></span></div>
+                        <div><strong><?php esc_html_e( 'حالة الفاتورة:', 'olama-registration' ); ?></strong> <span id="drawer-status-badge"></span></div>
+                        <div><strong><?php esc_html_e( 'تاريخ الإصدار:', 'olama-registration' ); ?></strong> <span id="drawer-issue-date" style="font-weight:700;"></span></div>
+                        <div><strong><?php esc_html_e( 'تاريخ الاستحقاق:', 'olama-registration' ); ?></strong> <span id="drawer-due-date" style="font-weight:700;"></span></div>
+                    </div>
+                </div>
+
+                <!-- Line items -->
+                <div class="olama-reg-section">
+                    <h3 class="olama-reg-section-title"><?php esc_html_e( 'البنود والرسوم المفوترة', 'olama-registration' ); ?></h3>
+                    <div class="olama-reg-table-wrap">
+                        <table class="olama-reg-fin-table" id="drawer-items-table">
+                            <thead>
+                                <tr>
+                                    <th><?php esc_html_e( 'البند / الرسوم', 'olama-registration' ); ?></th>
+                                    <th style="width:70px; text-align:center;"><?php esc_html_e( 'الكمية', 'olama-registration' ); ?></th>
+                                    <th style="width:110px;"><?php esc_html_e( 'سعر الوحدة', 'olama-registration' ); ?></th>
+                                    <th style="width:110px;"><?php esc_html_e( 'الإجمالي', 'olama-registration' ); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Installments Timeline -->
+                <div class="olama-reg-section">
+                    <h3 class="olama-reg-section-title"><?php esc_html_e( 'جدول الأقساط وجدول السداد', 'olama-registration' ); ?></h3>
+                    <div class="olama-reg-table-wrap">
+                        <table class="olama-reg-fin-table" id="drawer-installments-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:70px;"><?php esc_html_e( 'القسط', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'تاريخ الاستحقاق', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'القيمة المطلوبة', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'القيمة المدفوعة', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'الحالة', 'olama-registration' ); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="olama-reg-form-actions" style="justify-content:flex-end;">
+                <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-drawer-close"><?php esc_html_e( 'إغلاق النافذة', 'olama-registration' ); ?></button>
+            </div>
+        </div>
+    </div>
+
+</div>
