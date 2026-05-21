@@ -45,7 +45,7 @@ jobs:
               git config --global --add safe.directory "$PLUGIN_DIR"
 
               git fetch origin
-              git reset --hard origin/main
+              git reset --hard origin/master
               git clean -fd
             fi
 
