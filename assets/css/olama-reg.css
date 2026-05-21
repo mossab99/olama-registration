@@ -54,6 +54,12 @@
     font-family: var(--reg-font) !important;
 }
 
+.olama-reg-wrap .dashicons,
+.olama-reg-wrap .dashicons::before,
+.olama-reg-wrap .dashicons::after {
+    font-family: dashicons !important;
+}
+
 /* ── 3. Premium Page Header ─────────────────────────────────────────── */
 .olama-reg-wrap .olama-reg-page-header {
     display: flex !important;
