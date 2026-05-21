@@ -165,8 +165,10 @@ $sv = fn( string $k, string $def = '' ) => esc_attr( $s->$k ?? $def );
                     </tbody>
                 </table>
             </div>
-            <button type="button" class="button olama-reg-add-hist-row" data-student-uid="<?php echo esc_attr($s->student_uid); ?>">
-                + <?php esc_html_e( 'إضافة سطر', 'olama-registration' ); ?>
+            <button type="button" class="olama-reg-btn olama-reg-btn--secondary olama-reg-add-hist-row"
+                    data-student-uid="<?php echo esc_attr($s->student_uid); ?>">
+                <span class="dashicons dashicons-plus"></span>
+                <?php esc_html_e( 'إضافة سطر', 'olama-registration' ); ?>
             </button>
         </div><!-- school -->
 
@@ -211,8 +213,9 @@ $sv = fn( string $k, string $def = '' ) => esc_attr( $s->$k ?? $def );
                 </div>
             </div>
             <div class="olama-reg-form-actions">
-                <button type="button" class="button button-primary olama-reg-save-transport"
+                <button type="button" class="olama-reg-btn olama-reg-btn--secondary olama-reg-save-transport"
                         data-student-uid="<?php echo esc_attr($s->student_uid); ?>">
+                    <span class="dashicons dashicons-car"></span>
                     <?php esc_html_e( 'حفظ بيانات النقل', 'olama-registration' ); ?>
                 </button>
             </div>
@@ -220,7 +223,7 @@ $sv = fn( string $k, string $def = '' ) => esc_attr( $s->$k ?? $def );
 
         <!-- Student Save Bar -->
         <div class="olama-reg-form-actions olama-reg-student-save-bar">
-            <button type="button" class="button button-primary olama-reg-save-student"
+            <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-save-student"
                     data-student-uid="<?php echo esc_attr($s->student_uid); ?>"
                     data-family-uid="<?php echo esc_attr($family_uid); ?>">
                 <span class="dashicons dashicons-saved"></span>

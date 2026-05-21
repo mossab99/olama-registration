@@ -30,12 +30,25 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
             <span class="dashicons dashicons-chart-bar"></span>
             <?php esc_html_e( 'التقارير المالية والتحليلات', 'olama-registration' ); ?>
         </h1>
+        <?php if ( $year_id ): ?>
+        <span class="olama-reg-badge olama-reg-badge--info" style="padding:8px 18px; font-size:13px;">
+            <span class="dashicons dashicons-calendar-alt"></span>
+            <?php
+            foreach ( $years as $y ) {
+                if ( (int)$y->id === $year_id ) {
+                    echo esc_html( $y->year_name );
+                    break;
+                }
+            }
+            ?>
+        </span>
+        <?php endif; ?>
     </div>
 
     <!-- Notice area -->
     <div id="olama-reg-notice" class="olama-reg-notice" style="display:none;"></div>
 
-    <!-- ── ACADEMIC YEAR SELECTOR ───────────────────────────────────── -->
+    <!-- ── ACADEMIC YEAR SELECTOR ──────────────────────────────────── -->
     <div class="olama-reg-filter-bar">
         <form method="get" class="olama-reg-filter-form">
             <input type="hidden" name="page" value="olama-registration-reports">
@@ -53,7 +66,8 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
             </div>
 
             <div class="olama-reg-filter-group">
-                <button type="submit" class="olama-reg-btn olama-reg-btn--primary" style="height:38px; padding:0 20px;">
+                <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                    <span class="dashicons dashicons-chart-bar"></span>
                     <?php esc_html_e( 'عرض التقرير', 'olama-registration' ); ?>
                 </button>
             </div>

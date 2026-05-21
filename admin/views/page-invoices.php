@@ -278,6 +278,18 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
 
 $fee_templates = Olama_Reg_Billing_Fees::get_templates();
 ?>
+<?php
+// Quick stats for the banner
+$_inv_stats = $wpdb->get_row(
+    "SELECT
+        COUNT(*) AS total_count,
+        COALESCE(SUM(total),0) AS total_invoiced,
+        COALESCE(SUM(amount_paid),0) AS total_paid,
+        COALESCE(SUM(balance),0) AS total_balance
+     FROM {$wpdb->prefix}olama_invoices
+     WHERE status NOT IN ('cancelled','draft')"
+);
+?>
 <div class="wrap olama-reg-wrap" dir="rtl">
 
     <div class="olama-reg-page-header">
@@ -285,9 +297,42 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
             <span class="dashicons dashicons-media-text"></span>
             <?php esc_html_e( 'الفواتير والمستحقات المالية', 'olama-registration' ); ?>
         </h1>
-        <button class="page-title-action olama-reg-btn olama-reg-btn--primary" id="olama-reg-open-invoice-modal-btn">
-            + <?php esc_html_e( 'إصدار فاتورة جديدة', 'olama-registration' ); ?>
+        <button class="olama-reg-btn olama-reg-btn--primary" id="olama-reg-open-invoice-modal-btn">
+            <span class="dashicons dashicons-plus"></span>
+            <?php esc_html_e( 'إصدار فاتورة جديدة', 'olama-registration' ); ?>
         </button>
+    </div>
+
+    <!-- ── QUICK STAT CARDS ──────────────────────────────────────── -->
+    <div class="olama-reg-metrics-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+        <div class="olama-reg-metric-card olama-reg-metric-card--primary">
+            <div class="olama-reg-metric-icon"><span class="dashicons dashicons-media-text"></span></div>
+            <div class="olama-reg-metric-content">
+                <div class="olama-reg-metric-title"><?php esc_html_e( 'إجمالي الفواتير', 'olama-registration' ); ?></div>
+                <div class="olama-reg-metric-value"><?php echo esc_html( number_format( (float)($_inv_stats->total_invoiced ?? 0), 2 ) ); ?></div>
+            </div>
+        </div>
+        <div class="olama-reg-metric-card olama-reg-metric-card--success">
+            <div class="olama-reg-metric-icon"><span class="dashicons dashicons-yes-alt"></span></div>
+            <div class="olama-reg-metric-content">
+                <div class="olama-reg-metric-title"><?php esc_html_e( 'إجمالي المحصل', 'olama-registration' ); ?></div>
+                <div class="olama-reg-metric-value"><?php echo esc_html( number_format( (float)($_inv_stats->total_paid ?? 0), 2 ) ); ?></div>
+            </div>
+        </div>
+        <div class="olama-reg-metric-card olama-reg-metric-card--warning">
+            <div class="olama-reg-metric-icon"><span class="dashicons dashicons-clock"></span></div>
+            <div class="olama-reg-metric-content">
+                <div class="olama-reg-metric-title"><?php esc_html_e( 'الذمم المستحقة', 'olama-registration' ); ?></div>
+                <div class="olama-reg-metric-value"><?php echo esc_html( number_format( (float)($_inv_stats->total_balance ?? 0), 2 ) ); ?></div>
+            </div>
+        </div>
+        <div class="olama-reg-metric-card olama-reg-metric-card--danger">
+            <div class="olama-reg-metric-icon"><span class="dashicons dashicons-warning"></span></div>
+            <div class="olama-reg-metric-content">
+                <div class="olama-reg-metric-title"><?php esc_html_e( 'عدد الفواتير', 'olama-registration' ); ?></div>
+                <div class="olama-reg-metric-value"><?php echo esc_html( (int)($_inv_stats->total_count ?? 0) ); ?></div>
+            </div>
+        </div>
     </div>
 
     <!-- Notice area -->
@@ -297,21 +342,23 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
     <div class="olama-reg-filter-bar">
         <form method="get" class="olama-reg-filter-form">
             <input type="hidden" name="page" value="olama-registration-invoices">
-            
+
             <div class="olama-reg-filter-group">
                 <label><?php esc_html_e( 'البحث السريع', 'olama-registration' ); ?></label>
-                <input type="text" name="s" value="<?php echo esc_attr( $search_q ); ?>" placeholder="<?php esc_html_e( 'رقم الفاتورة، العائلة...', 'olama-registration' ); ?>" class="olama-reg-filter-input">
+                <input type="text" name="s" value="<?php echo esc_attr( $search_q ); ?>"
+                       placeholder="<?php esc_attr_e( 'رقم الفاتورة، اسم العائلة...', 'olama-registration' ); ?>"
+                       class="olama-reg-filter-input">
             </div>
 
             <div class="olama-reg-filter-group">
                 <label><?php esc_html_e( 'حالة الفاتورة', 'olama-registration' ); ?></label>
                 <select name="status" class="olama-reg-filter-input">
                     <option value=""><?php esc_html_e( 'جميع الحالات', 'olama-registration' ); ?></option>
-                    <option value="draft" <?php selected( $filter_status, 'draft' ); ?>><?php esc_html_e( 'مسودة', 'olama-registration' ); ?></option>
-                    <option value="issued" <?php selected( $filter_status, 'issued' ); ?>><?php esc_html_e( 'صادرة', 'olama-registration' ); ?></option>
-                    <option value="partial" <?php selected( $filter_status, 'partial' ); ?>><?php esc_html_e( 'مدفوعة جزئياً', 'olama-registration' ); ?></option>
-                    <option value="paid" <?php selected( $filter_status, 'paid' ); ?>><?php esc_html_e( 'مدفوعة بالكامل', 'olama-registration' ); ?></option>
-                    <option value="overdue" <?php selected( $filter_status, 'overdue' ); ?>><?php esc_html_e( 'متأخرة السداد', 'olama-registration' ); ?></option>
+                    <option value="draft"     <?php selected( $filter_status, 'draft' ); ?>><?php esc_html_e( 'مسودة', 'olama-registration' ); ?></option>
+                    <option value="issued"    <?php selected( $filter_status, 'issued' ); ?>><?php esc_html_e( 'صادرة', 'olama-registration' ); ?></option>
+                    <option value="partial"   <?php selected( $filter_status, 'partial' ); ?>><?php esc_html_e( 'مدفوعة جزئياً', 'olama-registration' ); ?></option>
+                    <option value="paid"      <?php selected( $filter_status, 'paid' ); ?>><?php esc_html_e( 'مدفوعة بالكامل', 'olama-registration' ); ?></option>
+                    <option value="overdue"   <?php selected( $filter_status, 'overdue' ); ?>><?php esc_html_e( 'متأخرة السداد', 'olama-registration' ); ?></option>
                     <option value="cancelled" <?php selected( $filter_status, 'cancelled' ); ?>><?php esc_html_e( 'ملغاة', 'olama-registration' ); ?></option>
                 </select>
             </div>
@@ -329,7 +376,8 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
             </div>
 
             <div class="olama-reg-filter-group">
-                <button type="submit" class="olama-reg-btn olama-reg-btn--primary" style="height: 38px; padding: 0 20px;">
+                <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                    <span class="dashicons dashicons-search"></span>
                     <?php esc_html_e( 'تطبيق التصفية', 'olama-registration' ); ?>
                 </button>
             </div>
@@ -366,52 +414,55 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
                             </td>
                         </tr>
                     <?php else: ?>
-                        <?php foreach ( $invoices as $inv ): ?>
+                        <?php foreach ( $invoices as $inv ):
+                            $badge_class = 'olama-reg-badge--inactive';
+                            $status_lbl  = __( 'مسودة', 'olama-registration' );
+                            switch ( $inv->status ) {
+                                case 'issued':
+                                    $badge_class = 'olama-reg-badge--info';
+                                    $status_lbl  = __( 'صادرة', 'olama-registration' );
+                                    break;
+                                case 'partial':
+                                    $badge_class = 'olama-reg-badge--warning';
+                                    $status_lbl  = __( 'جزئية', 'olama-registration' );
+                                    break;
+                                case 'paid':
+                                    $badge_class = 'olama-reg-badge--active';
+                                    $status_lbl  = __( 'مدفوعة', 'olama-registration' );
+                                    break;
+                                case 'overdue':
+                                    $badge_class = 'olama-reg-badge--blacklist';
+                                    $status_lbl  = __( 'متأخرة', 'olama-registration' );
+                                    break;
+                                case 'cancelled':
+                                    $badge_class = 'olama-reg-badge--inactive';
+                                    $status_lbl  = __( 'ملغاة', 'olama-registration' );
+                                    break;
+                            }
+                        ?>
                             <tr>
-                                <td><strong><?php echo esc_html( $inv->invoice_number ); ?></strong></td>
+                                <td><strong style="letter-spacing:0.3px;"><?php echo esc_html( $inv->invoice_number ); ?></strong></td>
                                 <td><span class="olama-reg-uid-badge"><?php echo esc_html( $inv->family_uid ); ?></span></td>
                                 <td><?php echo esc_html( $inv->father_first_name . ' ' . $inv->father_family_name ); ?></td>
-                                <td><?php echo esc_html( $inv->issue_date ); ?></td>
+                                <td style="color:var(--reg-text-muted);"><?php echo esc_html( $inv->issue_date ); ?></td>
                                 <td class="olama-reg-text--bold"><?php echo esc_html( number_format( $inv->total, 2 ) ); ?></td>
                                 <td style="color:var(--reg-success); font-weight:700;"><?php echo esc_html( number_format( $inv->amount_paid, 2 ) ); ?></td>
                                 <td class="olama-reg-balance-cell"><?php echo esc_html( number_format( $inv->balance, 2 ) ); ?></td>
                                 <td>
-                                    <?php 
-                                    $badge_class = 'olama-reg-badge--inactive';
-                                    $status_lbl  = 'مسودة';
-                                    switch ( $inv->status ) {
-                                        case 'issued':
-                                            $badge_class = 'olama-reg-badge--active';
-                                            $status_lbl  = 'صادرة';
-                                            break;
-                                        case 'partial':
-                                            $badge_class = 'olama-reg-badge--active';
-                                            $status_lbl  = 'جزئية';
-                                            break;
-                                        case 'paid':
-                                            $badge_class = 'olama-reg-badge--active';
-                                            $status_lbl  = 'مدفوعة';
-                                            break;
-                                        case 'overdue':
-                                            $badge_class = 'olama-reg-badge--blacklist';
-                                            $status_lbl  = 'متأخرة';
-                                            break;
-                                        case 'cancelled':
-                                            $badge_class = 'olama-reg-badge--inactive';
-                                            $status_lbl  = 'ملغاة';
-                                            break;
-                                    }
-                                    ?>
                                     <span class="olama-reg-badge <?php echo esc_attr( $badge_class ); ?>">
                                         <?php echo esc_html( $status_lbl ); ?>
                                     </span>
                                 </td>
-                                <td>
-                                    <button class="button button-small olama-reg-view-invoice-btn" data-id="<?php echo esc_attr( $inv->id ); ?>">
-                                        <span class="dashicons dashicons-visibility" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                <td style="text-align:center; white-space:nowrap;">
+                                    <button class="button button-small olama-reg-view-invoice-btn"
+                                            data-id="<?php echo esc_attr( $inv->id ); ?>"
+                                            title="<?php esc_attr_e( 'عرض التفاصيل', 'olama-registration' ); ?>">
+                                        <span class="dashicons dashicons-visibility"></span>
                                     </button>
-                                    <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'print', 'id' => $inv->id ], admin_url( 'admin.php?page=olama-registration-invoices' ) ) ); ?>" target="_blank" class="button button-small">
-                                        <span class="dashicons dashicons-printer" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                    <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'print', 'id' => $inv->id ], admin_url( 'admin.php?page=olama-registration-invoices' ) ) ); ?>"
+                                       target="_blank" class="button button-small"
+                                       title="<?php esc_attr_e( 'طباعة الفاتورة', 'olama-registration' ); ?>">
+                                        <span class="dashicons dashicons-printer"></span>
                                     </a>
                                 </td>
                             </tr>

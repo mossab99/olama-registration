@@ -127,15 +127,9 @@ class Olama_Reg_Admin {
 
     public function enqueue_assets( string $hook ): void {
 
-        $reg_pages = [
-            'toplevel_page_olama-registration',
-            'registration_page_olama-registration-students',
-            'registration_page_olama-registration-fees',
-            'registration_page_olama-registration-invoices',
-            'registration_page_olama-registration-payments',
-            'registration_page_olama-registration-reports',
-        ];
-        if ( ! in_array( $hook, $reg_pages, true ) ) return;
+        if ( strpos( $hook, 'olama-registration' ) === false ) {
+            return;
+        }
 
         // Select2
         wp_enqueue_style(

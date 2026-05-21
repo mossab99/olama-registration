@@ -175,6 +175,12 @@ if ( ! empty( $params ) ) {
     $payments = $wpdb->get_results( $query ) ?: [];
 }
 ?>
+<?php
+// Aggregate totals for the current filter
+$_pay_total = $wpdb->get_var(
+    "SELECT COALESCE(SUM(amount),0) FROM {$wpdb->prefix}olama_payments"
+);
+?>
 <div class="wrap olama-reg-wrap" dir="rtl">
 
     <div class="olama-reg-page-header">
@@ -182,6 +188,9 @@ if ( ! empty( $params ) ) {
             <span class="dashicons dashicons-money-alt"></span>
             <?php esc_html_e( 'سجل السندات والمدفوعات المستلمة', 'olama-registration' ); ?>
         </h1>
+        <span class="olama-reg-uid-badge olama-reg-uid-badge--lg" style="background:linear-gradient(135deg,#2E7D32,#1B5E20);">
+            <?php echo esc_html( number_format( (float)$_pay_total, 2 ) ); ?> <?php esc_html_e( 'إجمالي المحصل', 'olama-registration' ); ?>
+        </span>
     </div>
 
     <!-- Notice area -->
@@ -191,26 +200,29 @@ if ( ! empty( $params ) ) {
     <div class="olama-reg-filter-bar">
         <form method="get" class="olama-reg-filter-form">
             <input type="hidden" name="page" value="olama-registration-payments">
-            
+
             <div class="olama-reg-filter-group">
                 <label><?php esc_html_e( 'بحث في المدفوعات', 'olama-registration' ); ?></label>
-                <input type="text" name="s" value="<?php echo esc_attr( $search_q ); ?>" placeholder="<?php esc_html_e( 'اسم ولي الأمر، رقم الملف...', 'olama-registration' ); ?>" class="olama-reg-filter-input">
+                <input type="text" name="s" value="<?php echo esc_attr( $search_q ); ?>"
+                       placeholder="<?php esc_attr_e( 'اسم ولي الأمر، رقم الملف...', 'olama-registration' ); ?>"
+                       class="olama-reg-filter-input">
             </div>
 
             <div class="olama-reg-filter-group">
                 <label><?php esc_html_e( 'طريقة السداد', 'olama-registration' ); ?></label>
                 <select name="method" class="olama-reg-filter-input">
                     <option value=""><?php esc_html_e( 'جميع الطرق', 'olama-registration' ); ?></option>
-                    <option value="cash" <?php selected( $filter_method, 'cash' ); ?>><?php esc_html_e( 'نقدي (كاش)', 'olama-registration' ); ?></option>
+                    <option value="cash"          <?php selected( $filter_method, 'cash' ); ?>><?php esc_html_e( 'نقدي (كاش)', 'olama-registration' ); ?></option>
                     <option value="bank_transfer" <?php selected( $filter_method, 'bank_transfer' ); ?>><?php esc_html_e( 'تحويل بنكي', 'olama-registration' ); ?></option>
-                    <option value="cheque" <?php selected( $filter_method, 'cheque' ); ?>><?php esc_html_e( 'شيك', 'olama-registration' ); ?></option>
-                    <option value="online" <?php selected( $filter_method, 'online' ); ?>><?php esc_html_e( 'دفع إلكتروني', 'olama-registration' ); ?></option>
+                    <option value="cheque"        <?php selected( $filter_method, 'cheque' ); ?>><?php esc_html_e( 'شيك', 'olama-registration' ); ?></option>
+                    <option value="online"        <?php selected( $filter_method, 'online' ); ?>><?php esc_html_e( 'دفع إلكتروني', 'olama-registration' ); ?></option>
                 </select>
             </div>
 
             <div class="olama-reg-filter-group">
-                <button type="submit" class="olama-reg-btn olama-reg-btn--primary" style="height: 38px; padding: 0 20px;">
-                    <?php esc_html_e( 'تصفية النتائج', 'olama-registration' ); ?>
+                <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                    <span class="dashicons dashicons-search"></span>
+                    <?php esc_html_e( 'تصفية', 'olama-registration' ); ?>
                 </button>
             </div>
         </form>
@@ -247,30 +259,36 @@ if ( ! empty( $params ) ) {
                             </td>
                         </tr>
                     <?php else: ?>
-                        <?php foreach ( $payments as $pay ): ?>
+                        <?php foreach ( $payments as $pay ):
+                            $method_cfg = [
+                                'cash'          => [ 'label' => 'نقدي',         'class' => 'reg-method-pill--cash' ],
+                                'bank_transfer' => [ 'label' => 'تحويل بنكي',   'class' => 'reg-method-pill--transfer' ],
+                                'cheque'        => [ 'label' => 'شيك بنكي',     'class' => 'reg-method-pill--cheque' ],
+                                'online'        => [ 'label' => 'دفع إلكتروني', 'class' => 'reg-method-pill--online' ],
+                            ];
+                            $m = $method_cfg[ $pay->method ] ?? [ 'label' => $pay->method, 'class' => 'reg-method-pill--cash' ];
+                        ?>
                             <tr>
-                                <td>#<?php echo esc_html( $pay->id ); ?></td>
-                                <td><?php echo esc_html( $pay->payment_date ); ?></td>
+                                <td><span style="font-weight:700; color:var(--reg-text-muted);">#<?php echo esc_html( $pay->id ); ?></span></td>
+                                <td style="color:var(--reg-text-muted);"><?php echo esc_html( $pay->payment_date ); ?></td>
                                 <td><strong><?php echo esc_html( $pay->invoice_number ?: '—' ); ?></strong></td>
                                 <td><span class="olama-reg-uid-badge"><?php echo esc_html( $pay->family_uid ); ?></span></td>
                                 <td><?php echo esc_html( $pay->father_first_name . ' ' . $pay->father_family_name ); ?></td>
-                                <td style="color:var(--reg-success); font-weight:700;"><?php echo esc_html( number_format( $pay->amount, 2 ) ); ?></td>
+                                <td style="color:var(--reg-success); font-weight:800; font-size:15px;">
+                                    <?php echo esc_html( number_format( $pay->amount, 2 ) ); ?>
+                                </td>
                                 <td>
-                                    <?php 
-                                    $pay_methods = [
-                                        'cash'          => 'نقدي',
-                                        'bank_transfer' => 'تحويل بنكي',
-                                        'cheque'        => 'شيك',
-                                        'online'        => 'دفع إلكتروني',
-                                    ];
-                                    echo esc_html( $pay_methods[ $pay->method ] ?? $pay->method );
-                                    ?>
+                                    <span class="reg-method-pill <?php echo esc_attr( $m['class'] ); ?>">
+                                        <?php echo esc_html( $m['label'] ); ?>
+                                    </span>
                                 </td>
                                 <td><?php echo esc_html( $pay->reference ?: '—' ); ?></td>
                                 <td><?php echo esc_html( $pay->received_by_name ); ?></td>
-                                <td>
-                                    <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'print_receipt', 'id' => $pay->id ], admin_url( 'admin.php?page=olama-registration-payments' ) ) ); ?>" target="_blank" class="button button-small">
-                                        <span class="dashicons dashicons-printer" style="font-size:16px;vertical-align:middle;margin-top:2px;"></span>
+                                <td style="text-align:center;">
+                                    <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'print_receipt', 'id' => $pay->id ], admin_url( 'admin.php?page=olama-registration-payments' ) ) ); ?>"
+                                       target="_blank" class="button button-small"
+                                       title="<?php esc_attr_e( 'طباعة سند القبض', 'olama-registration' ); ?>">
+                                        <span class="dashicons dashicons-printer"></span>
                                     </a>
                                 </td>
                             </tr>
