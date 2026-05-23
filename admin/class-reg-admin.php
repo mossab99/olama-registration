@@ -17,12 +17,12 @@ class Olama_Reg_Admin {
     public function register_menu(): void {
 
         add_menu_page(
-            __( 'Olama Registration', 'olama-registration' ),
-            __( 'التسجيل', 'olama-registration' ),
-            'manage_options',
+            __( 'Olama Billing', 'olama-registration' ),
+            __( 'المالية', 'olama-registration' ),
+            'olama_access_registration',
             'olama-registration',
             [ $this, 'render_families' ],
-            'dashicons-id-alt',
+            'dashicons-money-alt',
             26
         );
 
@@ -30,7 +30,7 @@ class Olama_Reg_Admin {
             'olama-registration',
             __( 'Families', 'olama-registration' ),
             __( 'العائلات', 'olama-registration' ),
-            'manage_options',
+            'olama_manage_registration_families',
             'olama-registration',
             [ $this, 'render_families' ]
         );
@@ -39,7 +39,7 @@ class Olama_Reg_Admin {
             'olama-registration',
             __( 'Students', 'olama-registration' ),
             __( 'الطلاب', 'olama-registration' ),
-            'manage_options',
+            'olama_manage_registration_students',
             'olama-registration-students',
             [ $this, 'render_students' ]
         );
@@ -48,7 +48,7 @@ class Olama_Reg_Admin {
             'olama-registration',
             __( 'Fee Templates', 'olama-registration' ),
             __( 'نماذج الرسوم', 'olama-registration' ),
-            'manage_options',
+            'olama_manage_registration_fees',
             'olama-registration-fees',
             [ $this, 'render_fees' ]
         );
@@ -57,7 +57,7 @@ class Olama_Reg_Admin {
             'olama-registration',
             __( 'Invoices', 'olama-registration' ),
             __( 'الفواتير', 'olama-registration' ),
-            'manage_options',
+            'olama_manage_registration_invoices',
             'olama-registration-invoices',
             [ $this, 'render_invoices' ]
         );
@@ -66,25 +66,43 @@ class Olama_Reg_Admin {
             'olama-registration',
             __( 'Payments', 'olama-registration' ),
             __( 'السندات والمدفوعات', 'olama-registration' ),
-            'manage_options',
+            'olama_manage_registration_payments',
             'olama-registration-payments',
             [ $this, 'render_payments' ]
         );
 
         add_submenu_page(
             'olama-registration',
+            __( 'Custom Payments', 'olama-registration' ),
+            __( 'دفعات مخصصة', 'olama-registration' ),
+            'olama_manage_registration_payments',
+            'olama-registration-custom-payments',
+            [ $this, 'render_custom_payments' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
             __( 'Billing Reports', 'olama-registration' ),
             __( 'التقارير المالية', 'olama-registration' ),
-            'manage_options',
+            'olama_manage_registration_reports',
             'olama-registration-reports',
             [ $this, 'render_reports' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Settings', 'olama-registration' ),
+            __( 'الإعدادات', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-settings',
+            [ $this, 'render_settings' ]
         );
     }
 
     // ── Page Renderers ────────────────────────────────────────────────────────
 
     public function render_families(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        if ( ! current_user_can( 'olama_manage_registration_families' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
 
         // Print action — output the print view and exit
         $action     = sanitize_text_field( $_GET['action'] ?? '' );
@@ -99,28 +117,38 @@ class Olama_Reg_Admin {
     }
 
     public function render_students(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        if ( ! current_user_can( 'olama_manage_registration_students' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-student-list.php';
     }
 
     public function render_fees(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        if ( ! current_user_can( 'olama_manage_registration_fees' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-fee-templates.php';
     }
 
     public function render_invoices(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        if ( ! current_user_can( 'olama_manage_registration_invoices' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-invoices.php';
     }
 
     public function render_payments(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-payments.php';
     }
 
     public function render_reports(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        if ( ! current_user_can( 'olama_manage_registration_reports' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-billing-reports.php';
+    }
+
+    public function render_custom_payments(): void {
+        if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-custom-payments.php';
+    }
+
+    public function render_settings(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-settings.php';
     }
 
     // ── Assets ────────────────────────────────────────────────────────────────

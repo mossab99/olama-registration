@@ -58,7 +58,11 @@ if ( $action === 'print_receipt' && $payment_id ) {
             <table class="header-table">
                 <tr>
                     <td style="padding-bottom:15px;">
-                        <div class="logo-title">مدارس أوتاد الإبداع</div>
+                        <?php 
+                        $school_settings = get_option('olama_school_settings', []);
+                        $school_name = $school_settings['school_name_ar'] ?? 'مدارس أوتاد الإبداع';
+                        ?>
+                        <div class="logo-title"><?php echo esc_html( $school_name ); ?></div>
                         <div style="font-size: 11px; color:#6B7280; margin-top:4px;">إيصال سداد رسوم دراسية</div>
                     </td>
                     <td style="text-align: left; padding-bottom:15px;">
@@ -118,6 +122,36 @@ if ( $action === 'print_receipt' && $payment_id ) {
                 <?php endif; ?>
             </table>
 
+            <?php if ( $invoice && ! empty( $invoice->items ) ): ?>
+                <div style="margin-bottom: 30px;">
+                    <div style="font-size:14px; font-weight:700; color:#E8920A; margin-bottom:10px;">تفاصيل الفاتورة والخدمات:</div>
+                    <table style="width:100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background:#FFF3E0;">
+                                <th style="padding:8px; border:1px solid #E0C090; text-align:right; font-size:13px; color:#C4780A;">التفاصيل / الخدمة</th>
+                                <th style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#C4780A; width:80px;">العدد</th>
+                                <th style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#C4780A; width:100px;">القيمة</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ( $invoice->items as $item ): ?>
+                                <tr>
+                                    <td style="padding:8px; border:1px solid #E0C090; font-size:13px; color:#1a1a2e;"><?php echo esc_html( $item->description ); ?></td>
+                                    <td style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#1a1a2e;"><?php echo esc_html( (int) $item->quantity ); ?></td>
+                                    <td style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#1a1a2e;"><?php echo esc_html( number_format( $item->line_total, 2 ) ); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            <?php if ( isset( $invoice->discount ) && $invoice->discount > 0 ): ?>
+                                <tr>
+                                    <td colspan="2" style="padding:8px; border:1px solid #E0C090; text-align:left; font-size:13px; color:#c62828; font-weight:700;">الخصم الممنوح:</td>
+                                    <td style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#c62828; font-weight:700;">- <?php echo esc_html( number_format( $invoice->discount, 2 ) ); ?></td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+
             <table class="sign-table">
                 <tr>
                     <td>
@@ -132,7 +166,7 @@ if ( $action === 'print_receipt' && $payment_id ) {
             </table>
 
             <div class="footer">
-                مدارس أوتاد الإبداع - هاتف: 060000000 | البريد الإلكتروني: info@awtad.edu
+                <?php echo esc_html( $school_name ); ?> - هاتف: 060000000 | البريد الإلكتروني: info@awtad.edu
             </div>
         </div>
     </body>
@@ -188,9 +222,15 @@ $_pay_total = $wpdb->get_var(
             <span class="dashicons dashicons-money-alt"></span>
             <?php esc_html_e( 'سجل السندات والمدفوعات المستلمة', 'olama-registration' ); ?>
         </h1>
-        <span class="olama-reg-uid-badge olama-reg-uid-badge--lg" style="background:linear-gradient(135deg,#2E7D32,#1B5E20);">
-            <?php echo esc_html( number_format( (float)$_pay_total, 2 ) ); ?> <?php esc_html_e( 'إجمالي المحصل', 'olama-registration' ); ?>
-        </span>
+        <div style="display:flex; gap:12px; align-items:center;">
+            <span class="olama-reg-uid-badge olama-reg-uid-badge--lg" style="background:linear-gradient(135deg,#2E7D32,#1B5E20);">
+                <?php echo esc_html( number_format( (float)$_pay_total, 2 ) ); ?> <?php esc_html_e( 'إجمالي المحصل', 'olama-registration' ); ?>
+            </span>
+            <button class="olama-reg-btn olama-reg-btn--primary" id="olama-reg-open-general-payment-btn">
+                <span class="dashicons dashicons-plus"></span>
+                <?php esc_html_e( 'تسجيل دفعة', 'olama-registration' ); ?>
+            </button>
+        </div>
     </div>
 
     <!-- Notice area -->
@@ -290,6 +330,14 @@ $_pay_total = $wpdb->get_var(
                                        title="<?php esc_attr_e( 'طباعة سند القبض', 'olama-registration' ); ?>">
                                         <span class="dashicons dashicons-printer"></span>
                                     </a>
+                                    <?php if ( (float)$pay->amount > 0 && $pay->method !== 'reversal' ): ?>
+                                        <button class="button button-small olama-reg-reverse-payment-btn"
+                                                data-id="<?php echo esc_attr( $pay->id ); ?>"
+                                                title="<?php esc_attr_e( 'عكس السند', 'olama-registration' ); ?>"
+                                                style="color:#c62828;">
+                                            <span class="dashicons dashicons-undo"></span>
+                                        </button>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

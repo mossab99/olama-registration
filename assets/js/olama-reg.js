@@ -613,10 +613,15 @@
                     processResults: function (data) {
                         if (data.success && data.data.families) {
                             return {
-                                results: data.data.families.map(f => ({
-                                    id: f.family_uid,
-                                    text: `${f.father_first_name} ${f.father_family_name} (${f.family_uid})`
-                                }))
+                                results: data.data.families.map(f => {
+                                    const name1 = f.father_first_name || '';
+                                    const name2 = f.father_family_name || '';
+                                    const fullName = (name1 + ' ' + name2).trim() || 'بدون اسم';
+                                    return {
+                                        id: f.family_uid,
+                                        text: `${fullName} (${f.family_uid})`
+                                    };
+                                })
                             };
                         }
                         return { results: [] };
@@ -759,6 +764,47 @@
             .fail(() => showNotice(R.strings.error, true));
     });
 
+    // ── Billing - Cancel & Reverse ──────────────────────────────────────────
+
+    $(document).on('click', '.olama-reg-cancel-invoice-btn', function (e) {
+        e.preventDefault();
+        if (!confirm('هل أنت متأكد من إلغاء هذه الفاتورة؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+
+        const id = $(this).data('id');
+        const $btn = $(this);
+
+        ajax('olama_reg_cancel_invoice', { id }, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    setTimeout(() => window.location.reload(), 1000);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
+    $(document).on('click', '.olama-reg-reverse-payment-btn', function (e) {
+        e.preventDefault();
+        const notes = prompt('الرجاء إدخال سبب عكس السند (اختياري):', 'عكس سند بالخطأ');
+        if (notes === null) return; // User cancelled prompt
+
+        const id = $(this).data('id');
+        const $btn = $(this);
+
+        ajax('olama_reg_reverse_payment', { id, notes }, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    setTimeout(() => window.location.reload(), 1000);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
     // ── Billing - Invoice Details Drawer ─────────────────────────────────────
 
     $(document).on('click', '.olama-reg-view-invoice-btn', function () {
@@ -772,6 +818,7 @@
 
                     $('#drawer-invoice-number').text(inv.invoice_number);
                     $('#drawer-total-val').text(parseFloat(inv.total).toFixed(2) + ' د.أ');
+                    $('#drawer-discount-val').text(parseFloat(inv.discount || 0).toFixed(2) + ' د.أ');
                     $('#drawer-paid-val').text(parseFloat(inv.amount_paid).toFixed(2) + ' د.أ');
                     $('#drawer-balance-val').text(parseFloat(inv.balance).toFixed(2) + ' د.أ');
                     $('#drawer-family-uid').text(inv.family_uid);
@@ -878,58 +925,94 @@
     // ── Billing - Payments & Receipts ────────────────────────────────────────
 
     const paymentModalHtml = `
-    <div id="olama-reg-payment-modal" class="olama-reg-modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.4); padding-top:80px;">
-        <div class="olama-reg-form-wrapper" style="background:#fff; margin:0 auto 50px; width:90%; max-width:500px; border-radius:10px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
-            <div style="background:#FFF3E0; padding:15px 20px; border-bottom:1px solid #E0C090; display:flex; justify-content:space-between; align-items:center;">
-                <h2 style="margin:0; font-size:18px; font-weight:800; color:#C4780A; display:flex; align-items:center; gap:8px;">
-                    <span class="dashicons dashicons-money-alt"></span>
-                    تسجيل دفعة جديدة
-                </h2>
-                <button type="button" class="olama-reg-pay-modal-close" style="background:none; border:none; font-size:24px; cursor:pointer; color:#C4780A;">&times;</button>
+    <div id="olama-reg-payment-modal" class="olama-reg-modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);">
+        <div class="olama-reg-wrap" style="margin:0 auto !important; padding:40px 10px !important; max-width:600px !important; width:100% !important;">
+            <div class="olama-reg-modal-dialog" style="margin:0 !important; max-width:none !important;">
+                <div class="olama-reg-modal-header">
+                    <h2 class="olama-reg-modal-title">
+                        <span class="dashicons dashicons-money-alt"></span>
+                        تسجيل دفعة جديدة
+                    </h2>
+                    <button type="button" class="olama-reg-pay-modal-close olama-reg-modal-close" style="border:none;background:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+                
+                <form id="olama-reg-payment-form" style="margin:0;">
+                    <div class="olama-reg-modal-body">
+                        <input type="hidden" name="invoice_id" id="pay_invoice_id">
+                        <input type="hidden" name="family_uid" id="pay_family_uid">
+                        
+                        <div class="olama-reg-section" id="pay_family_search_wrap" style="display:none;">
+                            <h3 class="olama-reg-section-title">البحث والربط (دفعة عامة)</h3>
+                            <div class="olama-reg-grid">
+                                <div class="olama-reg-field">
+                                    <label for="pay_search_family">بحث عن العائلة:</label>
+                                    <select id="pay_search_family" style="width:100%;"></select>
+                                </div>
+                                <div class="olama-reg-field" id="pay_invoice_select_wrap" style="display:none;">
+                                    <label for="pay_select_invoice">الفاتورة المستهدفة:</label>
+                                    <select id="pay_select_invoice" style="width:100%;">
+                                        <option value="">-- اختر الفاتورة --</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="olama-reg-section" id="pay_invoice_display_wrap">
+                            <h3 class="olama-reg-section-title">معلومات الفاتورة المستهدفة</h3>
+                            <div class="olama-reg-grid">
+                                <div class="olama-reg-field" style="display:flex; flex-direction:column;">
+                                    <label>رقم الفاتورة:</label>
+                                    <span id="pay_invoice_no_lbl" style="font-weight:800; color:#1a1a2e; font-size:16px; margin-top:4px;"></span>
+                                </div>
+                                <div class="olama-reg-field" style="display:flex; flex-direction:column;">
+                                    <label>المتبقي غير المدفوع:</label>
+                                    <span id="pay_invoice_bal_lbl" style="font-weight:800; color:#E8920A; font-size:16px; margin-top:4px;">0.00 د.أ</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="olama-reg-section">
+                            <h3 class="olama-reg-section-title">تفاصيل الدفعة المالية</h3>
+                            <div class="olama-reg-grid">
+                                <div class="olama-reg-field olama-reg-field--required">
+                                    <label for="pay_amount">قيمة الدفعة المقبوضة (د.أ)</label>
+                                    <input type="number" step="0.01" id="pay_amount" name="amount" required>
+                                </div>
+                                <div class="olama-reg-field olama-reg-field--required">
+                                    <label for="pay_method">طريقة الدفع</label>
+                                    <select id="pay_method" name="method" required>
+                                        <option value="cash">نقدي (كاش)</option>
+                                        <option value="bank_transfer">تحويل بنكي</option>
+                                        <option value="cheque">شيك بنكي</option>
+                                        <option value="online">دفع إلكتروني</option>
+                                    </select>
+                                </div>
+                                <div class="olama-reg-field" id="pay_reference_wrap">
+                                    <label for="pay_reference">رقم المرجع / الشيك</label>
+                                    <input type="text" id="pay_reference" name="reference" placeholder="رقم المعاملة أو رقم الشيك...">
+                                </div>
+                                <div class="olama-reg-field olama-reg-field--required">
+                                    <label for="pay_date">تاريخ القبض</label>
+                                    <input type="text" id="pay_date" name="payment_date" class="olama-reg-datepicker" required>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="olama-reg-section">
+                            <h3 class="olama-reg-section-title">ملاحظات إضافية</h3>
+                            <div style="padding:14px;">
+                                <textarea id="pay_notes" name="notes" rows="3" style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;"></textarea>
+                            </div>
+                        </div>
+
+                    </div>
+                    
+                    <div class="olama-reg-form-actions">
+                        <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="olama-reg-save-payment-btn">حفظ وتسجيل السند</button>
+                        <button type="button" class="button button-large olama-reg-pay-modal-close">إلغاء</button>
+                    </div>
+                </form>
             </div>
-            <form id="olama-reg-payment-form" style="margin:0;">
-                <input type="hidden" name="invoice_id" id="pay_invoice_id">
-                <input type="hidden" name="family_uid" id="pay_family_uid">
-                <div style="padding:20px;">
-                    <div class="olama-reg-field" style="margin-bottom:12px; display:flex; gap:6px;">
-                        <label style="font-weight:700; color:#6B7280;">رقم الفاتورة:</label>
-                        <span id="pay_invoice_no_lbl" style="font-weight:800; color:#1a1a2e;"></span>
-                    </div>
-                    <div class="olama-reg-field" style="margin-bottom:12px; display:flex; gap:6px;">
-                        <label style="font-weight:700; color:#6B7280;">المتبقي غير المدفوع:</label>
-                        <span id="pay_invoice_bal_lbl" style="font-weight:800; color:#E8920A;">0.00 د.أ</span>
-                    </div>
-                    <div class="olama-reg-field olama-reg-field--required" style="margin-bottom:12px;">
-                        <label for="pay_amount">قيمة الدفعة المقبوضة (د.أ)</label>
-                        <input type="number" step="0.01" min="0.01" id="pay_amount" name="amount" required style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px;">
-                    </div>
-                    <div class="olama-reg-field olama-reg-field--required" style="margin-bottom:12px;">
-                        <label for="pay_method">طريقة الدفع</label>
-                        <select id="pay_method" name="method" required style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;">
-                            <option value="cash">نقدي (كاش)</option>
-                            <option value="bank_transfer">تحويل بنكي</option>
-                            <option value="cheque">شيك بنكي</option>
-                            <option value="online">دفع إلكتروني</option>
-                        </select>
-                    </div>
-                    <div class="olama-reg-field" style="margin-bottom:12px;" id="pay_reference_wrap">
-                        <label for="pay_reference">رقم المرجع / الشيك</label>
-                        <input type="text" id="pay_reference" name="reference" style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px;" placeholder="رقم المعاملة أو رقم الشيك...">
-                    </div>
-                    <div class="olama-reg-field" style="margin-bottom:12px;">
-                        <label for="pay_date">تاريخ القبض</label>
-                        <input type="text" id="pay_date" name="payment_date" class="olama-reg-datepicker" required style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px;">
-                    </div>
-                    <div class="olama-reg-field">
-                        <label for="pay_notes">ملاحظات</label>
-                        <textarea id="pay_notes" name="notes" rows="2" style="width:100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;"></textarea>
-                    </div>
-                </div>
-                <div class="olama-reg-form-actions">
-                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="olama-reg-save-payment-btn">حفظ وتسجيل السند</button>
-                    <button type="button" class="button button-large olama-reg-pay-modal-close">إلغاء</button>
-                </div>
-            </form>
         </div>
     </div>`;
 
@@ -938,6 +1021,9 @@
         const no = $(this).data('no');
         const bal = parseFloat($(this).data('bal')) || 0;
         const family = $(this).data('family');
+
+        $('#pay_family_search_wrap, #pay_invoice_select_wrap').hide();
+        $('#pay_invoice_display_wrap').show();
 
         $('#pay_invoice_id').val(id);
         $('#pay_family_uid').val(family);
@@ -951,6 +1037,77 @@
         $('#olama-reg-invoice-drawer').fadeOut(100);
         $('#olama-reg-payment-modal').fadeIn(200);
         initDatepickers($('#olama-reg-payment-modal'));
+    });
+
+    $(document).on('click', '#olama-reg-open-general-payment-btn', function() {
+        $('#pay_family_search_wrap, #pay_invoice_select_wrap').show();
+        $('#pay_invoice_display_wrap').hide();
+
+        $('#pay_invoice_id').val('');
+        $('#pay_family_uid').val('');
+        $('#pay_invoice_bal_lbl').text('0.00 د.أ');
+        $('#pay_amount').val('').removeAttr('max');
+
+        if (typeof $.fn.select2 !== 'undefined' && !$('#pay_search_family').hasClass('select2-hidden-accessible')) {
+            $('#pay_search_family').select2({
+                dir: 'rtl', width: '100%',
+                dropdownParent: $('#olama-reg-payment-modal'),
+                ajax: {
+                    url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
+                    data: function(params) { return { action: 'olama_reg_search', nonce: R.nonce, q: params.term }; },
+                    processResults: function(data) {
+                        return { results: (data.success && data.data.families) ? data.data.families.map(f => {
+                            const name1 = f.father_first_name || '';
+                            const name2 = f.father_family_name || '';
+                            const fullName = (name1 + ' ' + name2).trim() || 'بدون اسم';
+                            return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
+                        }) : [] };
+                    }
+                },
+                placeholder: 'ابحث عن العائلة للوصول إلى فواتيرها...',
+                minimumInputLength: 2
+            });
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        $('#pay_date').val(today);
+
+        $('#olama-reg-payment-modal').fadeIn(200);
+        initDatepickers($('#olama-reg-payment-modal'));
+    });
+
+    $(document).on('change', '#pay_search_family', function() {
+        const familyUid = $(this).val();
+        $('#pay_family_uid').val(familyUid);
+        const $invSelect = $('#pay_select_invoice');
+        $invSelect.empty().append('<option value="">جاري تحميل الفواتير...</option>');
+        $('#pay_invoice_id').val('');
+        $('#pay_invoice_bal_lbl').text('0.00 د.أ');
+        $('#pay_amount').val('').removeAttr('max');
+
+        if (!familyUid) {
+            $invSelect.empty().append('<option value="">-- اختر الفاتورة --</option>');
+            return;
+        }
+        ajax('olama_reg_get_family_billing', { family_uid: familyUid, academic_year_id: 0 })
+            .done(res => {
+                $invSelect.empty().append('<option value="">-- اختر الفاتورة --</option>');
+                if (res.success && res.data.invoices) {
+                    res.data.invoices.forEach(inv => {
+                        if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                            $invSelect.append(`<option value="${inv.id}" data-bal="${inv.balance}">${inv.invoice_number} (المتبقي: ${parseFloat(inv.balance).toFixed(2)})</option>`);
+                        }
+                    });
+                }
+            });
+    });
+
+    $(document).on('change', '#pay_select_invoice', function() {
+        const id = $(this).val();
+        $('#pay_invoice_id').val(id);
+        const bal = parseFloat($(this).find(':selected').data('bal')) || 0;
+        $('#pay_invoice_bal_lbl').text(bal.toFixed(2) + ' د.أ');
+        $('#pay_amount').val(bal.toFixed(2)).attr('max', bal.toFixed(2));
     });
 
     $(document).on('click', '.olama-reg-pay-modal-close', function () {
@@ -1228,5 +1385,143 @@
             loadFamilyBilling();
         }
     });
+
+    // =========================================================================
+    // Custom Payments
+    // =========================================================================
+    if ($('#cp_family_search').length) {
+        if (typeof $.fn.select2 !== 'undefined') {
+            $('#cp_family_search').select2({
+                dir: 'rtl', width: '100%',
+                ajax: {
+                    url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
+                    data: function(params) { return { action: 'olama_reg_search', nonce: R.nonce, q: params.term }; },
+                    processResults: function(data) {
+                        return { results: (data.success && data.data.families) ? data.data.families.map(f => {
+                            const name1 = f.father_first_name || '';
+                            const name2 = f.father_family_name || '';
+                            const fullName = (name1 + ' ' + name2).trim() || 'بدون اسم';
+                            return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
+                        }) : [] };
+                    }
+                },
+                placeholder: '-- ابحث باسم الأب، الأم، أو رقم العائلة --',
+                minimumInputLength: 3
+            });
+        }
+
+        $('#cp_family_search').on('change', function() {
+            const familyUid = $(this).val();
+            $('#cp_family_uid').val(familyUid);
+            const $container = $('#cp_students_container');
+            const $list = $('#cp_students_list');
+            
+            $list.empty();
+            if (!familyUid) {
+                $container.hide();
+                calculateCustomTotal();
+                return;
+            }
+
+            $container.show();
+            $list.html('<div style="grid-column: 1/-1; text-align: center; color: var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري تحميل الطلاب...</div>');
+
+            ajax('olama_reg_get_family_students', { family_uid: familyUid })
+                .done(res => {
+                    $list.empty();
+                    if (res.success && res.data.students && res.data.students.length > 0) {
+                        res.data.students.forEach(st => {
+                            const gradeName = st.grade_name || '';
+                            const html = `
+                                <label style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">
+                                    <input type="checkbox" name="student_uids[]" value="${st.student_uid}" class="cp-student-check" checked />
+                                    <span>
+                                        <span style="display:block; font-weight:700;">${st.student_name || 'بدون اسم'}</span>
+                                        <span style="display:block; font-size:11px; color:#64748b;">${gradeName}</span>
+                                    </span>
+                                </label>
+                            `;
+                            $list.append(html);
+                        });
+                        calculateCustomTotal();
+                    } else {
+                        $list.html('<div style="grid-column: 1/-1; color: #dc2626;">لا يوجد طلاب نشطين مسجلين لهذه العائلة.</div>');
+                    }
+                })
+                .fail(() => {
+                    $list.html('<div style="grid-column: 1/-1; color: #dc2626;">حدث خطأ أثناء جلب البيانات.</div>');
+                });
+        });
+
+        $(document).on('change', '.cp-student-check, #cp_amount, #cp_discount', calculateCustomTotal);
+        $(document).on('input', '#cp_amount, #cp_discount', calculateCustomTotal);
+
+        $('#cp_fee_template').on('change', function() {
+            const amount = $(this).find(':selected').data('amount');
+            if (amount !== undefined) {
+                $('#cp_amount').val(parseFloat(amount).toFixed(2));
+                calculateCustomTotal();
+            }
+        });
+
+        function calculateCustomTotal() {
+            const checkedCount = $('.cp-student-check:checked').length;
+            const amount = parseFloat($('#cp_amount').val()) || 0;
+            const discount = parseFloat($('#cp_discount').val()) || 0;
+            const total = Math.max(0, (checkedCount * amount) - discount);
+            $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
+            
+            if (checkedCount > 0) {
+                $('#cp_students_error').hide();
+            }
+        }
+
+        $('#olama-reg-custom-payment-form').on('submit', function(e) {
+            e.preventDefault();
+            const checkedCount = $('.cp-student-check:checked').length;
+            if (checkedCount === 0) {
+                $('#cp_students_error').show();
+                return;
+            }
+
+            const formData = $(this).serialize();
+            const $btn = $('#cp_submit_btn');
+            const $loading = $('#cp_loading');
+            const $msg = $('#cp_response_msg');
+
+            $btn.prop('disabled', true);
+            $loading.show();
+            $msg.hide();
+
+            $.post(R.ajaxurl, 'action=olama_reg_save_custom_payment&nonce=' + R.nonce + '&' + formData)
+                .done(res => {
+                    if (res.success) {
+                        $msg.html('<div class="notice notice-success inline" style="padding:10px;"><p>' + res.data.message + '</p></div>').fadeIn();
+                        $('#olama-reg-custom-payment-form')[0].reset();
+                        if (typeof $.fn.select2 !== 'undefined') {
+                            $('#cp_family_search').val('').trigger('change');
+                        }
+                        calculateCustomTotal();
+                        
+                        if (res.data.payment_id) {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('page', 'olama-registration-payments');
+                            url.searchParams.set('action', 'print_receipt');
+                            url.searchParams.set('id', res.data.payment_id);
+                            window.open(url.toString(), '_blank');
+                        }
+                    } else {
+                        $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data.message || 'Error occurred.') + '</p></div>').fadeIn();
+                    }
+                })
+                .fail(() => {
+                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>حدث خطأ في الاتصال بالخادم.</p></div>').fadeIn();
+                })
+                .always(() => {
+                    $btn.prop('disabled', false);
+                    $loading.hide();
+                });
+        });
+    }
 
 })(jQuery);

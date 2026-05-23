@@ -29,6 +29,15 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
 $nationalities = [ 'سعودي', 'أردني', 'مصري', 'سوري', 'لبناني', 'فلسطيني', 'يمني', 'عراقي', 'إماراتي', 'كويتي', 'بحريني', 'قطري', 'عُماني', 'مغربي', 'تونسي', 'ليبي', 'جزائري', 'سوداني', 'أخرى' ];
 
 $val = fn( string $k, string $default = '' ) => esc_attr( $f->$k ?? $default );
+
+// Read family info from Users & Permissions if available
+$school_family = null;
+if ( class_exists( 'Olama_School_Family' ) && ! empty( $family_uid ) ) {
+    $school_family = Olama_School_Family::get_family( $family_uid );
+}
+
+$father_mobile_val = $school_family ? $school_family->father_mobile : ($f->father_mobile ?? '');
+$mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mother_mobile ?? '');
 ?>
 
 <!-- UID Hero Card (only when editing) -->
@@ -82,277 +91,49 @@ $val = fn( string $k, string $default = '' ) => esc_attr( $f->$k ?? $default );
     ════════════════════════════════════════════════════════════════ -->
     <div class="olama-reg-tab-pane <?php echo $active_tab === 'family' ? 'active' : ''; ?>" id="tab-family">
 
-        <!-- Father Section -->
+
+
+        <!-- Core Family Data -->
         <div class="olama-reg-section">
             <h3 class="olama-reg-section-title">
-                <span class="dashicons dashicons-businessman"></span>
-                <?php esc_html_e( 'بيانات الأب', 'olama-registration' ); ?>
+                <span class="dashicons dashicons-groups"></span>
+                <?php esc_html_e( 'البيانات الأساسية', 'olama-registration' ); ?>
             </h3>
             <div class="olama-reg-grid">
 
-                <div class="olama-reg-field olama-reg-field--required">
-                    <label><?php esc_html_e( 'الاسم الأول', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_first_name"
-                           value="<?php echo $val('father_first_name'); ?>"
-                           placeholder="<?php esc_attr_e( 'الاسم الأول', 'olama-registration' ); ?>"
-                           required>
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'الثاني', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_second_name"
-                           value="<?php echo $val('father_second_name'); ?>"
-                           placeholder="<?php esc_attr_e( 'اسم الأب', 'olama-registration' ); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'الثالث', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_third_name"
-                           value="<?php echo $val('father_third_name'); ?>"
-                           placeholder="<?php esc_attr_e( 'اسم الجد', 'olama-registration' ); ?>">
-                </div>
-                <div class="olama-reg-field olama-reg-field--required">
+                <div class="olama-reg-field olama-reg-field--wide">
                     <label><?php esc_html_e( 'اسم العائلة', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_family_name"
-                           value="<?php echo $val('father_family_name'); ?>"
-                           placeholder="<?php esc_attr_e( 'اللقب / الكنية', 'olama-registration' ); ?>"
-                           required>
+                    <input type="text" name="family_name"
+                           value="<?php echo esc_attr( $school_family ? $school_family->family_name : ($f->family_name ?? '') ); ?>"
+                           readonly style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
+
                 <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'العائلة الثانوي', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_secondary_family"
-                           value="<?php echo $val('father_secondary_family'); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'الاسم (لاتيني)', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_name_t"
-                           value="<?php echo $val('father_name_t'); ?>"
-                           dir="ltr"
-                           placeholder="Full Name in English">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'الجنسية', 'olama-registration' ); ?></label>
-                    <select name="father_nationality" class="olama-reg-select2">
-                        <option value=""><?php esc_html_e( '-- اختر الجنسية --', 'olama-registration' ); ?></option>
-                        <?php foreach ( $nationalities as $nat ): ?>
-                            <option value="<?php echo esc_attr($nat); ?>" <?php selected( $f->father_nationality ?? '', $nat ); ?>>
-                                <?php echo esc_html($nat); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'المهنة', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_job"
-                           value="<?php echo $val('father_job'); ?>"
-                           placeholder="<?php esc_attr_e( 'مثال: مهندس، طبيب...', 'olama-registration' ); ?>">
-                </div>
-                <div class="olama-reg-field olama-reg-field--wide">
-                    <label><?php esc_html_e( 'جهة العمل', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_workplace"
-                           value="<?php echo $val('father_workplace'); ?>"
-                           placeholder="<?php esc_attr_e( 'اسم الشركة أو المؤسسة', 'olama-registration' ); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'هاتف', 'olama-registration' ); ?></label>
-                    <input type="tel" name="father_phone"
-                           value="<?php echo $val('father_phone'); ?>"
-                           dir="ltr"
-                           placeholder="+966 5x xxx xxxx">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'جوال', 'olama-registration' ); ?></label>
+                    <label><?php esc_html_e( 'جوال الأب', 'olama-registration' ); ?></label>
                     <input type="tel" name="father_mobile"
-                           value="<?php echo $val('father_mobile'); ?>"
-                           dir="ltr"
-                           placeholder="+966 5x xxx xxxx">
+                           value="<?php echo esc_attr( $father_mobile_val ); ?>"
+                           dir="ltr" readonly
+                           style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
+                
                 <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'البريد الإلكتروني', 'olama-registration' ); ?></label>
-                    <input type="email" name="father_email"
-                           value="<?php echo $val('father_email'); ?>"
-                           dir="ltr"
-                           placeholder="example@mail.com">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'نوع الوثيقة', 'olama-registration' ); ?></label>
-                    <select name="father_doc_type">
-                        <?php foreach ( [ '' => '-- اختر --', 'national_id' => 'هوية وطنية', 'passport' => 'جواز سفر', 'iqama' => 'إقامة', 'other' => 'أخرى' ] as $k => $lbl ): ?>
-                            <option value="<?php echo esc_attr($k); ?>" <?php selected( $f->father_doc_type ?? '', $k ); ?>><?php echo esc_html($lbl); ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'رقم الوثيقة', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_doc_number"
-                           value="<?php echo $val('father_doc_number'); ?>"
-                           dir="ltr">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'مكان الإصدار', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_doc_issue_place"
-                           value="<?php echo $val('father_doc_issue_place'); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'تاريخ الإصدار', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_doc_issue_date"
-                           value="<?php echo $val('father_doc_issue_date'); ?>"
-                           class="olama-reg-datepicker"
-                           placeholder="YYYY-MM-DD">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'تاريخ الانتهاء', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_doc_expiry_date"
-                           value="<?php echo $val('father_doc_expiry_date'); ?>"
-                           class="olama-reg-datepicker"
-                           placeholder="YYYY-MM-DD">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'شؤون الموظفين', 'olama-registration' ); ?></label>
-                    <input type="text" name="father_employee_affairs"
-                           value="<?php echo $val('father_employee_affairs'); ?>">
-                </div>
-                <div class="olama-reg-field olama-reg-field--checkbox">
-                    <input type="checkbox" name="father_is_employee" value="1"
-                           id="father_is_employee"
-                           <?php checked( $f->father_is_employee ?? 0, 1 ); ?>>
-                    <label for="father_is_employee" style="cursor:pointer; font-weight:600;">
-                        <?php esc_html_e( 'موظف في المدرسة', 'olama-registration' ); ?>
-                    </label>
-                </div>
-
-            </div><!-- .olama-reg-grid -->
-        </div><!-- Father Section -->
-
-        <!-- Mother Section -->
-        <div class="olama-reg-section">
-            <h3 class="olama-reg-section-title">
-                <span class="dashicons dashicons-businesswoman"></span>
-                <?php esc_html_e( 'بيانات الأم', 'olama-registration' ); ?>
-            </h3>
-            <div class="olama-reg-grid">
-
-                <div class="olama-reg-field olama-reg-field--wide">
-                    <label><?php esc_html_e( 'الاسم الكامل', 'olama-registration' ); ?></label>
-                    <input type="text" name="mother_full_name"
-                           value="<?php echo $val('mother_full_name'); ?>"
-                           placeholder="<?php esc_attr_e( 'اسم الأم الكامل', 'olama-registration' ); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'الجنسية', 'olama-registration' ); ?></label>
-                    <select name="mother_nationality" class="olama-reg-select2">
-                        <option value=""><?php esc_html_e( '-- اختر --', 'olama-registration' ); ?></option>
-                        <?php foreach ( $nationalities as $nat ): ?>
-                            <option value="<?php echo esc_attr($nat); ?>" <?php selected( $f->mother_nationality ?? '', $nat ); ?>><?php echo esc_html($nat); ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'المهنة', 'olama-registration' ); ?></label>
-                    <input type="text" name="mother_job"
-                           value="<?php echo $val('mother_job'); ?>">
-                </div>
-                <div class="olama-reg-field olama-reg-field--wide">
-                    <label><?php esc_html_e( 'جهة العمل', 'olama-registration' ); ?></label>
-                    <input type="text" name="mother_workplace"
-                           value="<?php echo $val('mother_workplace'); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'جوال', 'olama-registration' ); ?></label>
+                    <label><?php esc_html_e( 'جوال الأم', 'olama-registration' ); ?></label>
                     <input type="tel" name="mother_mobile"
-                           value="<?php echo $val('mother_mobile'); ?>"
-                           dir="ltr"
-                           placeholder="+966 5x xxx xxxx">
+                           value="<?php echo esc_attr( $mother_mobile_val ); ?>"
+                           dir="ltr" readonly
+                           style="background-color: #f0f0f1; cursor: not-allowed;">
                 </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'البريد الإلكتروني', 'olama-registration' ); ?></label>
-                    <input type="email" name="mother_email"
-                           value="<?php echo $val('mother_email'); ?>"
-                           dir="ltr"
-                           placeholder="example@mail.com">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'شؤون الموظفين', 'olama-registration' ); ?></label>
-                    <input type="text" name="mother_employee_affairs"
-                           value="<?php echo $val('mother_employee_affairs'); ?>">
-                </div>
-                <div class="olama-reg-field olama-reg-field--checkbox">
-                    <input type="checkbox" name="mother_is_employee" value="1"
-                           id="mother_is_employee"
-                           <?php checked( $f->mother_is_employee ?? 0, 1 ); ?>>
-                    <label for="mother_is_employee" style="cursor:pointer; font-weight:600;">
-                        <?php esc_html_e( 'موظفة في المدرسة', 'olama-registration' ); ?>
-                    </label>
+
+                <div class="olama-reg-field olama-reg-field--wide">
+                    <label><?php esc_html_e( 'العنوان', 'olama-registration' ); ?></label>
+                    <textarea name="address" rows="2" readonly style="background-color: #f0f0f1; cursor: not-allowed;"><?php echo esc_textarea( $school_family ? $school_family->address : ($f->address ?? '') ); ?></textarea>
                 </div>
 
             </div>
-        </div><!-- Mother Section -->
+        </div>
 
-        <!-- Other Data -->
-        <div class="olama-reg-section">
-            <h3 class="olama-reg-section-title">
-                <span class="dashicons dashicons-location"></span>
-                <?php esc_html_e( 'البيانات التكميلية والعنوان', 'olama-registration' ); ?>
-            </h3>
-            <div class="olama-reg-grid">
-
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'المنطقة السكنية', 'olama-registration' ); ?></label>
-                    <input type="text" name="residential_area"
-                           value="<?php echo $val('residential_area'); ?>">
-                </div>
-                <div class="olama-reg-field olama-reg-field--wide">
-                    <label><?php esc_html_e( 'العنوان التفصيلي', 'olama-registration' ); ?></label>
-                    <input type="text" name="home_address"
-                           value="<?php echo $val('home_address'); ?>"
-                           placeholder="<?php esc_attr_e( 'الشارع، الحي، المدينة', 'olama-registration' ); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'رقم المبنى', 'olama-registration' ); ?></label>
-                    <input type="text" name="building_number"
-                           value="<?php echo $val('building_number'); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'رقم الشقة', 'olama-registration' ); ?></label>
-                    <input type="text" name="apartment_number"
-                           value="<?php echo $val('apartment_number'); ?>">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'هاتف المنزل', 'olama-registration' ); ?></label>
-                    <input type="tel" name="home_phone"
-                           value="<?php echo $val('home_phone'); ?>"
-                           dir="ltr">
-                </div>
-                <div class="olama-reg-field">
-                    <label><?php esc_html_e( 'التصنيف', 'olama-registration' ); ?></label>
-                    <select name="classification">
-                        <?php foreach ( [ '' => '-- اختر --', 'vip' => 'VIP', 'regular' => 'عادي', 'staff' => 'موظف', 'other' => 'أخرى' ] as $k => $lbl ): ?>
-                            <option value="<?php echo esc_attr($k); ?>" <?php selected( $f->classification ?? '', $k ); ?>><?php echo esc_html($lbl); ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="olama-reg-field olama-reg-field--wide">
-                    <label><?php esc_html_e( 'ملاحظات', 'olama-registration' ); ?></label>
-                    <textarea name="reg_notes" rows="3"
-                              placeholder="<?php esc_attr_e( 'أي ملاحظات أو تفاصيل إضافية...', 'olama-registration' ); ?>"><?php echo esc_textarea( $f->reg_notes ?? '' ); ?></textarea>
-                </div>
-                <div class="olama-reg-field olama-reg-field--checkbox">
-                    <input type="checkbox" name="is_active" value="1"
-                           id="is_active"
-                           <?php checked( $f->is_active ?? 1, 1 ); ?>>
-                    <label for="is_active" style="cursor:pointer; font-weight:600; color:var(--reg-success);">
-                        <?php esc_html_e( 'حساب فعال', 'olama-registration' ); ?>
-                    </label>
-                </div>
-
-            </div>
-        </div><!-- Other Data -->
-
-        <!-- Save Button -->
+        <!-- Form Actions (No Save Button) -->
         <div class="olama-reg-form-actions">
-            <input type="hidden" name="family_uid" id="olama-reg-family-uid" value="<?php echo esc_attr( $family_uid ); ?>">
-            <button type="button" id="olama-reg-save-family" class="olama-reg-btn olama-reg-btn--primary">
-                <span class="dashicons dashicons-saved"></span>
-                <?php esc_html_e( 'حفظ بيانات العائلة', 'olama-registration' ); ?>
-            </button>
             <?php if ( $f ): ?>
             <a href="<?php echo esc_url( add_query_arg( [ 'page' => 'olama-registration', 'action' => 'print', 'family_uid' => $family_uid ], admin_url( 'admin.php' ) ) ); ?>"
                class="olama-reg-btn olama-reg-btn--secondary" target="_blank">
@@ -381,12 +162,6 @@ $val = fn( string $k, string $default = '' ) => esc_attr( $f->$k ?? $default );
                 <span class="dashicons dashicons-admin-users" style="color:var(--reg-primary);"></span>
                 <?php printf( esc_html__( 'عدد الطلاب: %d', 'olama-registration' ), count( $students ) ); ?>
             </span>
-            <button type="button" id="olama-reg-add-student"
-                    class="olama-reg-btn olama-reg-btn--primary"
-                    data-family-uid="<?php echo esc_attr( $family_uid ); ?>">
-                <span class="dashicons dashicons-plus"></span>
-                <?php esc_html_e( 'إضافة طالب جديد', 'olama-registration' ); ?>
-            </button>
         </div>
 
         <div id="olama-reg-students-list">
@@ -398,8 +173,7 @@ $val = fn( string $k, string $default = '' ) => esc_attr( $f->$k ?? $default );
             <?php else: ?>
                 <?php foreach ( $students as $s ):
                     $photo_url  = Olama_Reg_Student::get_student_photo_url( (int) ( $s->photo_attachment_id ?? 0 ) );
-                    $s_history  = Olama_Reg_Academic_History::get_history( $s->student_uid );
-                    $s_transport= Olama_Reg_Transport::get_transport( $s->student_uid, $active_year_id );
+
                     $is_open    = ( $open_student_uid === $s->student_uid );
                 ?>
                 <?php include OLAMA_REG_PATH . 'admin/views/partial-student-row.php'; ?>
@@ -420,7 +194,11 @@ $val = fn( string $k, string $default = '' ) => esc_attr( $f->$k ?? $default );
                 <span class="dashicons dashicons-money-alt"></span>
                 <p><?php esc_html_e( 'يرجى حفظ بيانات العائلة أولاً.', 'olama-registration' ); ?></p>
             </div>
-        <?php else: ?>
+        <?php else: 
+            $summary  = Olama_Reg_Billing_Invoice::get_invoice_summary( $family_uid, $active_year_id );
+            $invoices = Olama_Reg_Billing_Invoice::get_family_invoices( $family_uid, $active_year_id );
+            $payments = Olama_Reg_Billing_Payment::get_family_payments( $family_uid, $active_year_id );
+        ?>
 
         <div class="olama-reg-fin-toolbar">
             <div class="olama-reg-field olama-reg-field--inline" style="gap:12px; align-items:center;">
@@ -438,51 +216,152 @@ $val = fn( string $k, string $default = '' ) => esc_attr( $f->$k ?? $default );
                     <?php endforeach; ?>
                 </select>
             </div>
-            <button type="button" id="olama-reg-add-fin-row" class="olama-reg-btn olama-reg-btn--secondary">
+            <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-invoices&action=new&family_uid=' . $family_uid ) ); ?>" class="olama-reg-btn olama-reg-btn--primary">
                 <span class="dashicons dashicons-plus"></span>
-                <?php esc_html_e( 'إضافة سطر', 'olama-registration' ); ?>
-            </button>
+                <?php esc_html_e( 'إصدار فاتورة جديدة', 'olama-registration' ); ?>
+            </a>
         </div>
 
-        <div class="olama-reg-table-wrap">
-            <table class="olama-reg-fin-table" id="olama-reg-fin-table">
-                <thead>
-                    <tr>
-                        <th><?php esc_html_e( 'تاريخ الاستحقاق', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'طريقة الحساب', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'النسبة %', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'المبلغ المستحق', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'المبلغ المدفوع', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'المدفوعات والدائرة', 'olama-registration' ); ?></th>
-                        <th class="olama-reg-fin-balance"><?php esc_html_e( 'الرصيد', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'المرجع', 'olama-registration' ); ?></th>
-                        <th><?php esc_html_e( 'ملاحظات', 'olama-registration' ); ?></th>
-                        <th style="width:50px; text-align:center;"><?php esc_html_e( 'حفظ', 'olama-registration' ); ?></th>
-                        <th style="width:50px; text-align:center;"><?php esc_html_e( 'حذف', 'olama-registration' ); ?></th>
-                    </tr>
-                </thead>
-                <tbody id="olama-reg-fin-body">
-                    <?php
-                        $fin_rows = Olama_Reg_Financial::get_entitlements( $family_uid, $active_year_id );
-                        foreach ( $fin_rows as $row ) {
-                            include OLAMA_REG_PATH . 'admin/views/partial-fin-row.php';
-                        }
-                    ?>
-                </tbody>
-                <tfoot>
-                    <tr class="olama-reg-fin-totals" id="olama-reg-fin-totals">
-                        <?php
-                            $totals = Olama_Reg_Financial::get_totals( $family_uid, $active_year_id );
-                        ?>
-                        <td colspan="3"><strong><?php esc_html_e( 'المجموع الإجمالي', 'olama-registration' ); ?></strong></td>
-                        <td class="olama-reg-total" id="total-due"><?php echo number_format( (float)($totals->total_due ?? 0), 2 ); ?></td>
-                        <td class="olama-reg-total" id="total-paid"><?php echo number_format( (float)($totals->total_paid ?? 0), 2 ); ?></td>
-                        <td class="olama-reg-total" id="total-revolving"><?php echo number_format( (float)($totals->total_revolving ?? 0), 2 ); ?></td>
-                        <td class="olama-reg-total olama-reg-fin-balance" id="total-balance"><?php echo number_format( (float)($totals->total_balance ?? 0), 2 ); ?></td>
-                        <td colspan="4"></td>
-                    </tr>
-                </tfoot>
-            </table>
+        <!-- Summary Dashboard -->
+        <div class="olama-reg-dashboard-cards" style="display: flex; gap: 20px; margin-bottom: 30px;">
+            <div class="olama-reg-stat-card" style="flex:1; background:#fff; padding:20px; border-radius:12px; border:1px solid #e2e8f0; text-align:center;">
+                <h4 style="margin:0; color:#64748b; font-size:14px;"><?php esc_html_e('إجمالي الفواتير', 'olama-registration'); ?></h4>
+                <div style="font-size:28px; font-weight:800; color:#0f172a; margin-top:10px;">
+                    <?php echo number_format( (float)($summary->total_invoiced ?? 0), 2 ); ?>
+                </div>
+            </div>
+            <div class="olama-reg-stat-card" style="flex:1; background:#fff; padding:20px; border-radius:12px; border:1px solid #e2e8f0; text-align:center;">
+                <h4 style="margin:0; color:#64748b; font-size:14px;"><?php esc_html_e('إجمالي المحصل', 'olama-registration'); ?></h4>
+                <div style="font-size:28px; font-weight:800; color:#10b981; margin-top:10px;">
+                    <?php echo number_format( (float)($summary->total_paid ?? 0), 2 ); ?>
+                </div>
+            </div>
+            <div class="olama-reg-stat-card" style="flex:1; background:#fff; padding:20px; border-radius:12px; border:1px solid #e2e8f0; text-align:center;">
+                <h4 style="margin:0; color:#64748b; font-size:14px;"><?php esc_html_e('الذمم المستحقة', 'olama-registration'); ?></h4>
+                <div style="font-size:28px; font-weight:800; color:#ef4444; margin-top:10px;">
+                    <?php echo number_format( (float)($summary->balance ?? 0), 2 ); ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- Invoices List -->
+        <div class="olama-reg-invoices-list">
+            <?php if ( empty( $invoices ) ): ?>
+                <div class="olama-reg-empty-state">
+                    <span class="dashicons dashicons-media-document"></span>
+                    <p><?php esc_html_e( 'لا توجد فواتير مسجلة لهذه العائلة.', 'olama-registration' ); ?></p>
+                </div>
+            <?php else: ?>
+                <?php foreach ( $invoices as $inv ): 
+                    // Filter payments for this invoice
+                    $inv_payments = array_filter( $payments, fn($p) => (int)$p->invoice_id === (int)$inv->id );
+                    
+                    // Status Badge Logic
+                    $status_colors = [
+                        'draft'     => ['bg' => '#f1f5f9', 'text' => '#475569', 'label' => 'مسودة'],
+                        'issued'    => ['bg' => '#e0f2fe', 'text' => '#0369a1', 'label' => 'صادرة'],
+                        'partial'   => ['bg' => '#fef3c7', 'text' => '#b45309', 'label' => 'جزئية'],
+                        'paid'      => ['bg' => '#dcfce7', 'text' => '#15803d', 'label' => 'مدفوعة'],
+                        'overdue'   => ['bg' => '#fee2e2', 'text' => '#b91c1c', 'label' => 'متأخرة'],
+                        'cancelled' => ['bg' => '#f3f4f6', 'text' => '#374151', 'label' => 'ملغاة'],
+                    ];
+                    $st = $status_colors[ $inv->status ] ?? $status_colors['draft'];
+                ?>
+                <div class="olama-reg-invoice-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; margin-bottom:20px; overflow:hidden;">
+                    
+                    <!-- Invoice Header -->
+                    <div style="padding:20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #f1f5f9; background:#fafaf9;">
+                        <div>
+                            <div style="font-weight:700; color:#0f172a; font-size:16px;">
+                                <?php echo esc_html( $inv->invoice_number ); ?>
+                            </div>
+                            <div style="color:#64748b; font-size:13px; margin-top:5px;">
+                                <?php echo esc_html( $inv->issue_date ); ?> 
+                                <?php if($inv->due_date): ?> &middot; <?php esc_html_e('تاريخ الاستحقاق:', 'olama-registration'); ?> <?php echo esc_html($inv->due_date); ?><?php endif; ?>
+                            </div>
+                        </div>
+                        <div style="text-align:left;">
+                            <span style="display:inline-block; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; background:<?php echo $st['bg']; ?>; color:<?php echo $st['text']; ?>;">
+                                <?php echo esc_html( $st['label'] ); ?>
+                            </span>
+                            <div style="font-size:20px; font-weight:800; color:#0f172a; margin-top:5px;">
+                                <?php echo number_format( (float)$inv->total, 2 ); ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Payments Nested List -->
+                    <div style="padding:20px;">
+                        <?php if ( empty( $inv_payments ) ): ?>
+                            <p style="color:#94a3b8; font-size:13px; margin:0; text-align:center;">
+                                <?php esc_html_e( 'لم يتم تسجيل أي دفعات لهذه الفاتورة بعد.', 'olama-registration' ); ?>
+                            </p>
+                        <?php else: ?>
+                            <h5 style="margin:0 0 15px 0; color:#475569; font-size:14px; font-weight:700;">
+                                <span class="dashicons dashicons-money-alt" style="font-size:16px; margin-top:0;"></span>
+                                <?php esc_html_e( 'سجل الدفعات', 'olama-registration' ); ?>
+                            </h5>
+                            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                                <thead>
+                                    <tr style="border-bottom:1px solid #e2e8f0;">
+                                        <th style="padding:8px; text-align:right; color:#64748b; font-weight:600;"><?php esc_html_e('رقم السند', 'olama-registration'); ?></th>
+                                        <th style="padding:8px; text-align:right; color:#64748b; font-weight:600;"><?php esc_html_e('تاريخ القبض', 'olama-registration'); ?></th>
+                                        <th style="padding:8px; text-align:right; color:#64748b; font-weight:600;"><?php esc_html_e('طريقة الدفع', 'olama-registration'); ?></th>
+                                        <th style="padding:8px; text-align:left; color:#64748b; font-weight:600;"><?php esc_html_e('المبلغ', 'olama-registration'); ?></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ( $inv_payments as $pay ): 
+                                        $method_label = match($pay->method) {
+                                            'cash' => 'نقدي', 'bank_transfer' => 'حوالة', 'cheque' => 'شيك', 'online' => 'إلكتروني', default => 'أخرى'
+                                        };
+                                    ?>
+                                    <tr style="border-bottom:1px solid #f1f5f9;">
+                                        <td style="padding:8px;">#<?php echo esc_html($pay->id); ?></td>
+                                        <td style="padding:8px;"><?php echo esc_html($pay->payment_date); ?></td>
+                                        <td style="padding:8px;">
+                                            <span style="display:inline-block; background:#f0fdf4; color:#166534; padding:2px 8px; border-radius:4px; font-size:11px;">
+                                                <?php echo esc_html($method_label); ?>
+                                            </span>
+                                            <?php if($pay->reference): ?>
+                                                <div style="font-size:11px; color:#94a3b8; margin-top:2px;"><?php echo esc_html($pay->reference); ?></div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td style="padding:8px; text-align:left; font-weight:700; color:#10b981;">
+                                            <?php echo number_format((float)$pay->amount, 2); ?>
+                                            <?php if ( (float)$pay->amount > 0 && $pay->method !== 'reversal' ): ?>
+                                                <button class="button button-small olama-reg-reverse-payment-btn"
+                                                        data-id="<?php echo esc_attr( $pay->id ); ?>"
+                                                        title="<?php esc_attr_e( 'عكس السند', 'olama-registration' ); ?>"
+                                                        style="color:#c62828; border:none; background:none; padding:0; vertical-align:middle; margin-right:5px;">
+                                                    <span class="dashicons dashicons-undo" style="font-size:16px; width:16px; height:16px;"></span>
+                                                </button>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <!-- Invoice Footer Actions -->
+                    <div style="padding:12px 20px; background:#f8fafc; border-top:1px solid #f1f5f9; display:flex; justify-content:flex-end; gap:10px;">
+                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-invoices&action=view&id=' . $inv->id ) ); ?>" class="olama-reg-btn" style="background:#fff; border:1px solid #cbd5e1; color:#475569;">
+                            <span class="dashicons dashicons-visibility"></span> <?php esc_html_e('عرض الفاتورة', 'olama-registration'); ?>
+                        </a>
+                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-payments&action=new&invoice_id=' . $inv->id ) ); ?>" class="olama-reg-btn olama-reg-btn--primary">
+                            <span class="dashicons dashicons-plus"></span> <?php esc_html_e('تسجيل دفعة', 'olama-registration'); ?>
+                        </a>
+                        <?php if ( (float)$inv->amount_paid == 0 && $inv->status !== 'cancelled' ): ?>
+                            <button class="olama-reg-btn olama-reg-cancel-invoice-btn" data-id="<?php echo esc_attr( $inv->id ); ?>" style="background:#fff; border:1px solid #fca5a5; color:#dc2626;">
+                                <span class="dashicons dashicons-dismiss"></span> <?php esc_html_e('إلغاء الفاتورة', 'olama-registration'); ?>
+                            </button>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
         </div>
 
         <?php endif; // $f check ?>

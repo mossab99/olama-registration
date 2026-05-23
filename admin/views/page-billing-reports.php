@@ -75,7 +75,7 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
     </div>
 
     <!-- ── METRICS INDICATOR CARDS ──────────────────────────────────── -->
-    <div class="olama-reg-metrics-grid">
+    <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
 
         <div class="olama-reg-metric-card olama-reg-metric-card--primary">
             <div class="olama-reg-metric-icon">
@@ -114,6 +114,16 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
             <div class="olama-reg-metric-content">
                 <div class="olama-reg-metric-title"><?php esc_html_e( 'إجمالي الذمم المتأخرة', 'olama-registration' ); ?></div>
                 <div class="olama-reg-metric-value"><?php echo esc_html( number_format( $metrics['total_overdue'], 2 ) ); ?></div>
+            </div>
+        </div>
+
+        <div class="olama-reg-metric-card" style="background:#f1f5f9; border-left:4px solid #94a3b8;">
+            <div class="olama-reg-metric-icon" style="background:#e2e8f0; color:#64748b;">
+                <span class="dashicons dashicons-tag"></span>
+            </div>
+            <div class="olama-reg-metric-content">
+                <div class="olama-reg-metric-title"><?php esc_html_e( 'إجمالي الخصومات الممنوحة', 'olama-registration' ); ?></div>
+                <div class="olama-reg-metric-value" style="color:#475569;"><?php echo esc_html( number_format( $metrics['total_discount'], 2 ) ); ?></div>
             </div>
         </div>
 

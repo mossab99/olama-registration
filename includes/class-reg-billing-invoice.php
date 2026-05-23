@@ -288,6 +288,33 @@ class Olama_Reg_Billing_Invoice {
         return false !== $result;
     }
 
+    /**
+     * Cancel (Void) an invoice. Blocked if payments exist.
+     */
+    public static function cancel( int $id ): bool|\WP_Error {
+        global $wpdb;
+
+        $inv = self::get_invoice( $id );
+        if ( ! $inv ) {
+            return new \WP_Error( 'not_found', __( 'Invoice not found.', 'olama-registration' ) );
+        }
+
+        if ( (float) $inv->amount_paid > 0 ) {
+            return new \WP_Error( 'has_payments', __( 'لا يمكن إلغاء فاتورة مسددة جزئياً أو كلياً. يرجى عكس السندات أولاً.', 'olama-registration' ) );
+        }
+
+        if ( $inv->status === 'cancelled' ) {
+            return true;
+        }
+
+        $wpdb->update( self::t( 'olama_invoices' ), [ 'status' => 'cancelled' ], [ 'id' => $id ] );
+        $wpdb->update( self::t( 'olama_invoice_installments' ), [ 'status' => 'cancelled' ], [ 'invoice_id' => $id ] );
+
+        self::log_audit( 'invoice', $id, 'cancelled', $inv, self::get_invoice( $id ) );
+
+        return true;
+    }
+
     // ── Totals recalculation ──────────────────────────────────────────────────
 
     /**
@@ -330,6 +357,8 @@ class Olama_Reg_Billing_Invoice {
                 $status = 'partial';
             } elseif ( ! empty( $inv->due_date ) && $inv->due_date < date( 'Y-m-d' ) ) {
                 $status = 'overdue';
+            } else {
+                $status = 'issued';
             }
         }
 
@@ -339,6 +368,7 @@ class Olama_Reg_Billing_Invoice {
                 'subtotal'    => round( $subtotal, 2 ),
                 'total'       => round( $total, 2 ),
                 'amount_paid' => round( $amount_paid, 2 ),
+                'balance'     => round( $balance, 2 ),
                 'status'      => $status,
             ],
             [ 'id' => $id ]

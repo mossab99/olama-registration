@@ -34,6 +34,7 @@ class Olama_Reg_Billing_Reports {
             COALESCE(SUM(total), 0) AS total_invoiced,
             COALESCE(SUM(amount_paid), 0) AS total_collected,
             COALESCE(SUM(balance), 0) AS total_receivables,
+            COALESCE(SUM(discount), 0) AS total_discount,
             COALESCE(SUM(CASE WHEN due_date < CURDATE() AND balance > 0 AND status NOT IN ('paid', 'cancelled') THEN balance ELSE 0 END), 0) AS total_overdue
             FROM " . self::t( 'olama_invoices' ) . "
             WHERE {$where}";
@@ -48,6 +49,7 @@ class Olama_Reg_Billing_Reports {
             'total_invoiced'    => (float) ( $row->total_invoiced ?? 0 ),
             'total_collected'   => (float) ( $row->total_collected ?? 0 ),
             'total_receivables' => (float) ( $row->total_receivables ?? 0 ),
+            'total_discount'    => (float) ( $row->total_discount ?? 0 ),
             'total_overdue'     => (float) ( $row->total_overdue ?? 0 ),
         ];
     }

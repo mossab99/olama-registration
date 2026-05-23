@@ -80,8 +80,12 @@ if ( $action === 'print' && $id ) {
             <table class="header-table">
                 <tr>
                     <td>
-                        <div class="logo-title">مدارس أوتاد الإبداع</div>
-                        <div style="font-size: 12px; color: #6B7280; margin-top:4px;">قسم الشؤون المالية والرسوم</div>
+                        <?php 
+                        $school_settings = get_option('olama_school_settings', []);
+                        $school_name = $school_settings['school_name_ar'] ?? 'مدارس أوتاد الإبداع';
+                        ?>
+                        <div class="logo-title"><?php echo esc_html( $school_name ); ?></div>
+                        <div style="font-size: 11px; color:#6B7280; margin-top:4px;">إيصال مطالبة مالية - نسخة لولي الأمر</div>
                     </td>
                     <td style="text-align: left;">
                         <div class="invoice-title">فاتورة رسوم</div>
@@ -399,6 +403,7 @@ $_inv_stats = $wpdb->get_row(
                         <th><?php esc_html_e( 'ولي الأمر', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'تاريخ الإصدار', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'الإجمالي', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'الخصم', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'المدفوع', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'المتبقي', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'الحالة', 'olama-registration' ); ?></th>
@@ -446,6 +451,7 @@ $_inv_stats = $wpdb->get_row(
                                 <td><?php echo esc_html( $inv->father_first_name . ' ' . $inv->father_family_name ); ?></td>
                                 <td style="color:var(--reg-text-muted);"><?php echo esc_html( $inv->issue_date ); ?></td>
                                 <td class="olama-reg-text--bold"><?php echo esc_html( number_format( $inv->total, 2 ) ); ?></td>
+                                <td style="color:#c62828; font-weight:700;"><?php echo esc_html( number_format( $inv->discount ?? 0, 2 ) ); ?></td>
                                 <td style="color:var(--reg-success); font-weight:700;"><?php echo esc_html( number_format( $inv->amount_paid, 2 ) ); ?></td>
                                 <td class="olama-reg-balance-cell"><?php echo esc_html( number_format( $inv->balance, 2 ) ); ?></td>
                                 <td>
@@ -464,6 +470,14 @@ $_inv_stats = $wpdb->get_row(
                                        title="<?php esc_attr_e( 'طباعة الفاتورة', 'olama-registration' ); ?>">
                                         <span class="dashicons dashicons-printer"></span>
                                     </a>
+                                    <?php if ( (float)$inv->amount_paid == 0 && $inv->status !== 'cancelled' ): ?>
+                                        <button class="button button-small olama-reg-cancel-invoice-btn"
+                                                data-id="<?php echo esc_attr( $inv->id ); ?>"
+                                                title="<?php esc_attr_e( 'إلغاء الفاتورة', 'olama-registration' ); ?>"
+                                                style="color:#c62828;">
+                                            <span class="dashicons dashicons-dismiss"></span>
+                                        </button>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -615,10 +629,14 @@ $_inv_stats = $wpdb->get_row(
             
             <div class="olama-reg-modal-body">
                 <!-- Header metrics -->
-                <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 20px;">
+                <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 20px;">
                     <div class="olama-reg-metric-card olama-reg-metric-card--primary" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                         <div class="olama-reg-metric-title"><?php esc_html_e( 'قيمة الفاتورة', 'olama-registration' ); ?></div>
                         <div id="drawer-total-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                    </div>
+                    <div class="olama-reg-metric-card" style="background:#fff3f3; border-left:4px solid #ef4444; padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                        <div class="olama-reg-metric-title"><?php esc_html_e( 'الخصم الممنوح', 'olama-registration' ); ?></div>
+                        <div id="drawer-discount-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0; color:#ef4444;">0.00</div>
                     </div>
                     <div class="olama-reg-metric-card olama-reg-metric-card--success" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                         <div class="olama-reg-metric-title"><?php esc_html_e( 'المجموع المدفوع', 'olama-registration' ); ?></div>

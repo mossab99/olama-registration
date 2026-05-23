@@ -103,6 +103,64 @@ class Olama_Reg_Billing_Payment {
         return $payment_id;
     }
 
+    /**
+     * Reverse a payment by inserting a negative counterpart and recalculating installments.
+     */
+    public static function reverse( int $id, string $notes = '' ): int|\WP_Error {
+        global $wpdb;
+
+        $payment = self::get_payment_row( $id );
+        if ( ! $payment ) {
+            return new \WP_Error( 'not_found', __( 'Payment not found.', 'olama-registration' ) );
+        }
+
+        if ( (float) $payment->amount <= 0 || $payment->method === 'reversal' ) {
+            return new \WP_Error( 'already_reversed', __( 'لا يمكن عكس هذا السند.', 'olama-registration' ) );
+        }
+
+        // Check if already reversed
+        $exists = $wpdb->get_var( $wpdb->prepare(
+            "SELECT id FROM " . self::t( 'olama_payments' ) . " WHERE reference = %s",
+            'REVERSAL-' . $id
+        ) );
+        if ( $exists ) {
+            return new \WP_Error( 'already_reversed', __( 'السند معكوس مسبقاً.', 'olama-registration' ) );
+        }
+
+        $payload = [
+            'invoice_id'     => $payment->invoice_id,
+            'installment_id' => $payment->installment_id,
+            'family_uid'     => $payment->family_uid,
+            'payment_date'   => date( 'Y-m-d' ),
+            'amount'         => -1 * (float) $payment->amount,
+            'method'         => 'reversal',
+            'reference'      => 'REVERSAL-' . $id,
+            'received_by'    => get_current_user_id(),
+            'notes'          => sanitize_textarea_field( $notes ) ?: __( 'عكس سند قبض رقم', 'olama-registration' ) . ' #' . $id,
+        ];
+
+        $wpdb->query( 'START TRANSACTION' );
+
+        $result = $wpdb->insert( self::t( 'olama_payments' ), $payload );
+        if ( ! $result ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new \WP_Error( 'db_error', $wpdb->last_error );
+        }
+        $new_payment_id = (int) $wpdb->insert_id;
+
+        // Reset all installments and recalculate
+        self::reallocate_all_installments( (int) $payment->invoice_id );
+
+        // Recalculate invoice totals
+        Olama_Reg_Billing_Invoice::recalculate_totals( (int) $payment->invoice_id );
+
+        $wpdb->query( 'COMMIT' );
+
+        self::log_audit( 'payment', $id, 'reversed', $payment, self::get_payment_row( $id ) );
+
+        return $new_payment_id;
+    }
+
     // ── Read ──────────────────────────────────────────────────────────────────
 
     public static function get_invoice_payments( int $invoice_id ): array {
@@ -173,6 +231,67 @@ class Olama_Reg_Billing_Payment {
 
             $apply = min( $remaining, $outstanding );
             $new_paid = round( (float) $inst->amount_paid + $apply, 2 );
+            $remaining = round( $remaining - $apply, 2 );
+
+            $new_status = 'partial';
+            if ( $new_paid >= (float) $inst->amount_due ) {
+                $new_status = 'paid';
+            } elseif ( ! empty( $inst->due_date ) && $inst->due_date < date( 'Y-m-d' ) ) {
+                $new_status = 'overdue';
+            }
+
+            $wpdb->update(
+                self::t( 'olama_invoice_installments' ),
+                [
+                    'amount_paid' => $new_paid,
+                    'status'      => $new_status,
+                ],
+                [ 'id' => (int) $inst->id ]
+            );
+        }
+    }
+
+    /**
+     * Completely recalculates all installment allocations for an invoice.
+     * Used when a payment is reversed to ensure accuracy.
+     */
+    public static function reallocate_all_installments( int $invoice_id ): void {
+        global $wpdb;
+
+        // 1. Reset all installments amount_paid = 0 and status based on due_date
+        $wpdb->query( $wpdb->prepare(
+            "UPDATE " . self::t( 'olama_invoice_installments' ) . " 
+             SET amount_paid = 0, 
+                 status = IF(due_date < CURDATE(), 'overdue', 'pending')
+             WHERE invoice_id = %d",
+            $invoice_id
+        ) );
+
+        // 2. Get net sum of all payments for this invoice
+        $net_paid = (float) $wpdb->get_var( $wpdb->prepare(
+            "SELECT SUM(amount) FROM " . self::t( 'olama_payments' ) . " WHERE invoice_id = %d",
+            $invoice_id
+        ) );
+
+        if ( $net_paid <= 0 ) return;
+
+        // 3. Re-apply to installments in order
+        $installments = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM " . self::t( 'olama_invoice_installments' ) . "
+             WHERE invoice_id = %d
+             ORDER BY installment_no ASC",
+            $invoice_id
+        ) );
+
+        $remaining = $net_paid;
+        foreach ( $installments as $inst ) {
+            if ( $remaining <= 0 ) break;
+
+            $outstanding = (float) $inst->amount_due;
+            if ( $outstanding <= 0 ) continue;
+
+            $apply = min( $remaining, $outstanding );
+            $new_paid = $apply;
             $remaining = round( $remaining - $apply, 2 );
 
             $new_status = 'partial';

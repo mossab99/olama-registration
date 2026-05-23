@@ -26,10 +26,6 @@ $table->prepare_items();
             <span class="dashicons dashicons-id-alt"></span>
             <?php esc_html_e( 'العائلات المسجلة', 'olama-registration' ); ?>
         </h1>
-        <a href="<?php echo esc_url( add_query_arg( [ 'page' => 'olama-registration', 'action' => 'edit' ], admin_url( 'admin.php' ) ) ); ?>"
-           class="page-title-action olama-reg-btn olama-reg-btn--primary">
-            + <?php esc_html_e( 'إضافة عائلة جديدة', 'olama-registration' ); ?>
-        </a>
     </div>
 
     <!-- Notice area -->

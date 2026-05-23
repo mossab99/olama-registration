@@ -9,14 +9,9 @@ class Olama_Reg_Ajax {
 
     public function __construct() {
         $actions = [
-            'olama_reg_save_family',
             'olama_reg_get_family',
-            'olama_reg_soft_delete_family',
-            'olama_reg_save_student',
             'olama_reg_get_student',
-            'olama_reg_save_academic_history',
-            'olama_reg_delete_history_row',
-            'olama_reg_save_transport',
+
             'olama_reg_save_financial_row',
             'olama_reg_delete_financial_row',
             'olama_reg_get_financial',
@@ -27,9 +22,13 @@ class Olama_Reg_Ajax {
             'olama_reg_create_invoice',
             'olama_reg_update_invoice',
             'olama_reg_get_invoice',
+            'olama_reg_cancel_invoice',
             'olama_reg_record_payment',
+            'olama_reg_reverse_payment',
             'olama_reg_get_receipt',
             'olama_reg_get_family_billing',
+            'olama_reg_get_family_students',
+            'olama_reg_save_custom_payment',
         ];
 
         foreach ( $actions as $action ) {
@@ -49,33 +48,6 @@ class Olama_Reg_Ajax {
 
     // ── Family ────────────────────────────────────────────────────────────────
 
-    public function ajax_save_family(): void {
-        $this->guard();
-
-        $family_uid = sanitize_text_field( $_POST['family_uid'] ?? '' );
-        $data       = $_POST;
-
-        if ( $family_uid ) {
-            $result = Olama_Reg_Family::update( $family_uid, $data );
-        } else {
-            $result = Olama_Reg_Family::create( $data );
-            if ( ! is_wp_error( $result ) ) {
-                $family_uid = $result;
-            }
-        }
-
-        if ( is_wp_error( $result ) ) {
-            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
-        }
-
-        $family = Olama_Reg_Family::get_family( $family_uid );
-        wp_send_json_success( [
-            'message'    => __( 'Family saved successfully.', 'olama-registration' ),
-            'family_uid' => $family_uid,
-            'family'     => $family,
-        ] );
-    }
-
     public function ajax_get_family(): void {
         $this->guard();
 
@@ -94,51 +66,9 @@ class Olama_Reg_Ajax {
         ] );
     }
 
-    public function ajax_soft_delete_family(): void {
-        $this->guard();
 
-        $family_uid = sanitize_text_field( $_POST['family_uid'] ?? '' );
-        $result     = Olama_Reg_Family::soft_delete( $family_uid );
-
-        if ( ! $result ) {
-            wp_send_json_error( [ 'message' => __( 'Could not deactivate family.', 'olama-registration' ) ] );
-        }
-
-        wp_send_json_success( [ 'message' => __( 'Family deactivated.', 'olama-registration' ) ] );
-    }
 
     // ── Student ───────────────────────────────────────────────────────────────
-
-    public function ajax_save_student(): void {
-        $this->guard();
-
-        $student_uid = sanitize_text_field( $_POST['student_uid'] ?? '' );
-        $family_uid  = sanitize_text_field( $_POST['family_uid']  ?? '' );
-        $data        = $_POST;
-
-        if ( $student_uid ) {
-            $result = Olama_Reg_Student::update( $student_uid, $data );
-        } else {
-            if ( ! $family_uid ) {
-                wp_send_json_error( [ 'message' => __( 'Family UID is required to create a student.', 'olama-registration' ) ] );
-            }
-            $result = Olama_Reg_Student::create( $family_uid, $data );
-            if ( ! is_wp_error( $result ) ) {
-                $student_uid = $result;
-            }
-        }
-
-        if ( is_wp_error( $result ) ) {
-            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
-        }
-
-        $student = Olama_Reg_Student::get_student( $student_uid );
-        wp_send_json_success( [
-            'message'     => __( 'Student saved successfully.', 'olama-registration' ),
-            'student_uid' => $student_uid,
-            'student'     => $student,
-        ] );
-    }
 
     public function ajax_get_student(): void {
         $this->guard();
@@ -157,73 +87,13 @@ class Olama_Reg_Ajax {
             if ( $ay ) $active_year_id = (int) $ay->id;
         }
 
-        $history   = Olama_Reg_Academic_History::get_history( $student_uid );
-        $transport = Olama_Reg_Transport::get_transport( $student_uid, $active_year_id );
-
         wp_send_json_success( [
             'student'   => $student,
-            'history'   => $history,
-            'transport' => $transport,
             'photo_url' => Olama_Reg_Student::get_student_photo_url( (int) ( $student->photo_attachment_id ?? 0 ) ),
         ] );
     }
 
-    // ── Academic History ──────────────────────────────────────────────────────
 
-    public function ajax_save_academic_history(): void {
-        $this->guard();
-
-        $result = Olama_Reg_Academic_History::save_row( $_POST );
-
-        if ( is_wp_error( $result ) ) {
-            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
-        }
-
-        $history = Olama_Reg_Academic_History::get_history( sanitize_text_field( $_POST['student_uid'] ) );
-        wp_send_json_success( [
-            'message' => __( 'History saved.', 'olama-registration' ),
-            'id'      => $result,
-            'history' => $history,
-        ] );
-    }
-
-    public function ajax_delete_history_row(): void {
-        $this->guard();
-
-        $id     = (int) ( $_POST['id'] ?? 0 );
-        $result = Olama_Reg_Academic_History::delete_row( $id );
-
-        if ( ! $result ) {
-            wp_send_json_error( [ 'message' => __( 'Could not delete row.', 'olama-registration' ) ] );
-        }
-
-        wp_send_json_success( [ 'message' => __( 'Row deleted.', 'olama-registration' ) ] );
-    }
-
-    // ── Transport ─────────────────────────────────────────────────────────────
-
-    public function ajax_save_transport(): void {
-        $this->guard();
-
-        $student_uid      = sanitize_text_field( $_POST['student_uid']      ?? '' );
-        $academic_year_id = (int) ( $_POST['academic_year_id'] ?? 0 );
-
-        if ( ! $academic_year_id && class_exists( 'Olama_School_Academic' ) ) {
-            $ay = Olama_School_Academic::get_active_year();
-            if ( $ay ) $academic_year_id = (int) $ay->id;
-        }
-
-        $result = Olama_Reg_Transport::save_transport( $student_uid, $academic_year_id, $_POST );
-
-        if ( is_wp_error( $result ) ) {
-            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
-        }
-
-        wp_send_json_success( [
-            'message'   => __( 'Transport data saved.', 'olama-registration' ),
-            'transport' => Olama_Reg_Transport::get_transport( $student_uid, $academic_year_id ),
-        ] );
-    }
 
     // ── Financial ─────────────────────────────────────────────────────────────
 
@@ -397,6 +267,20 @@ class Olama_Reg_Ajax {
         wp_send_json_success( [ 'invoice' => $invoice ] );
     }
 
+    public function ajax_cancel_invoice(): void {
+        $this->guard();
+        $id     = (int) ( $_POST['id'] ?? 0 );
+        $result = Olama_Reg_Billing_Invoice::cancel( $id );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => __( 'تم إلغاء الفاتورة بنجاح.', 'olama-registration' ),
+        ] );
+    }
+
     // ── Billing - Payments ────────────────────────────────────────────────────
 
     public function ajax_record_payment(): void {
@@ -409,6 +293,22 @@ class Olama_Reg_Ajax {
 
         wp_send_json_success( [
             'message'    => __( 'Payment recorded successfully.', 'olama-registration' ),
+            'payment_id' => $result,
+        ] );
+    }
+
+    public function ajax_reverse_payment(): void {
+        $this->guard();
+        $id     = (int) ( $_POST['id'] ?? 0 );
+        $notes  = sanitize_textarea_field( $_POST['notes'] ?? '' );
+        $result = Olama_Reg_Billing_Payment::reverse( $id, $notes );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message'    => __( 'تم عكس السند بنجاح.', 'olama-registration' ),
             'payment_id' => $result,
         ] );
     }
@@ -444,6 +344,100 @@ class Olama_Reg_Ajax {
             'invoices' => $invoices,
             'payments' => $payments,
             'summary'  => $summary,
+        ] );
+    }
+
+    // ── Custom Payments ────────────────────────────────────────────────────────
+
+    public function ajax_get_family_students(): void {
+        $this->guard();
+        $family_uid = sanitize_text_field( $_POST['family_uid'] ?? '' );
+        if ( ! $family_uid ) {
+            wp_send_json_error( [ 'message' => __( 'Missing family UID.', 'olama-registration' ) ] );
+        }
+        
+        $students = Olama_Reg_Student::get_family_students( $family_uid );
+        wp_send_json_success( [ 'students' => $students ] );
+    }
+
+    public function ajax_save_custom_payment(): void {
+        $this->guard();
+        global $wpdb;
+
+        $family_uid   = sanitize_text_field( $_POST['family_uid'] ?? '' );
+        $student_uids = isset( $_POST['student_uids'] ) && is_array( $_POST['student_uids'] ) ? array_map( 'sanitize_text_field', $_POST['student_uids'] ) : [];
+        $service_type = sanitize_text_field( $_POST['service_type'] ?? '' );
+        $amount       = (float) ( $_POST['amount'] ?? 0 );
+        $discount     = (float) ( $_POST['discount'] ?? 0 );
+        $fee_template = absint( $_POST['fee_template_id'] ?? 0 );
+        $payment_meth = sanitize_text_field( $_POST['payment_method'] ?? 'cash' );
+
+        if ( ! $family_uid || empty( $student_uids ) || ! $service_type || $amount <= 0 ) {
+            wp_send_json_error( [ 'message' => __( 'بيانات غير مكتملة. تأكد من تحديد الطلاب وتحديد قيمة الدفعة.', 'olama-registration' ) ] );
+        }
+
+        // Build line items
+        $items = [];
+        foreach ( $student_uids as $s_uid ) {
+            $student = Olama_Reg_Student::get_student( $s_uid );
+            $s_name  = $student ? trim( $student->student_name ) : $s_uid;
+            
+            $items[] = [
+                'description' => sprintf( '%s - %s', $service_type, $s_name ),
+                'quantity'    => 1,
+                'unit_price'  => $amount,
+            ];
+        }
+
+        $total_amount = max( 0, ( count( $student_uids ) * $amount ) - $discount );
+
+        $academic_year_id = 0;
+        if ( class_exists( 'Olama_School_Academic' ) ) {
+            $active_year = Olama_School_Academic::get_active_year();
+            if ( $active_year ) {
+                $academic_year_id = (int) $active_year->id;
+            }
+        }
+
+        // 1. Create Invoice
+        $invoice_data = [
+            'family_uid'       => $family_uid,
+            'academic_year_id' => $academic_year_id,
+            'fee_template_id'  => $fee_template ?: null,
+            'issue_date'       => date( 'Y-m-d' ),
+            'status'           => 'issued',
+            'notes'            => 'رسوم خدمة إضافية: ' . $service_type,
+            'items'            => $items,
+            'discount'         => $discount,
+        ];
+
+        $invoice_id = Olama_Reg_Billing_Invoice::create( $invoice_data );
+
+        if ( is_wp_error( $invoice_id ) ) {
+            wp_send_json_error( [ 'message' => $invoice_id->get_error_message() ] );
+        }
+
+        // 2. Register Payment
+        $payment_data = [
+            'family_uid'   => $family_uid,
+            'invoice_id'   => $invoice_id,
+            'amount'       => $total_amount,
+            'payment_date' => date( 'Y-m-d' ),
+            'method'       => $payment_meth,
+            'reference'    => '',
+            'notes'        => 'دفعة مقبوضة عن خدمات إضافية: ' . $service_type,
+        ];
+
+        $payment_id = Olama_Reg_Billing_Payment::record( $payment_data );
+
+        if ( is_wp_error( $payment_id ) ) {
+            wp_send_json_error( [ 'message' => $payment_id->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message'    => __( 'تم تسجيل الفاتورة وإصدار السند بنجاح.', 'olama-registration' ),
+            'invoice_id' => $invoice_id,
+            'payment_id' => $payment_id,
         ] );
     }
 }
