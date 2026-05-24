@@ -21,13 +21,55 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
                 1. اختيار العائلة والطلاب
             </div>
 
-            <!-- Family Search -->
-            <div style="margin-bottom: 20px;">
+            <!-- Customer Type Toggle -->
+            <div style="margin-bottom: 20px; padding: 15px; background: #f1f5f9; border-radius: 8px; border: 1px solid #cbd5e1;">
+                <label style="display: block; font-weight: 700; margin-bottom: 10px; color: var(--reg-primary);">نوع العميل:</label>
+                <div style="display: flex; gap: 20px;">
+                    <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                        <input type="radio" name="customer_type" value="internal" checked> 
+                        عائلة مسجلة (Internal)
+                    </label>
+                    <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                        <input type="radio" name="customer_type" value="external"> 
+                        عميل خارجي (Walk-in/External)
+                    </label>
+                </div>
+            </div>
+
+            <!-- Family Search (Internal) -->
+            <div id="cp_internal_customer_wrap" style="margin-bottom: 20px;">
                 <label style="display: block; font-weight: 700; margin-bottom: 8px; color: var(--reg-primary);">بحث عن العائلة:</label>
-                <select id="cp_family_search" class="olama-reg-family-search" style="width:100%;" required>
+                <select id="cp_family_search" class="olama-reg-family-search" style="width:100%;">
                     <option value="">-- ابحث باسم الأب، الأم، أو رقم العائلة --</option>
                 </select>
                 <input type="hidden" id="cp_family_uid" name="family_uid" />
+            </div>
+
+            <!-- External Customer Fields -->
+            <div id="cp_external_customer_wrap" style="display: none; margin-bottom: 20px; padding: 15px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; font-weight: 700; margin-bottom: 5px; color: var(--reg-primary);">اسم العميل الخارجي (الأب/الأم) <span style="color:red">*</span></label>
+                        <input type="text" id="cp_ext_name" class="regular-text" style="width:100%;" placeholder="مثال: سارة محمد">
+                    </div>
+                    <div>
+                        <label style="display: block; font-weight: 700; margin-bottom: 5px; color: var(--reg-primary);">رقم الهاتف <span style="color:red">*</span></label>
+                        <input type="text" id="cp_ext_phone" class="regular-text" style="width:100%;" placeholder="مثال: 0791234567">
+                    </div>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 15px 0;">
+                
+                <label style="display: block; font-weight: 700; margin-bottom: 10px; color: var(--reg-primary);">إضافة أبناء للعميل الخارجي <span style="color:red">*</span></label>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="cp_ext_child_name" placeholder="اسم الابن/الابنة" class="regular-text" style="flex: 2;">
+                    <input type="text" id="cp_ext_child_grade" placeholder="الصف / المرحلة (اختياري)" class="regular-text" style="flex: 1;">
+                    <button type="button" id="cp_ext_add_child_btn" class="button button-secondary">إضافة ابن</button>
+                </div>
+
+                <div id="cp_ext_students_list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">
+                    <!-- External children appended here via JS -->
+                </div>
             </div>
 
             <!-- Students Container -->

@@ -91,6 +91,15 @@ class Olama_Reg_Admin {
 
         add_submenu_page(
             'olama-registration',
+            __( 'Settlement Receipts', 'olama-registration' ),
+            __( 'إيصالات التسوية', 'olama-registration' ),
+            'olama_manage_registration_payments',
+            'olama-registration-settlements',
+            [ $this, 'render_settlements' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
             __( 'Settings', 'olama-registration' ),
             __( 'الإعدادات', 'olama-registration' ),
             'manage_options',
@@ -144,6 +153,18 @@ class Olama_Reg_Admin {
     public function render_custom_payments(): void {
         if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-custom-payments.php';
+    }
+
+    public function render_settlements(): void {
+        if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+
+        $action = sanitize_text_field( $_GET['action'] ?? '' );
+        if ( $action === 'print' ) {
+            include OLAMA_REG_PATH . 'admin/views/partial-print-settlement.php';
+            return;
+        }
+
+        include OLAMA_REG_PATH . 'admin/views/page-settlements.php';
     }
 
     public function render_settings(): void {

@@ -60,6 +60,7 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-invoice.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-payment.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-reports.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-settlement.php';
 
     // ── Load admin ───────────────────────────────────────────────────────────
     if ( is_admin() ) {

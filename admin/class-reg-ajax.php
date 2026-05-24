@@ -29,6 +29,10 @@ class Olama_Reg_Ajax {
             'olama_reg_get_family_billing',
             'olama_reg_get_family_students',
             'olama_reg_save_custom_payment',
+            'olama_reg_create_settlement',
+            'olama_reg_settle_receipt',
+            'olama_reg_cancel_settlement',
+            'olama_reg_create_external_customer',
         ];
 
         foreach ( $actions as $action ) {
@@ -66,7 +70,115 @@ class Olama_Reg_Ajax {
         ] );
     }
 
+    public function ajax_create_external_customer(): void {
+        try {
+            $this->guard();
 
+            $name  = sanitize_text_field( $_POST['name'] ?? '' );
+            $phone = sanitize_text_field( $_POST['phone'] ?? '' );
+
+            if ( empty( $name ) || empty( $phone ) ) {
+                wp_send_json_error( [ 'message' => __( 'Name and Phone are required.', 'olama-registration' ) ] );
+            }
+
+            global $wpdb;
+            $table = $wpdb->prefix . 'olama_families';
+
+            // Check if phone exists in father_mobile or mother_mobile
+            $existing = $wpdb->get_row( $wpdb->prepare(
+                "SELECT family_uid, family_name FROM {$table} WHERE father_mobile = %s OR mother_mobile = %s LIMIT 1",
+                $phone, $phone
+            ) );
+
+            $children = json_decode( stripslashes( $_POST['children'] ?? '[]' ), true );
+            $student_uids = [];
+
+            if ( $existing ) {
+                // Prevent linking to internal families
+                if ( strpos( $existing->family_name, '[Ext]' ) === false && strpos( $existing->family_name, '(External)' ) === false ) {
+                    wp_send_json_error( [ 'message' => __( 'رقم الهاتف هذا مستخدم بالفعل لعائلة مسجلة مسبقاً. يرجى استخدام نافذة (عائلة مسجلة) أو إدخال رقم مختلف.', 'olama-registration' ) ] );
+                }
+
+                $family_uid = $existing->family_uid;
+                $is_new = false;
+            } else {
+                // Generate a new family UID
+                if (!class_exists('Olama_Reg_ID_Generator')) {
+                    wp_send_json_error( [ 'message' => 'Id generator class not found' ] );
+                }
+                $family_uid = Olama_Reg_ID_Generator::next_family_uid();
+
+                if ( ! $family_uid ) {
+                    wp_send_json_error( [ 'message' => __( 'Could not generate family UID.', 'olama-registration' ) ] );
+                }
+
+                // Insert new external customer
+                $inserted = $wpdb->insert(
+                    $table,
+                    [
+                        'family_uid'         => $family_uid,
+                        'family_name'        => $name . ' [Ext]',
+                        'father_first_name'  => $name,
+                        'father_mobile'      => $phone,
+                    ],
+                    [ '%s', '%s', '%s', '%s' ]
+                );
+
+                if ( ! $inserted ) {
+                    wp_send_json_error( [ 'message' => 'Insert Family Error: ' . $wpdb->last_error ] );
+                }
+                $is_new = true;
+            }
+
+            // Process children
+            if ( is_array( $children ) && ! empty( $children ) ) {
+                $students_table = $wpdb->prefix . 'olama_students';
+                foreach ( $children as $child ) {
+                    $child_name = sanitize_text_field( $child['name'] ?? '' );
+                    if ( empty( $child_name ) ) continue;
+                    
+                    $child_grade = sanitize_text_field( $child['grade'] ?? '' );
+                    $full_child_name = $child_name . ' [Ext]';
+
+                    // Check if this exact external child already exists for this family
+                    $existing_child = $wpdb->get_row( $wpdb->prepare(
+                        "SELECT student_uid FROM {$students_table} WHERE family_id = %s AND student_name = %s LIMIT 1",
+                        $family_uid, $full_child_name
+                    ) );
+
+                    if ( $existing_child ) {
+                        $student_uids[] = $existing_child->student_uid;
+                    } else {
+                        $new_student_uid = uniqid( 'ext_stu_' );
+                        $inserted_student = $wpdb->insert(
+                            $students_table,
+                            [
+                                'student_uid'  => $new_student_uid,
+                                'family_id'    => $family_uid,
+                                'student_name' => $full_child_name,
+                                'national_id'  => $child_grade,
+                                'is_active'    => 1,
+                            ],
+                            [ '%s', '%s', '%s', '%s', '%d' ]
+                        );
+                        if (!$inserted_student) {
+                            wp_send_json_error( [ 'message' => 'Insert Student Error: ' . $wpdb->last_error ] );
+                        }
+                        $student_uids[] = $new_student_uid;
+                    }
+                }
+            }
+
+            wp_send_json_success( [
+                'message'      => __( 'External customer processed successfully.', 'olama-registration' ),
+                'family_uid'   => $family_uid,
+                'student_uids' => $student_uids,
+                'is_new'       => $is_new,
+            ] );
+        } catch (\Throwable $e) {
+            wp_send_json_error([ 'message' => 'Exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() ]);
+        }
+    }
 
     // ── Student ───────────────────────────────────────────────────────────────
 
@@ -371,25 +483,40 @@ class Olama_Reg_Ajax {
         $discount     = (float) ( $_POST['discount'] ?? 0 );
         $fee_template = absint( $_POST['fee_template_id'] ?? 0 );
         $payment_meth = sanitize_text_field( $_POST['payment_method'] ?? 'cash' );
+        $is_external  = ! empty( $_POST['is_external'] );
 
-        if ( ! $family_uid || empty( $student_uids ) || ! $service_type || $amount <= 0 ) {
-            wp_send_json_error( [ 'message' => __( 'بيانات غير مكتملة. تأكد من تحديد الطلاب وتحديد قيمة الدفعة.', 'olama-registration' ) ] );
-        }
-
-        // Build line items
         $items = [];
-        foreach ( $student_uids as $s_uid ) {
-            $student = Olama_Reg_Student::get_student( $s_uid );
-            $s_name  = $student ? trim( $student->student_name ) : $s_uid;
-            
+        $total_amount = 0;
+
+        if ( ! $is_external ) {
+            if ( ! $family_uid || empty( $student_uids ) || ! $service_type || $amount <= 0 ) {
+                wp_send_json_error( [ 'message' => __( 'بيانات غير مكتملة. تأكد من تحديد الطلاب وتحديد قيمة الدفعة.', 'olama-registration' ) ] );
+            }
+
+            // Build line items
+            foreach ( $student_uids as $s_uid ) {
+                $student = Olama_Reg_Student::get_student( $s_uid );
+                $s_name  = $student ? trim( $student->student_name ) : $s_uid;
+                
+                $items[] = [
+                    'description' => sprintf( '%s - %s', $service_type, $s_name ),
+                    'quantity'    => 1,
+                    'unit_price'  => $amount,
+                ];
+            }
+
+            $total_amount = max( 0, ( count( $student_uids ) * $amount ) - $discount );
+        } else {
+            if ( ! $family_uid || ! $service_type || $amount <= 0 ) {
+                wp_send_json_error( [ 'message' => __( 'بيانات غير مكتملة. تأكد من تحديد نوع الخدمة وقيمة الدفعة.', 'olama-registration' ) ] );
+            }
             $items[] = [
-                'description' => sprintf( '%s - %s', $service_type, $s_name ),
+                'description' => $service_type,
                 'quantity'    => 1,
                 'unit_price'  => $amount,
             ];
+            $total_amount = max( 0, $amount - $discount );
         }
-
-        $total_amount = max( 0, ( count( $student_uids ) * $amount ) - $discount );
 
         $academic_year_id = 0;
         if ( class_exists( 'Olama_School_Academic' ) ) {
@@ -438,6 +565,54 @@ class Olama_Reg_Ajax {
             'message'    => __( 'تم تسجيل الفاتورة وإصدار السند بنجاح.', 'olama-registration' ),
             'invoice_id' => $invoice_id,
             'payment_id' => $payment_id,
+        ] );
+    }
+
+    // ── Settlement Receipts ───────────────────────────────────────────────────
+
+    public function ajax_create_settlement(): void {
+        $this->guard();
+        $result = Olama_Reg_Settlement::create_receipt( $_POST );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message'    => __( 'تم إنشاء إيصال التسوية بنجاح.', 'olama-registration' ),
+            'receipt_id' => $result,
+        ] );
+    }
+
+    public function ajax_settle_receipt(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+        $oracle_receipt = sanitize_text_field( $_POST['oracle_receipt_number'] ?? '' );
+        $notes = sanitize_textarea_field( $_POST['notes'] ?? '' );
+
+        $result = Olama_Reg_Settlement::settle_receipt( $id, $oracle_receipt, $notes );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => __( 'تمت التسوية بنجاح.', 'olama-registration' ),
+        ] );
+    }
+
+    public function ajax_cancel_settlement(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+
+        $result = Olama_Reg_Settlement::cancel_receipt( $id );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => __( 'تم إلغاء الإيصال بنجاح.', 'olama-registration' ),
         ] );
     }
 }

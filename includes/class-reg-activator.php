@@ -25,6 +25,7 @@ class Olama_Reg_Activator {
 
         self::create_financial_table( $wpdb, $charset );
         self::create_billing_tables( $wpdb, $charset );
+        self::create_settlement_receipts_table( $wpdb, $charset );
     }
 
 
@@ -167,5 +168,38 @@ class Olama_Reg_Activator {
         dbDelta( $sql_installments );
         dbDelta( $sql_payments );
         dbDelta( $sql_audit );
+    }
+
+    // ── Create Settlement Receipts Table ───────────────────────────────────────
+    private static function create_settlement_receipts_table( $wpdb, string $charset ): void {
+        $table = $wpdb->prefix . 'olama_settlement_receipts';
+
+        $sql = "CREATE TABLE {$table} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            receipt_number varchar(50) NOT NULL,
+            family_id varchar(50) NOT NULL,
+            student_id varchar(50) DEFAULT NULL,
+            payment_category varchar(100) NOT NULL,
+            original_amount decimal(10,2) NOT NULL DEFAULT 0.00,
+            settled_amount decimal(10,2) NOT NULL DEFAULT 0.00,
+            remaining_balance decimal(10,2) NOT NULL DEFAULT 0.00,
+            payment_method varchar(50) NOT NULL DEFAULT 'cash',
+            oracle_receipt_number varchar(150) DEFAULT NULL,
+            settlement_date date DEFAULT NULL,
+            status varchar(50) NOT NULL DEFAULT 'pending_settlement',
+            notes text DEFAULT NULL,
+            created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            updated_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            settled_by bigint(20) UNSIGNED DEFAULT NULL,
+            cancelled_by bigint(20) UNSIGNED DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            UNIQUE KEY receipt_number (receipt_number),
+            KEY family_id (family_id),
+            KEY status (status)
+        ) {$charset};";
+
+        dbDelta( $sql );
     }
 }

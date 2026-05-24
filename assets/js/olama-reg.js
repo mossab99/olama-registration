@@ -1410,6 +1410,51 @@
             });
         }
 
+        // Toggle Internal/External Customer UI
+        $('input[name="customer_type"]').on('change', function() {
+            if ($(this).val() === 'external') {
+                $('#cp_internal_customer_wrap').hide();
+                $('#cp_external_customer_wrap').show();
+                $('#cp_family_search').prop('required', false);
+                $('#cp_students_container').hide();
+                $('.cp-student-check').prop('checked', false);
+                calculateCustomTotal();
+            } else {
+                $('#cp_internal_customer_wrap').show();
+                $('#cp_external_customer_wrap').hide();
+                $('#cp_family_search').prop('required', true);
+                if ($('#cp_family_uid').val()) {
+                    $('#cp_students_container').show();
+                }
+            }
+        });
+
+        // Add External Child
+        let extChildIndex = 0;
+        $('#cp_ext_add_child_btn').on('click', function() {
+            const name = $('#cp_ext_child_name').val().trim();
+            const grade = $('#cp_ext_child_grade').val().trim();
+            if (!name) return;
+            
+            extChildIndex++;
+            const html = `
+                <label style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;" id="ext_child_lbl_${extChildIndex}">
+                    <input type="checkbox" class="cp-ext-student-check" data-name="${name}" data-grade="${grade}" checked />
+                    <span>
+                        <span style="display:block; font-weight:700;">${name}</span>
+                        <span style="display:block; font-size:11px; color:#64748b;">${grade || 'بدون صف'}</span>
+                    </span>
+                    <button type="button" class="button-link" style="color:#dc2626; margin-right:auto; padding:0;" onclick="$('#ext_child_lbl_${extChildIndex}').remove(); $('#cp_amount').trigger('change');">
+                        <span class="dashicons dashicons-trash"></span>
+                    </button>
+                </label>
+            `;
+            $('#cp_ext_students_list').append(html);
+            $('#cp_ext_child_name').val('');
+            $('#cp_ext_child_grade').val('');
+            calculateCustomTotal();
+        });
+
         $('#cp_family_search').on('change', function() {
             const familyUid = $(this).val();
             $('#cp_family_uid').val(familyUid);
@@ -1453,7 +1498,7 @@
                 });
         });
 
-        $(document).on('change', '.cp-student-check, #cp_amount, #cp_discount', calculateCustomTotal);
+        $(document).on('change', '.cp-student-check, .cp-ext-student-check, #cp_amount, #cp_discount', calculateCustomTotal);
         $(document).on('input', '#cp_amount, #cp_discount', calculateCustomTotal);
 
         $('#cp_fee_template').on('change', function() {
@@ -1465,7 +1510,7 @@
         });
 
         function calculateCustomTotal() {
-            const checkedCount = $('.cp-student-check:checked').length;
+            const checkedCount = $('.cp-student-check:checked, .cp-ext-student-check:checked').length;
             const amount = parseFloat($('#cp_amount').val()) || 0;
             const discount = parseFloat($('#cp_discount').val()) || 0;
             const total = Math.max(0, (checkedCount * amount) - discount);
@@ -1478,13 +1523,21 @@
 
         $('#olama-reg-custom-payment-form').on('submit', function(e) {
             e.preventDefault();
-            const checkedCount = $('.cp-student-check:checked').length;
-            if (checkedCount === 0) {
+            
+            const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
+            const internalCount = $('.cp-student-check:checked').length;
+            const externalCount = $('.cp-ext-student-check:checked').length;
+            
+            if (!isExternal && internalCount === 0) {
                 $('#cp_students_error').show();
                 return;
             }
+            if (isExternal && externalCount === 0) {
+                alert('يجب إضافة واختيار ابن واحد على الأقل للعميل الخارجي.');
+                return;
+            }
 
-            const formData = $(this).serialize();
+            const $form = $(this);
             const $btn = $('#cp_submit_btn');
             const $loading = $('#cp_loading');
             const $msg = $('#cp_response_msg');
@@ -1493,7 +1546,19 @@
             $loading.show();
             $msg.hide();
 
-            $.post(R.ajaxurl, 'action=olama_reg_save_custom_payment&nonce=' + R.nonce + '&' + formData)
+            const processPayment = function(familyUid, studentUids = []) {
+                $('#cp_family_uid').val(familyUid);
+                
+                // Inject student UIDs if passed
+                $('.cp_temp_student_uid').remove();
+                studentUids.forEach(uid => {
+                    $form.append(`<input type="hidden" name="student_uids[]" value="${uid}" class="cp_temp_student_uid">`);
+                });
+
+                // Serialize again now that family_uid and student_uids are set
+                let formData = $form.serialize();
+
+                $.post(R.ajaxurl, 'action=olama_reg_save_custom_payment&nonce=' + R.nonce + '&' + formData)
                 .done(res => {
                     if (res.success) {
                         $msg.html('<div class="notice notice-success inline" style="padding:10px;"><p>' + res.data.message + '</p></div>').fadeIn();
@@ -1514,13 +1579,53 @@
                         $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data.message || 'Error occurred.') + '</p></div>').fadeIn();
                     }
                 })
-                .fail(() => {
-                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>حدث خطأ في الاتصال بالخادم.</p></div>').fadeIn();
-                })
                 .always(() => {
                     $btn.prop('disabled', false);
                     $loading.hide();
                 });
+            };
+
+            if (isExternal) {
+                const extName = $('#cp_ext_name').val();
+                const extPhone = $('#cp_ext_phone').val();
+                
+                if (!extName || !extPhone) {
+                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>يرجى إدخال اسم العميل ورقم الهاتف.</p></div>').fadeIn();
+                    $btn.prop('disabled', false);
+                    $loading.hide();
+                    return;
+                }
+
+                const children = [];
+                $('.cp-ext-student-check:checked').each(function() {
+                    children.push({
+                        name: $(this).data('name'),
+                        grade: $(this).data('grade')
+                    });
+                });
+
+                $.post(R.ajaxurl, {
+                    action: 'olama_reg_create_external_customer',
+                    nonce: R.nonce,
+                    name: extName,
+                    phone: extPhone,
+                    children: JSON.stringify(children)
+                }).done(res => {
+                    if (res.success && res.data.family_uid) {
+                        processPayment(res.data.family_uid, res.data.student_uids || []);
+                    } else {
+                        $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data?.message || 'Error creating external customer.') + '</p></div>').fadeIn();
+                        $btn.prop('disabled', false);
+                        $loading.hide();
+                    }
+                }).fail(() => {
+                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>حدث خطأ في الاتصال بالخادم عند إنشاء العميل.</p></div>').fadeIn();
+                    $btn.prop('disabled', false);
+                    $loading.hide();
+                });
+            } else {
+                processPayment($('#cp_family_uid').val());
+            }
         });
     }
 
