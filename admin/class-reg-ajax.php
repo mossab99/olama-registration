@@ -1,6 +1,6 @@
 <?php
 /**
- * AJAX Endpoints — all 13 actions in one class
+ * AJAX Endpoints
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -32,7 +32,19 @@ class Olama_Reg_Ajax {
             'olama_reg_create_settlement',
             'olama_reg_settle_receipt',
             'olama_reg_cancel_settlement',
-            'olama_reg_create_external_customer',
+
+            // External Customer CRUD
+            'olama_reg_search_external_customers',
+            'olama_reg_get_external_customer',
+            'olama_reg_add_external_customer',
+            'olama_reg_update_external_customer',
+            'olama_reg_delete_external_customer',
+
+            // Child CRUD
+            'olama_reg_get_external_customer_children',
+            'olama_reg_add_child_to_customer',
+            'olama_reg_update_child',
+            'olama_reg_delete_child',
         ];
 
         foreach ( $actions as $action ) {
@@ -70,114 +82,207 @@ class Olama_Reg_Ajax {
         ] );
     }
 
-    public function ajax_create_external_customer(): void {
-        try {
-            $this->guard();
+    // ── External Customer CRUD ─────────────────────────────────────────────────
 
-            $name  = sanitize_text_field( $_POST['name'] ?? '' );
-            $phone = sanitize_text_field( $_POST['phone'] ?? '' );
+    public function ajax_search_external_customers(): void {
+        $this->guard();
+        global $wpdb;
+        $q    = sanitize_text_field( $_POST['q'] ?? '' );
+        $like = '%' . $wpdb->esc_like( $q ) . '%';
 
-            if ( empty( $name ) || empty( $phone ) ) {
-                wp_send_json_error( [ 'message' => __( 'Name and Phone are required.', 'olama-registration' ) ] );
-            }
+        $table  = $wpdb->prefix . 'olama_customers';
+        $ctable = $wpdb->prefix . 'olama_customer_children';
 
-            global $wpdb;
-            $table = $wpdb->prefix . 'olama_families';
+        $customers = $wpdb->get_results( $wpdb->prepare(
+            "SELECT DISTINCT c.id, c.customer_uid, c.customer_name, c.phone
+             FROM {$table} c
+             LEFT JOIN {$ctable} ch ON ch.customer_id = c.id AND ch.is_active = 1
+             WHERE c.is_active = 1
+               AND ( c.customer_name LIKE %s OR c.phone LIKE %s OR c.customer_uid LIKE %s OR ch.child_name LIKE %s )
+             LIMIT 20",
+            $like, $like, $like, $like
+        ) );
 
-            // Check if phone exists in father_mobile or mother_mobile
-            $existing = $wpdb->get_row( $wpdb->prepare(
-                "SELECT family_uid, family_name FROM {$table} WHERE father_mobile = %s OR mother_mobile = %s LIMIT 1",
-                $phone, $phone
-            ) );
+        wp_send_json_success( [ 'customers' => $customers ] );
+    }
 
-            $children = json_decode( stripslashes( $_POST['children'] ?? '[]' ), true );
-            $student_uids = [];
+    public function ajax_get_external_customer(): void {
+        $this->guard();
+        $customer_id = absint( $_POST['customer_id'] ?? 0 );
 
-            if ( $existing ) {
-                // Prevent linking to internal families
-                if ( strpos( $existing->family_name, '[Ext]' ) === false && strpos( $existing->family_name, '(External)' ) === false ) {
-                    wp_send_json_error( [ 'message' => __( 'رقم الهاتف هذا مستخدم بالفعل لعائلة مسجلة مسبقاً. يرجى استخدام نافذة (عائلة مسجلة) أو إدخال رقم مختلف.', 'olama-registration' ) ] );
-                }
-
-                $family_uid = $existing->family_uid;
-                $is_new = false;
-            } else {
-                // Generate a new family UID
-                if (!class_exists('Olama_Reg_ID_Generator')) {
-                    wp_send_json_error( [ 'message' => 'Id generator class not found' ] );
-                }
-                $family_uid = Olama_Reg_ID_Generator::next_family_uid();
-
-                if ( ! $family_uid ) {
-                    wp_send_json_error( [ 'message' => __( 'Could not generate family UID.', 'olama-registration' ) ] );
-                }
-
-                // Insert new external customer
-                $inserted = $wpdb->insert(
-                    $table,
-                    [
-                        'family_uid'         => $family_uid,
-                        'family_name'        => $name . ' [Ext]',
-                        'father_first_name'  => $name,
-                        'father_mobile'      => $phone,
-                    ],
-                    [ '%s', '%s', '%s', '%s' ]
-                );
-
-                if ( ! $inserted ) {
-                    wp_send_json_error( [ 'message' => 'Insert Family Error: ' . $wpdb->last_error ] );
-                }
-                $is_new = true;
-            }
-
-            // Process children
-            if ( is_array( $children ) && ! empty( $children ) ) {
-                $students_table = $wpdb->prefix . 'olama_students';
-                foreach ( $children as $child ) {
-                    $child_name = sanitize_text_field( $child['name'] ?? '' );
-                    if ( empty( $child_name ) ) continue;
-                    
-                    $child_grade = sanitize_text_field( $child['grade'] ?? '' );
-                    $full_child_name = $child_name . ' [Ext]';
-
-                    // Check if this exact external child already exists for this family
-                    $existing_child = $wpdb->get_row( $wpdb->prepare(
-                        "SELECT student_uid FROM {$students_table} WHERE family_id = %s AND student_name = %s LIMIT 1",
-                        $family_uid, $full_child_name
-                    ) );
-
-                    if ( $existing_child ) {
-                        $student_uids[] = $existing_child->student_uid;
-                    } else {
-                        $new_student_uid = uniqid( 'ext_stu_' );
-                        $inserted_student = $wpdb->insert(
-                            $students_table,
-                            [
-                                'student_uid'  => $new_student_uid,
-                                'family_id'    => $family_uid,
-                                'student_name' => $full_child_name,
-                                'national_id'  => $child_grade,
-                                'is_active'    => 1,
-                            ],
-                            [ '%s', '%s', '%s', '%s', '%d' ]
-                        );
-                        if (!$inserted_student) {
-                            wp_send_json_error( [ 'message' => 'Insert Student Error: ' . $wpdb->last_error ] );
-                        }
-                        $student_uids[] = $new_student_uid;
-                    }
-                }
-            }
-
-            wp_send_json_success( [
-                'message'      => __( 'External customer processed successfully.', 'olama-registration' ),
-                'family_uid'   => $family_uid,
-                'student_uids' => $student_uids,
-                'is_new'       => $is_new,
-            ] );
-        } catch (\Throwable $e) {
-            wp_send_json_error([ 'message' => 'Exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() ]);
+        if ( ! $customer_id ) {
+            wp_send_json_error( [ 'message' => 'معرف العميل مطلوب.' ] );
         }
+
+        $customer = Olama_Reg_Customer::get( $customer_id );
+        if ( ! $customer ) {
+            wp_send_json_error( [ 'message' => 'العميل غير موجود.' ] );
+        }
+
+        $children = Olama_Reg_Child::get_by_customer( $customer_id );
+
+        wp_send_json_success( [
+            'customer' => $customer,
+            'children' => $children,
+        ] );
+    }
+
+    public function ajax_add_external_customer(): void {
+        $this->guard();
+
+        $result = Olama_Reg_Customer::create( [
+            'customer_name' => sanitize_text_field( $_POST['customer_name'] ?? $_POST['name'] ?? '' ),
+            'phone'         => sanitize_text_field( $_POST['phone'] ?? '' ),
+            'notes'         => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+        ] );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        $customer     = Olama_Reg_Customer::get( $result );
+        $children_raw = json_decode( stripslashes( $_POST['children'] ?? '[]' ), true );
+        $children     = [];
+
+        if ( is_array( $children_raw ) ) {
+            foreach ( $children_raw as $c ) {
+                $child_id = Olama_Reg_Child::add( $result, [
+                    'child_name' => $c['name'] ?? '',
+                    'grade'      => $c['grade'] ?? '',
+                ] );
+                if ( ! is_wp_error( $child_id ) ) {
+                    $children[] = Olama_Reg_Child::get( $child_id );
+                }
+            }
+        }
+
+        wp_send_json_success( [
+            'message'      => 'تم إضافة العميل بنجاح.',
+            'customer_id'  => $result,
+            'customer_uid' => $customer->customer_uid ?? '',
+            'customer'     => $customer,
+            'children'     => $children,
+        ] );
+    }
+
+    public function ajax_update_external_customer(): void {
+        $this->guard();
+        $customer_id = absint( $_POST['customer_id'] ?? 0 );
+
+        if ( ! $customer_id ) {
+            wp_send_json_error( [ 'message' => 'معرف العميل مطلوب.' ] );
+        }
+
+        $result = Olama_Reg_Customer::update( $customer_id, [
+            'customer_name' => sanitize_text_field( $_POST['customer_name'] ?? $_POST['name'] ?? '' ),
+            'phone'         => sanitize_text_field( $_POST['phone'] ?? '' ),
+            'notes'         => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+        ] );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message'  => 'تم تحديث بيانات العميل.',
+            'customer' => Olama_Reg_Customer::get( $customer_id ),
+        ] );
+    }
+
+    public function ajax_delete_external_customer(): void {
+        $this->guard();
+        $customer_id = absint( $_POST['customer_id'] ?? 0 );
+
+        if ( ! $customer_id ) {
+            wp_send_json_error( [ 'message' => 'معرف العميل مطلوب.' ] );
+        }
+
+        $result = Olama_Reg_Customer::delete( $customer_id );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [ 'message' => 'تم حذف العميل بنجاح.' ] );
+    }
+
+    // ── Child CRUD ────────────────────────────────────────────────────────────
+
+    public function ajax_get_external_customer_children(): void {
+        $this->guard();
+        $customer_id = absint( $_POST['customer_id'] ?? 0 );
+
+        if ( ! $customer_id ) {
+            wp_send_json_error( [ 'message' => 'معرف العميل مطلوب.' ] );
+        }
+
+        $children = Olama_Reg_Child::get_by_customer( $customer_id );
+        wp_send_json_success( [ 'children' => $children ] );
+    }
+
+    public function ajax_add_child_to_customer(): void {
+        $this->guard();
+        $customer_id = absint( $_POST['customer_id'] ?? 0 );
+
+        if ( ! $customer_id ) {
+            wp_send_json_error( [ 'message' => 'معرف العميل مطلوب.' ] );
+        }
+
+        $result = Olama_Reg_Child::add( $customer_id, [
+            'child_name' => sanitize_text_field( $_POST['child_name'] ?? $_POST['name'] ?? '' ),
+            'grade'      => sanitize_text_field( $_POST['grade'] ?? '' ),
+            'notes'      => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+        ] );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => 'تمت إضافة الابن بنجاح.',
+            'child'   => Olama_Reg_Child::get( $result ),
+        ] );
+    }
+
+    public function ajax_update_child(): void {
+        $this->guard();
+        $child_id = absint( $_POST['child_id'] ?? 0 );
+
+        if ( ! $child_id ) {
+            wp_send_json_error( [ 'message' => 'معرف الابن مطلوب.' ] );
+        }
+
+        $result = Olama_Reg_Child::update( $child_id, [
+            'child_name' => sanitize_text_field( $_POST['child_name'] ?? $_POST['name'] ?? '' ),
+            'grade'      => sanitize_text_field( $_POST['grade'] ?? '' ),
+            'notes'      => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+        ] );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [
+            'message' => 'تم تحديث بيانات الابن.',
+            'child'   => Olama_Reg_Child::get( $child_id ),
+        ] );
+    }
+
+    public function ajax_delete_child(): void {
+        $this->guard();
+        $child_id = absint( $_POST['child_id'] ?? 0 );
+
+        if ( ! $child_id ) {
+            wp_send_json_error( [ 'message' => 'معرف الابن مطلوب.' ] );
+        }
+
+        $result = Olama_Reg_Child::delete( $child_id );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [ 'message' => 'تم حذف الابن.' ] );
     }
 
     // ── Student ───────────────────────────────────────────────────────────────
@@ -483,7 +588,8 @@ class Olama_Reg_Ajax {
         $discount     = (float) ( $_POST['discount'] ?? 0 );
         $fee_template = absint( $_POST['fee_template_id'] ?? 0 );
         $payment_meth = sanitize_text_field( $_POST['payment_method'] ?? 'cash' );
-        $is_external  = ! empty( $_POST['is_external'] );
+        $is_external  = ! empty( $_POST['is_external'] ) || ! empty( $_POST['is_external_customer'] );
+        $ext_customer = absint( $_POST['ext_customer_id'] ?? 0 );
 
         $items = [];
         $total_amount = 0;
@@ -507,15 +613,57 @@ class Olama_Reg_Ajax {
 
             $total_amount = max( 0, ( count( $student_uids ) * $amount ) - $discount );
         } else {
-            if ( ! $family_uid || ! $service_type || $amount <= 0 ) {
+            if ( ! $ext_customer || ! $service_type || $amount <= 0 ) {
                 wp_send_json_error( [ 'message' => __( 'بيانات غير مكتملة. تأكد من تحديد نوع الخدمة وقيمة الدفعة.', 'olama-registration' ) ] );
             }
-            $items[] = [
-                'description' => $service_type,
-                'quantity'    => 1,
-                'unit_price'  => $amount,
-            ];
-            $total_amount = max( 0, $amount - $discount );
+
+            // Use CUST-uid as family_uid for external customers (not EXT-{id})
+            $customer = Olama_Reg_Customer::get( $ext_customer );
+            $family_uid = $customer ? $customer->customer_uid : ( 'CUST-' . str_pad( $ext_customer, 4, '0', STR_PAD_LEFT ) );
+
+            // Children come as array of child IDs (from DB checkboxes)
+            $child_ids_raw = isset( $_POST['child_ids'] ) && is_array( $_POST['child_ids'] )
+                ? array_map( 'absint', $_POST['child_ids'] )
+                : [];
+
+            // Also handle newly typed children (quick-add during payment)
+            $new_children_raw = json_decode( stripslashes( $_POST['new_children'] ?? '[]' ), true );
+            if ( is_array( $new_children_raw ) ) {
+                foreach ( $new_children_raw as $nc ) {
+                    $nc_name = sanitize_text_field( $nc['name'] ?? '' );
+                    if ( $nc_name ) {
+                        $new_child_id = Olama_Reg_Child::add( $ext_customer, [
+                            'child_name' => $nc_name,
+                            'grade'      => sanitize_text_field( $nc['grade'] ?? '' ),
+                        ] );
+                        if ( ! is_wp_error( $new_child_id ) ) {
+                            $child_ids_raw[] = $new_child_id;
+                        }
+                    }
+                }
+            }
+
+            if ( ! empty( $child_ids_raw ) ) {
+                foreach ( $child_ids_raw as $child_id ) {
+                    $child = Olama_Reg_Child::get( $child_id );
+                    if ( ! $child ) continue;
+                    $items[] = [
+                        'description'   => sprintf( '%s - %s', $service_type, $child->child_name ),
+                        'quantity'      => 1,
+                        'unit_price'    => $amount,
+                        'ext_child_id'  => $child->id,
+                    ];
+                }
+                $total_amount = max( 0, ( count( $items ) * $amount ) - $discount );
+            } else {
+                // Payment for the customer directly (no children)
+                $items[] = [
+                    'description' => $service_type,
+                    'quantity'    => 1,
+                    'unit_price'  => $amount,
+                ];
+                $total_amount = max( 0, $amount - $discount );
+            }
         }
 
         $academic_year_id = 0;
@@ -526,7 +674,7 @@ class Olama_Reg_Ajax {
             }
         }
 
-        // 1. Create Invoice
+        // 1. Create a single Invoice containing all items
         $invoice_data = [
             'family_uid'       => $family_uid,
             'academic_year_id' => $academic_year_id,
@@ -538,24 +686,30 @@ class Olama_Reg_Ajax {
             'discount'         => $discount,
         ];
 
+        if ( $is_external ) {
+            $invoice_data['ext_customer_id'] = $ext_customer;
+            // If there is only one child, we can set ext_child_id for clearer reporting
+            if ( count( $items ) === 1 && ! empty( $items[0]['ext_child_id'] ) ) {
+                $invoice_data['ext_child_id'] = $items[0]['ext_child_id'];
+            }
+            $invoice_data['notes'] = 'رسوم خدمة: ' . $service_type;
+        }
+
         $invoice_id = Olama_Reg_Billing_Invoice::create( $invoice_data );
 
         if ( is_wp_error( $invoice_id ) ) {
             wp_send_json_error( [ 'message' => $invoice_id->get_error_message() ] );
         }
 
-        // 2. Register Payment
-        $payment_data = [
+        // 2. Record a single Payment
+        $payment_id = Olama_Reg_Billing_Payment::record( [
             'family_uid'   => $family_uid,
             'invoice_id'   => $invoice_id,
             'amount'       => $total_amount,
             'payment_date' => date( 'Y-m-d' ),
             'method'       => $payment_meth,
-            'reference'    => '',
-            'notes'        => 'دفعة مقبوضة عن خدمات إضافية: ' . $service_type,
-        ];
-
-        $payment_id = Olama_Reg_Billing_Payment::record( $payment_data );
+            'notes'        => $is_external ? 'دفعة: ' . $service_type : 'دفعة مقبوضة عن خدمات إضافية: ' . $service_type,
+        ] );
 
         if ( is_wp_error( $payment_id ) ) {
             wp_send_json_error( [ 'message' => $payment_id->get_error_message() ] );

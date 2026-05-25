@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-define( 'OLAMA_REG_VERSION',             '1.1.3' );
+define( 'OLAMA_REG_VERSION',             '1.1.4' );
 define( 'OLAMA_REG_MIN_SCHOOL_VERSION',  '2.3.9' );
 define( 'OLAMA_REG_PATH',               plugin_dir_path( __FILE__ ) );
 define( 'OLAMA_REG_URL',                plugin_dir_url( __FILE__ ) );
@@ -55,6 +55,8 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-activator.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-family.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-student.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-customer.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-child.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-financial.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-fees.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-invoice.php';

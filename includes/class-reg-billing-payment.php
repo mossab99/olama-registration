@@ -325,12 +325,37 @@ class Olama_Reg_Billing_Payment {
 
         $invoice = Olama_Reg_Billing_Invoice::get_invoice( (int) $payment->invoice_id );
 
+        // Try internal family first
         $family = null;
         if ( $payment->family_uid ) {
             $family = $wpdb->get_row( $wpdb->prepare(
-                "SELECT family_uid, father_first_name, father_family_name FROM {$wpdb->prefix}olama_families WHERE family_uid = %s",
+                "SELECT family_uid, father_first_name, father_family_name
+                 FROM {$wpdb->prefix}olama_families
+                 WHERE family_uid = %s",
                 $payment->family_uid
             ) );
+        }
+
+        // Fallback: look up external customer when family_uid is a CUST- code
+        $ext_customer_name = null;
+        if ( ! $family && $payment->family_uid ) {
+            // Check invoice for ext_customer_id first
+            $ext_id = $invoice ? (int) ( $invoice->ext_customer_id ?? 0 ) : 0;
+
+            // If not on invoice, try to find by customer_uid
+            if ( ! $ext_id ) {
+                $ext_id = (int) $wpdb->get_var( $wpdb->prepare(
+                    "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                    $payment->family_uid
+                ) );
+            }
+
+            if ( $ext_id ) {
+                $ext_customer_name = $wpdb->get_var( $wpdb->prepare(
+                    "SELECT customer_name FROM {$wpdb->prefix}olama_customers WHERE id = %d",
+                    $ext_id
+                ) );
+            }
         }
 
         $received_by_name = '';
@@ -340,11 +365,12 @@ class Olama_Reg_Billing_Payment {
         }
 
         return [
-            'payment'          => $payment,
-            'invoice'          => $invoice,
-            'family'           => $family,
-            'received_by_name' => $received_by_name,
-            'generated_at'     => current_time( 'mysql' ),
+            'payment'           => $payment,
+            'invoice'           => $invoice,
+            'family'            => $family,
+            'ext_customer_name' => $ext_customer_name,
+            'received_by_name'  => $received_by_name,
+            'generated_at'      => current_time( 'mysql' ),
         ];
     }
 

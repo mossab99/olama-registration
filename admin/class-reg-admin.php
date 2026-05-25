@@ -28,20 +28,11 @@ class Olama_Reg_Admin {
 
         add_submenu_page(
             'olama-registration',
-            __( 'Families', 'olama-registration' ),
-            __( 'العائلات', 'olama-registration' ),
+            __( 'Contacts', 'olama-registration' ),
+            __( 'جهات الاتصال', 'olama-registration' ),
             'olama_manage_registration_families',
             'olama-registration',
             [ $this, 'render_families' ]
-        );
-
-        add_submenu_page(
-            'olama-registration',
-            __( 'Students', 'olama-registration' ),
-            __( 'الطلاب', 'olama-registration' ),
-            'olama_manage_registration_students',
-            'olama-registration-students',
-            [ $this, 'render_students' ]
         );
 
         add_submenu_page(
@@ -122,12 +113,17 @@ class Olama_Reg_Admin {
             return;
         }
 
-        include OLAMA_REG_PATH . 'admin/views/page-family-list.php';
+        include OLAMA_REG_PATH . 'admin/views/page-contacts.php';
     }
 
     public function render_students(): void {
         if ( ! current_user_can( 'olama_manage_registration_students' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-student-list.php';
+    }
+
+    public function render_customers(): void {
+        if ( ! current_user_can( 'olama_manage_registration_families' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-customers.php';
     }
 
     public function render_fees(): void {

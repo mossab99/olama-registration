@@ -1387,245 +1387,907 @@
     });
 
     // =========================================================================
-    // Custom Payments
+    // Customers Page — Full CRUD Modal + Children Expand/Collapse
     // =========================================================================
-    if ($('#cp_family_search').length) {
-        if (typeof $.fn.select2 !== 'undefined') {
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    function custNotice(msg, isError) {
+        const $n = $('#cust_notice');
+        if (!$n.length) { showNotice(msg, isError); return; }
+        $n.text(msg)
+          .css({
+              background: isError ? '#fee2e2' : '#dcfce7',
+              color:      isError ? '#dc2626' : '#16a34a',
+              border:     '1px solid ' + (isError ? '#fca5a5' : '#86efac'),
+          })
+          .show();
+        clearTimeout(window._custNoticeTimer);
+        window._custNoticeTimer = setTimeout(() => $n.fadeOut(), 5000);
+    }
+
+    // Build a saved-child row HTML (for edit modal)
+    function buildSavedChildRow(child) {
+        return `
+        <div class="cust-saved-child-row" data-child-id="${child.id}" style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+            <div style="flex:1;">
+                <span class="cust-child-name" style="font-weight:700; font-size:13px;">${escHtml(child.child_name)}</span>
+                <span class="cust-child-grade" style="font-size:11px; color:#64748b; margin-right:8px;">${escHtml(child.grade || '')}</span>
+            </div>
+            <button type="button" class="button button-small cust-child-edit-btn" data-child-id="${child.id}" title="تعديل">
+                <span class="dashicons dashicons-edit" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span>
+            </button>
+            <button type="button" class="button button-small cust-child-delete-btn" data-child-id="${child.id}" title="حذف" style="color:#dc2626; border-color:#fca5a5;">
+                <span class="dashicons dashicons-trash" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span>
+            </button>
+        </div>`;
+    }
+
+    // Build a pending child row HTML (for create modal)
+    function buildPendingChildRow(name, grade, idx) {
+        return `
+        <div class="cust-pending-child-row" data-idx="${idx}" style="display:flex; align-items:center; gap:8px; padding:8px 10px; background:#f0fdf4; border:1px dashed #86efac; border-radius:6px;">
+            <div style="flex:1;">
+                <span style="font-weight:700; font-size:13px;">${escHtml(name)}</span>
+                ${grade ? `<span style="font-size:11px; color:#64748b; margin-right:8px;">${escHtml(grade)}</span>` : ''}
+            </div>
+            <button type="button" class="button-link cust-pending-child-remove" style="color:#dc2626; font-size:18px; line-height:1; padding:0;">×</button>
+        </div>`;
+    }
+
+    function escHtml(str) {
+        return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    let _custPendingChildren = []; // for create mode
+    let _custEditId = 0;           // 0 = create mode
+
+    // ── Open Modal (Create) ────────────────────────────────────────────────────
+
+    $(document).on('click', '#cust_btn_add_new', function() {
+        _custEditId = 0;
+        _custPendingChildren = [];
+        $('#cust-modal-customer-id').val('');
+        $('#cust-modal-name').val('');
+        $('#cust-modal-phone').val('');
+        $('#cust-modal-notes').val('');
+        $('#cust-modal-title').html('<span class="dashicons dashicons-businessman" style="font-size:20px;width:20px;height:20px;"></span> إضافة عميل جديد');
+        $('#cust-modal-save-label').text('حفظ');
+        $('#cust-modal-saved-children').empty();
+        $('#cust-modal-pending-children').empty();
+        $('#cust-modal-new-child-form').hide();
+        $('#cust-modal-no-children').show();
+        $('#cust-modal-overlay').css('display','flex');
+        setTimeout(() => $('#cust-modal-name').focus(), 100);
+    });
+
+    // ── Open Modal (Edit) ──────────────────────────────────────────────────────
+
+    $(document).on('click', '.cust-btn-edit', function() {
+        const id = parseInt($(this).data('id'));
+        _custEditId = id;
+        _custPendingChildren = [];
+
+        $('#cust-modal-title').html('<span class="dashicons dashicons-edit" style="font-size:20px;width:20px;height:20px;"></span> تعديل بيانات العميل');
+        $('#cust-modal-save-label').text('حفظ التعديلات');
+        $('#cust-modal-customer-id').val(id);
+        $('#cust-modal-saved-children').html('<div style="color:#94a3b8; font-size:13px; padding:8px;"><span class="spinner is-active" style="float:none;"></span> جاري التحميل...</div>');
+        $('#cust-modal-pending-children').empty();
+        $('#cust-modal-new-child-form').hide();
+        $('#cust-modal-no-children').hide();
+        $('#cust-modal-overlay').css('display','flex');
+
+        ajax('olama_reg_get_external_customer', { customer_id: id })
+            .done(res => {
+                if (res.success) {
+                    const c = res.data.customer;
+                    $('#cust-modal-name').val(c.customer_name);
+                    $('#cust-modal-phone').val(c.phone || '');
+                    $('#cust-modal-notes').val(c.notes || '');
+
+                    const children = res.data.children || [];
+                    $('#cust-modal-saved-children').empty();
+                    if (children.length) {
+                        children.forEach(ch => $('#cust-modal-saved-children').append(buildSavedChildRow(ch)));
+                        $('#cust-modal-no-children').hide();
+                    } else {
+                        $('#cust-modal-no-children').show();
+                    }
+                }
+            });
+    });
+
+    // ── Close Modal ────────────────────────────────────────────────────────────
+
+    $(document).on('click', '#cust-modal-close, #cust-modal-cancel', function() {
+        $('#cust-modal-overlay').hide();
+    });
+    $(document).on('click', '#cust-modal-overlay', function(e) {
+        if (e.target === this) $('#cust-modal-overlay').hide();
+    });
+
+    // ── Show new child form ────────────────────────────────────────────────────
+
+    $(document).on('click', '#cust-modal-add-child-btn', function() {
+        $('#cust-modal-new-child-name').val('');
+        $('#cust-modal-new-child-grade').val('');
+        $('#cust-modal-new-child-form').show();
+        setTimeout(() => $('#cust-modal-new-child-name').focus(), 50);
+    });
+
+    $(document).on('click', '#cust-modal-cancel-new-child', function() {
+        $('#cust-modal-new-child-form').hide();
+    });
+
+    // ── Save new child (AJAX in edit mode, pending in create mode) ─────────────
+
+    $(document).on('click', '#cust-modal-save-new-child', function() {
+        const name  = $('#cust-modal-new-child-name').val().trim();
+        const grade = $('#cust-modal-new-child-grade').val().trim();
+        if (!name) { $('#cust-modal-new-child-name').focus(); return; }
+
+        if (_custEditId) {
+            // Edit mode → save to DB immediately
+            $('#cust-modal-new-child-loading').show();
+            ajax('olama_reg_add_child_to_customer', { customer_id: _custEditId, child_name: name, grade })
+                .done(res => {
+                    $('#cust-modal-new-child-loading').hide();
+                    if (res.success && res.data.child) {
+                        $('#cust-modal-saved-children').append(buildSavedChildRow(res.data.child));
+                        $('#cust-modal-no-children').hide();
+                        // Update count in table row
+                        const $cnt = $(`.cust-children-count[data-id="${_custEditId}"]`);
+                        $cnt.text(parseInt($cnt.text() || 0) + 1);
+                        $('#cust-modal-new-child-form').hide();
+                    } else {
+                        alert(res.data?.message || 'خطأ في إضافة الابن');
+                    }
+                })
+                .fail(() => { $('#cust-modal-new-child-loading').hide(); alert(R.strings.error); });
+        } else {
+            // Create mode → queue as pending
+            const idx = _custPendingChildren.length;
+            _custPendingChildren.push({ name, grade });
+            $('#cust-modal-pending-children').append(buildPendingChildRow(name, grade, idx));
+            $('#cust-modal-no-children').hide();
+            $('#cust-modal-new-child-form').hide();
+        }
+    });
+
+    // ── Remove pending child ───────────────────────────────────────────────────
+
+    $(document).on('click', '.cust-pending-child-remove', function() {
+        const idx = parseInt($(this).closest('.cust-pending-child-row').data('idx'));
+        _custPendingChildren.splice(idx, 1);
+        $(this).closest('.cust-pending-child-row').remove();
+        // Re-index
+        _custPendingChildren.forEach((c, i) => {
+            $('#cust-modal-pending-children .cust-pending-child-row').eq(i).attr('data-idx', i);
+        });
+        if (!$('#cust-modal-saved-children .cust-saved-child-row').length && !_custPendingChildren.length) {
+            $('#cust-modal-no-children').show();
+        }
+    });
+
+    // ── Edit saved child inline ────────────────────────────────────────────────
+
+    $(document).on('click', '.cust-child-edit-btn', function() {
+        const $row    = $(this).closest('.cust-saved-child-row');
+        const childId = parseInt($row.data('child-id'));
+        const curName = $row.find('.cust-child-name').text().trim();
+        const curGrade= $row.find('.cust-child-grade').text().trim();
+
+        // Replace row with inline edit form
+        $row.html(`
+            <div style="display:flex; gap:8px; align-items:flex-end; flex:1;">
+                <div style="flex:1;">
+                    <label style="font-size:11px; font-weight:700; display:block; margin-bottom:2px;">الاسم</label>
+                    <input type="text" class="cust-child-edit-name regular-text" value="${escHtml(curName)}" style="width:100%;">
+                </div>
+                <div style="flex:1;">
+                    <label style="font-size:11px; font-weight:700; display:block; margin-bottom:2px;">الصف</label>
+                    <input type="text" class="cust-child-edit-grade regular-text" value="${escHtml(curGrade)}" style="width:100%;">
+                </div>
+                <button type="button" class="button button-small cust-child-edit-save" data-child-id="${childId}" style="height:32px;">حفظ</button>
+                <button type="button" class="button button-small cust-child-edit-cancel" data-child-id="${childId}" data-name="${escHtml(curName)}" data-grade="${escHtml(curGrade)}" style="height:32px;">إلغاء</button>
+            </div>`);
+    });
+
+    $(document).on('click', '.cust-child-edit-cancel', function() {
+        const $row    = $(this).closest('.cust-saved-child-row');
+        const childId = parseInt($(this).data('child-id'));
+        const name    = $(this).data('name');
+        const grade   = $(this).data('grade');
+        $row.html(buildSavedChildRow({ id: childId, child_name: name, grade }).match(/<div class="cust-saved-child-row"[^>]*>([\/\s\S]*)<\/div>/)?.[1] || '');
+        // Simpler: just rebuild the row entirely
+        $row.replaceWith(buildSavedChildRow({ id: childId, child_name: name, grade }));
+    });
+
+    $(document).on('click', '.cust-child-edit-save', function() {
+        const $row    = $(this).closest('.cust-saved-child-row');
+        const childId = parseInt($(this).data('child-id'));
+        const name    = $row.find('.cust-child-edit-name').val().trim();
+        const grade   = $row.find('.cust-child-edit-grade').val().trim();
+        if (!name) { $row.find('.cust-child-edit-name').focus(); return; }
+
+        ajax('olama_reg_update_child', { child_id: childId, child_name: name, grade })
+            .done(res => {
+                if (res.success && res.data.child) {
+                    $row.replaceWith(buildSavedChildRow(res.data.child));
+                } else {
+                    alert(res.data?.message || R.strings.error);
+                }
+            });
+    });
+
+    // ── Delete saved child ─────────────────────────────────────────────────────
+
+    $(document).on('click', '.cust-child-delete-btn', function() {
+        if (!confirm('هل تريد حذف هذا الابن؟')) return;
+        const $row    = $(this).closest('.cust-saved-child-row');
+        const childId = parseInt($row.data('child-id'));
+
+        ajax('olama_reg_delete_child', { child_id: childId })
+            .done(res => {
+                if (res.success) {
+                    $row.fadeOut(200, function() {
+                        $(this).remove();
+                        // Update count
+                        if (_custEditId) {
+                            const $cnt = $(`.cust-children-count[data-id="${_custEditId}"]`);
+                            $cnt.text(Math.max(0, parseInt($cnt.text() || 0) - 1));
+                        }
+                        if (!$('#cust-modal-saved-children .cust-saved-child-row').length && !_custPendingChildren.length) {
+                            $('#cust-modal-no-children').show();
+                        }
+                    });
+                } else {
+                    alert(res.data?.message || R.strings.error);
+                }
+            });
+    });
+
+    // ── Save Customer (Create or Update) ──────────────────────────────────────
+
+    $(document).on('click', '#cust-modal-save', function() {
+        const $btn = $(this);
+        const name  = $('#cust-modal-name').val().trim();
+        const phone = $('#cust-modal-phone').val().trim();
+        const notes = $('#cust-modal-notes').val().trim();
+
+        if (!name) { $('#cust-modal-name').focus(); custNotice('اسم العميل مطلوب.', true); return; }
+
+        setLoading($btn, true);
+
+        if (_custEditId) {
+            // Update
+            ajax('olama_reg_update_external_customer', { customer_id: _custEditId, customer_name: name, phone, notes })
+                .done(res => {
+                    setLoading($btn, false);
+                    if (res.success) {
+                        custNotice('تم تحديث بيانات العميل بنجاح.');
+                        // Update row in table
+                        const $row = $(`.cust-row[data-id="${_custEditId}"]`);
+                        $row.find('strong').first().text(name);
+                        $row.find('td').eq(3).text(phone || '—');
+                        $('#cust-modal-overlay').hide();
+                    } else {
+                        custNotice(res.data?.message || R.strings.error, true);
+                    }
+                })
+                .fail(() => { setLoading($btn, false); custNotice(R.strings.error, true); });
+        } else {
+            // Create
+            ajax('olama_reg_add_external_customer', {
+                customer_name: name,
+                phone,
+                notes,
+                children: JSON.stringify(_custPendingChildren)
+            })
+                .done(res => {
+                    setLoading($btn, false);
+                    if (res.success) {
+                        custNotice('تم إضافة العميل بنجاح.');
+                        $('#cust-modal-overlay').hide();
+                        // Reload page to show new customer
+                        setTimeout(() => window.location.reload(), 800);
+                    } else {
+                        custNotice(res.data?.message || R.strings.error, true);
+                    }
+                })
+                .fail(() => { setLoading($btn, false); custNotice(R.strings.error, true); });
+        }
+    });
+
+    // ── Delete Customer ────────────────────────────────────────────────────────
+
+    $(document).on('click', '.cust-btn-delete', function() {
+        const id   = parseInt($(this).data('id'));
+        const name = $(this).data('name');
+        if (!confirm(`هل تريد حذف العميل "${name}"؟ سيتم إخفاء جميع أبنائه أيضاً.`)) return;
+
+        ajax('olama_reg_delete_external_customer', { customer_id: id })
+            .done(res => {
+                if (res.success) {
+                    // Remove customer row + children row
+                    $(`.cust-row[data-id="${id}"]`).fadeOut(300, function() { $(this).remove(); });
+                    $(`.cust-children-row[data-parent-id="${id}"]`).remove();
+                    custNotice('تم حذف العميل بنجاح.');
+                } else {
+                    custNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    // ── Expand/Collapse Children Row ──────────────────────────────────────────
+
+    $(document).on('click', '.cust-toggle-children', function() {
+        const id    = parseInt($(this).data('id'));
+        const $icon = $(this).find('.cust-toggle-icon');
+        const $childRow = $(`.cust-children-row[data-parent-id="${id}"]`);
+
+        if ($childRow.is(':visible')) {
+            $childRow.hide();
+            $icon.removeClass('dashicons-arrow-up-alt2').addClass('dashicons-arrow-down-alt2');
+            return;
+        }
+
+        $icon.removeClass('dashicons-arrow-down-alt2').addClass('dashicons-arrow-up-alt2');
+        $childRow.show();
+
+        const $container = $childRow.find('.cust-children-container');
+        // Only load once
+        if ($container.data('loaded')) return;
+        $container.data('loaded', true);
+
+        $container.html('<div style="color:#94a3b8; padding:8px;"><span class="spinner is-active" style="float:none;"></span> جاري التحميل...</div>');
+
+        ajax('olama_reg_get_external_customer', { customer_id: id })
+            .done(res => {
+                if (!res.success) { $container.html('<div style="color:#dc2626;">خطأ في تحميل البيانات.</div>'); return; }
+
+                const children = res.data.children || [];
+                renderChildrenInline($container, id, children);
+            });
+    });
+
+    function renderChildrenInline($container, customerId, children) {
+        let html = `<div class="cust-inline-children" data-customer-id="${customerId}">`;
+
+        if (children.length) {
+            html += `<table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:10px;">
+                <thead><tr style="background:#e0f2fe;">
+                    <th style="padding:6px 10px; text-align:right;">اسم الابن</th>
+                    <th style="padding:6px 10px; text-align:right;">الصف</th>
+                    <th style="padding:6px 10px; width:90px; text-align:center;">إجراءات</th>
+                </tr></thead><tbody>`;
+
+            children.forEach(ch => {
+                html += `<tr class="cust-inline-child-tr" data-child-id="${ch.id}">
+                    <td style="padding:6px 10px; font-weight:600;">${escHtml(ch.child_name)}</td>
+                    <td style="padding:6px 10px; color:#64748b;">${escHtml(ch.grade || '—')}</td>
+                    <td style="padding:6px 4px; text-align:center; white-space:nowrap;">
+                        <button class="button button-small cust-inline-edit-child" data-child-id="${ch.id}" title="تعديل" style="margin-left:3px;">
+                            <span class="dashicons dashicons-edit" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span>
+                        </button>
+                        <button class="button button-small cust-inline-delete-child" data-child-id="${ch.id}" data-customer-id="${customerId}" title="حذف" style="color:#dc2626; border-color:#fca5a5;">
+                            <span class="dashicons dashicons-trash" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span>
+                        </button>
+                    </td>
+                </tr>`;
+            });
+
+            html += '</tbody></table>';
+        } else {
+            html += `<div style="color:#94a3b8; font-size:13px; padding:6px 0 10px; font-style:italic;">لا يوجد أبناء مسجلون.</div>`;
+        }
+
+        html += `<div class="cust-inline-add-form" style="display:none; background:#f0fdf4; border:1px dashed #86efac; border-radius:8px; padding:10px; margin-bottom:8px;">
+            <div style="display:flex; gap:8px; align-items:flex-end;">
+                <div style="flex:2;">
+                    <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">اسم الابن *</label>
+                    <input type="text" class="cust-inline-new-name regular-text" style="width:100%;" placeholder="الاسم الكامل">
+                </div>
+                <div style="flex:1;">
+                    <label style="font-size:11px; font-weight:700; display:block; margin-bottom:3px;">الصف</label>
+                    <input type="text" class="cust-inline-new-grade regular-text" style="width:100%;" placeholder="مثال: رابع">
+                </div>
+                <button type="button" class="button button-primary cust-inline-save-child" data-customer-id="${customerId}" style="height:34px; background:var(--reg-success); border-color:var(--reg-success); white-space:nowrap;">حفظ</button>
+                <button type="button" class="button button-secondary cust-inline-cancel-add" style="height:34px;">إلغاء</button>
+            </div>
+        </div>
+        <button type="button" class="button button-secondary cust-inline-add-btn" data-customer-id="${customerId}" style="font-size:12px; height:28px; display:flex; align-items:center; gap:4px;">
+            <span class="dashicons dashicons-plus" style="font-size:14px;width:14px;height:14px;margin-top:2px;"></span>
+            إضافة ابن
+        </button></div>`;
+
+        $container.html(html);
+    }
+
+    // Show inline add form
+    $(document).on('click', '.cust-inline-add-btn', function() {
+        const $wrap = $(this).closest('.cust-inline-children');
+        $wrap.find('.cust-inline-add-form').show();
+        $wrap.find('.cust-inline-new-name').focus();
+        $(this).hide();
+    });
+    $(document).on('click', '.cust-inline-cancel-add', function() {
+        const $wrap = $(this).closest('.cust-inline-children');
+        $wrap.find('.cust-inline-add-form').hide().find('input').val('');
+        $wrap.find('.cust-inline-add-btn').show();
+    });
+
+    // Save inline new child
+    $(document).on('click', '.cust-inline-save-child', function() {
+        const $wrap      = $(this).closest('.cust-inline-children');
+        const customerId = parseInt($(this).data('customer-id'));
+        const name       = $wrap.find('.cust-inline-new-name').val().trim();
+        const grade      = $wrap.find('.cust-inline-new-grade').val().trim();
+        if (!name) { $wrap.find('.cust-inline-new-name').focus(); return; }
+
+        ajax('olama_reg_add_child_to_customer', { customer_id: customerId, child_name: name, grade })
+            .done(res => {
+                if (res.success && res.data.child) {
+                    const ch = res.data.child;
+                    // Add row to table
+                    let $tbody = $wrap.find('table tbody');
+                    if (!$tbody.length) {
+                        // No table yet — re-render
+                        ajax('olama_reg_get_external_customer', { customer_id: customerId })
+                            .done(r2 => {
+                                if (r2.success) renderChildrenInline($wrap.closest('.cust-children-container'), customerId, r2.data.children || []);
+                            });
+                        return;
+                    }
+                    $tbody.append(`<tr class="cust-inline-child-tr" data-child-id="${ch.id}">
+                        <td style="padding:6px 10px; font-weight:600;">${escHtml(ch.child_name)}</td>
+                        <td style="padding:6px 10px; color:#64748b;">${escHtml(ch.grade || '—')}</td>
+                        <td style="padding:6px 4px; text-align:center; white-space:nowrap;">
+                            <button class="button button-small cust-inline-edit-child" data-child-id="${ch.id}" title="تعديل" style="margin-left:3px;"><span class="dashicons dashicons-edit" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span></button>
+                            <button class="button button-small cust-inline-delete-child" data-child-id="${ch.id}" data-customer-id="${customerId}" title="حذف" style="color:#dc2626; border-color:#fca5a5;"><span class="dashicons dashicons-trash" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span></button>
+                        </td></tr>`);
+                    $wrap.find('.cust-inline-add-form').hide().find('input').val('');
+                    $wrap.find('.cust-inline-add-btn').show();
+                    // Remove empty state text
+                    $wrap.find('> div[style*="font-style:italic"]').remove();
+                    // Update count badge
+                    const $cnt = $(`.cust-children-count[data-id="${customerId}"]`);
+                    $cnt.text(parseInt($cnt.text() || 0) + 1);
+                } else {
+                    alert(res.data?.message || R.strings.error);
+                }
+            });
+    });
+
+    // Edit inline child
+    $(document).on('click', '.cust-inline-edit-child', function() {
+        const $tr     = $(this).closest('.cust-inline-child-tr');
+        const childId = parseInt($tr.data('child-id'));
+        const name    = $tr.find('td').eq(0).text().trim();
+        const grade   = $tr.find('td').eq(1).text().trim().replace('—','');
+
+        $tr.html(`
+            <td colspan="2" style="padding:6px 4px;">
+                <div style="display:flex; gap:8px;">
+                    <input type="text" class="cust-inline-edit-name regular-text" value="${escHtml(name)}" style="flex:2;">
+                    <input type="text" class="cust-inline-edit-grade regular-text" value="${escHtml(grade)}" style="flex:1;" placeholder="الصف">
+                </div>
+            </td>
+            <td style="padding:6px 4px; white-space:nowrap;">
+                <button class="button button-small cust-inline-update-child" data-child-id="${childId}" style="height:30px;">حفظ</button>
+                <button class="button button-small cust-inline-cancel-edit" data-child-id="${childId}" data-name="${escHtml(name)}" data-grade="${escHtml(grade)}" style="height:30px;">إلغاء</button>
+            </td>`);
+    });
+
+    $(document).on('click', '.cust-inline-cancel-edit', function() {
+        const $tr     = $(this).closest('.cust-inline-child-tr');
+        const childId = parseInt($(this).data('child-id'));
+        const customerId = parseInt($tr.closest('.cust-inline-children').data('customer-id'));
+        const name    = $(this).data('name');
+        const grade   = $(this).data('grade');
+        $tr.html(`
+            <td style="padding:6px 10px; font-weight:600;">${escHtml(name)}</td>
+            <td style="padding:6px 10px; color:#64748b;">${escHtml(grade || '—')}</td>
+            <td style="padding:6px 4px; text-align:center; white-space:nowrap;">
+                <button class="button button-small cust-inline-edit-child" data-child-id="${childId}" title="تعديل" style="margin-left:3px;"><span class="dashicons dashicons-edit" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span></button>
+                <button class="button button-small cust-inline-delete-child" data-child-id="${childId}" data-customer-id="${customerId}" title="حذف" style="color:#dc2626; border-color:#fca5a5;"><span class="dashicons dashicons-trash" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span></button>
+            </td>`);
+    });
+
+    $(document).on('click', '.cust-inline-update-child', function() {
+        const $tr     = $(this).closest('.cust-inline-child-tr');
+        const childId = parseInt($(this).data('child-id'));
+        const customerId = parseInt($tr.closest('.cust-inline-children').data('customer-id'));
+        const name    = $tr.find('.cust-inline-edit-name').val().trim();
+        const grade   = $tr.find('.cust-inline-edit-grade').val().trim();
+        if (!name) { $tr.find('.cust-inline-edit-name').focus(); return; }
+
+        ajax('olama_reg_update_child', { child_id: childId, child_name: name, grade })
+            .done(res => {
+                if (res.success && res.data.child) {
+                    const ch = res.data.child;
+                    $tr.html(`
+                        <td style="padding:6px 10px; font-weight:600;">${escHtml(ch.child_name)}</td>
+                        <td style="padding:6px 10px; color:#64748b;">${escHtml(ch.grade || '—')}</td>
+                        <td style="padding:6px 4px; text-align:center; white-space:nowrap;">
+                            <button class="button button-small cust-inline-edit-child" data-child-id="${ch.id}" title="تعديل" style="margin-left:3px;"><span class="dashicons dashicons-edit" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span></button>
+                            <button class="button button-small cust-inline-delete-child" data-child-id="${ch.id}" data-customer-id="${customerId}" title="حذف" style="color:#dc2626; border-color:#fca5a5;"><span class="dashicons dashicons-trash" style="font-size:13px;width:13px;height:13px;vertical-align:middle;"></span></button>
+                        </td>`);
+                } else {
+                    alert(res.data?.message || R.strings.error);
+                }
+            });
+    });
+
+    // Delete inline child
+    $(document).on('click', '.cust-inline-delete-child', function() {
+        if (!confirm('هل تريد حذف هذا الابن؟')) return;
+        const $tr        = $(this).closest('.cust-inline-child-tr');
+        const childId    = parseInt($(this).data('child-id'));
+        const customerId = parseInt($(this).data('customer-id'));
+
+        ajax('olama_reg_delete_child', { child_id: childId })
+            .done(res => {
+                if (res.success) {
+                    $tr.fadeOut(200, function() {
+                        $(this).remove();
+                        const $cnt = $(`.cust-children-count[data-id="${customerId}"]`);
+                        $cnt.text(Math.max(0, parseInt($cnt.text() || 0) - 1));
+                    });
+                } else {
+                    alert(res.data?.message || R.strings.error);
+                }
+            });
+    });
+
+    // ── Search debounce ────────────────────────────────────────────────────────
+
+    let _custSearchTimer;
+    $(document).on('input', '#cust_search_input', function() {
+        clearTimeout(_custSearchTimer);
+        const q = $(this).val();
+        _custSearchTimer = setTimeout(() => {
+            const url = new URL(window.location.href);
+            if (q) url.searchParams.set('s', q);
+            else url.searchParams.delete('s');
+            url.searchParams.delete('paged');
+            window.location.href = url.toString();
+        }, 600);
+    });
+
+    // =========================================================================
+    // Quick-Add External Customer Modal (custom-payments page)
+    // =========================================================================
+
+    $(document).on('click', '#cp_btn_add_ext_customer', function() {
+        $('#modal_ext_children_list').empty();
+        $('#modal_ext_name, #modal_ext_phone, #modal_ext_notes').val('');
+        $('#ext-quick-modal-overlay').css('display','flex');
+        setTimeout(() => $('#modal_ext_name').focus(), 50);
+    });
+
+    $(document).on('click', '#modal_ext_btn_cancel, #modal_ext_btn_cancel2', function() {
+        $('#ext-quick-modal-overlay').hide();
+    });
+
+    $(document).on('click', '#modal_ext_add_child_btn', function() {
+        $('#modal_ext_children_list').append(`
+            <div style="display:flex; gap:5px;" class="modal-child-row">
+                <input type="text" class="modal-child-name regular-text" placeholder="اسم الابن/الابنة" style="flex:2">
+                <input type="text" class="modal-child-grade regular-text" placeholder="الصف (اختياري)" style="flex:1">
+                <button type="button" class="button btn-remove-modal-child" style="min-width:32px;">×</button>
+            </div>
+        `);
+    });
+
+    $(document).on('click', '.btn-remove-modal-child', function() {
+        $(this).closest('.modal-child-row').remove();
+    });
+
+    $(document).on('click', '#modal_ext_btn_save', function() {
+        const name  = $('#modal_ext_name').val().trim();
+        const phone = $('#modal_ext_phone').val().trim();
+        const notes = $('#modal_ext_notes').val().trim();
+        const $btn  = $(this);
+
+        if (!name) { alert('الرجاء إدخال اسم العميل'); return; }
+
+        const children = [];
+        $('#modal_ext_children_list .modal-child-row').each(function() {
+            const cName  = $(this).find('.modal-child-name').val().trim();
+            const cGrade = $(this).find('.modal-child-grade').val().trim();
+            if (cName) children.push({ name: cName, grade: cGrade });
+        });
+
+        setLoading($btn, true);
+
+        ajax('olama_reg_add_external_customer', {
+            customer_name: name,
+            phone,
+            notes,
+            children: JSON.stringify(children)
+        }).done(res => {
+            setLoading($btn, false);
+            if (res.success && res.data.customer_id) {
+                if ($('#cp_ext_customer_search').length) {
+                    const uid = res.data.customer_uid ? `[${res.data.customer_uid}] ` : '';
+                    const newOption = new Option(`${uid}${name}${phone ? ' - ' + phone : ''}`, res.data.customer_id, true, true);
+                    $('#cp_ext_customer_search').append(newOption).trigger('change');
+                    $('#ext-quick-modal-overlay').hide();
+                } else {
+                    window.location.reload();
+                }
+            } else {
+                alert(res.data?.message || 'حدث خطأ أثناء حفظ العميل');
+            }
+        }).fail(() => { setLoading($btn, false); alert(R.strings.error); });
+    });
+
+    // =========================================================================
+    // Custom Payments — DB-backed child checkboxes
+    // =========================================================================
+    if ($('#cp_family_search').length || $('#cp_ext_customer_search').length) {
+
+        // Init Family Select2
+        if ($('#cp_family_search').length && typeof $.fn.select2 !== 'undefined') {
             $('#cp_family_search').select2({
                 dir: 'rtl', width: '100%',
                 ajax: {
                     url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
-                    data: function(params) { return { action: 'olama_reg_search', nonce: R.nonce, q: params.term }; },
-                    processResults: function(data) {
-                        return { results: (data.success && data.data.families) ? data.data.families.map(f => {
-                            const name1 = f.father_first_name || '';
-                            const name2 = f.father_family_name || '';
-                            const fullName = (name1 + ' ' + name2).trim() || 'بدون اسم';
-                            return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
-                        }) : [] };
-                    }
+                    data: params => ({ action: 'olama_reg_search', nonce: R.nonce, q: params.term }),
+                    processResults: data => ({ results: (data.success && data.data.families) ? data.data.families.map(f => {
+                        const fullName = ((f.father_first_name || '') + ' ' + (f.father_family_name || '')).trim() || 'بدون اسم';
+                        return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
+                    }) : [] })
                 },
                 placeholder: '-- ابحث باسم الأب، الأم، أو رقم العائلة --',
                 minimumInputLength: 3
             });
         }
 
-        // Toggle Internal/External Customer UI
+        // Init External Customer Select2
+        if ($('#cp_ext_customer_search').length && typeof $.fn.select2 !== 'undefined') {
+            $('#cp_ext_customer_search').select2({
+                dir: 'rtl', width: '100%',
+                ajax: {
+                    url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
+                    data: params => ({ action: 'olama_reg_search_external_customers', nonce: R.nonce, q: params.term }),
+                    processResults: data => ({ results: (data.success && data.data.customers) ? data.data.customers.map(c => {
+                        const uid = c.customer_uid ? `[${c.customer_uid}] ` : '';
+                        return { id: c.id, text: `${uid}${c.customer_name}${c.phone ? ' - ' + c.phone : ''}` };
+                    }) : [] })
+                },
+                placeholder: '-- ابحث بالاسم أو الهاتف أو اسم الابن --',
+                minimumInputLength: 2
+            }).on('change', function() {
+                const customerId = parseInt($(this).val()) || 0;
+                $('#cp_ext_customer_id').val(customerId);
+
+                if (!customerId) {
+                    $('#cp_ext_children_section').hide();
+                    $('#cp_ext_no_customer_msg').show();
+                    $('#cp_ext_students_list').empty();
+                    cpCalcTotal();
+                    return;
+                }
+
+                // Load children from DB
+                $('#cp_ext_no_customer_msg').hide();
+                $('#cp_ext_children_section').show();
+                $('#cp_ext_students_list').html('<div style="grid-column:1/-1; text-align:center; color:var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري التحميل...</div>');
+                $('#cp_ext_no_children_msg').hide();
+
+                ajax('olama_reg_get_external_customer_children', { customer_id: customerId })
+                    .done(res => {
+                        $('#cp_ext_students_list').empty();
+                        const children = res.success ? (res.data.children || []) : [];
+                        if (children.length) {
+                            children.forEach(ch => cpAddChildCheckbox(ch.id, ch.child_name, ch.grade, true));
+                            $('#cp_ext_no_children_msg').hide();
+                        } else {
+                            $('#cp_ext_no_children_msg').show();
+                        }
+                        cpCalcTotal();
+                    });
+            });
+        }
+
+        // Build a DB-backed child checkbox (data-child-id)
+        function cpAddChildCheckbox(childId, name, grade, checked) {
+            const id = `cp_ext_ch_${childId}`;
+            const html = `
+                <label for="${id}" style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" id="${id}" class="cp-ext-student-check" name="child_ids[]" value="${childId}" ${checked ? 'checked' : ''} style="width:16px;height:16px;">
+                    <span>
+                        <span style="display:block; font-weight:700;">${escHtml(name)}</span>
+                        <span style="display:block; font-size:11px; color:#64748b;">${escHtml(grade || 'بدون صف')}</span>
+                    </span>
+                </label>`;
+            $('#cp_ext_students_list').append(html);
+            $('#cp_ext_no_children_msg').hide();
+        }
+
+        // Toggle UI
         $('input[name="customer_type"]').on('change', function() {
             if ($(this).val() === 'external') {
                 $('#cp_internal_customer_wrap').hide();
                 $('#cp_external_customer_wrap').show();
-                $('#cp_family_search').prop('required', false);
                 $('#cp_students_container').hide();
                 $('.cp-student-check').prop('checked', false);
-                calculateCustomTotal();
             } else {
                 $('#cp_internal_customer_wrap').show();
                 $('#cp_external_customer_wrap').hide();
-                $('#cp_family_search').prop('required', true);
-                if ($('#cp_family_uid').val()) {
-                    $('#cp_students_container').show();
-                }
+                if ($('#cp_family_uid').val()) $('#cp_students_container').show();
             }
+            cpCalcTotal();
         });
 
-        // Add External Child
-        let extChildIndex = 0;
-        $('#cp_ext_add_child_btn').on('click', function() {
-            const name = $('#cp_ext_child_name').val().trim();
-            const grade = $('#cp_ext_child_grade').val().trim();
-            if (!name) return;
-            
-            extChildIndex++;
-            const html = `
-                <label style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;" id="ext_child_lbl_${extChildIndex}">
-                    <input type="checkbox" class="cp-ext-student-check" data-name="${name}" data-grade="${grade}" checked />
-                    <span>
-                        <span style="display:block; font-weight:700;">${name}</span>
-                        <span style="display:block; font-size:11px; color:#64748b;">${grade || 'بدون صف'}</span>
-                    </span>
-                    <button type="button" class="button-link" style="color:#dc2626; margin-right:auto; padding:0;" onclick="$('#ext_child_lbl_${extChildIndex}').remove(); $('#cp_amount').trigger('change');">
-                        <span class="dashicons dashicons-trash"></span>
-                    </button>
-                </label>
-            `;
-            $('#cp_ext_students_list').append(html);
-            $('#cp_ext_child_name').val('');
-            $('#cp_ext_child_grade').val('');
-            calculateCustomTotal();
-        });
-
+        // Family change → load students
         $('#cp_family_search').on('change', function() {
             const familyUid = $(this).val();
             $('#cp_family_uid').val(familyUid);
-            const $container = $('#cp_students_container');
             const $list = $('#cp_students_list');
-            
             $list.empty();
-            if (!familyUid) {
-                $container.hide();
-                calculateCustomTotal();
-                return;
-            }
+            if (!familyUid) { $('#cp_students_container').hide(); cpCalcTotal(); return; }
 
-            $container.show();
-            $list.html('<div style="grid-column: 1/-1; text-align: center; color: var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري تحميل الطلاب...</div>');
+            $('#cp_students_container').show();
+            $list.html('<div style="grid-column:1/-1; text-align:center; color:var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري تحميل الطلاب...</div>');
 
             ajax('olama_reg_get_family_students', { family_uid: familyUid })
                 .done(res => {
                     $list.empty();
-                    if (res.success && res.data.students && res.data.students.length > 0) {
+                    if (res.success && res.data.students && res.data.students.length) {
                         res.data.students.forEach(st => {
-                            const gradeName = st.grade_name || '';
-                            const html = `
+                            $list.append(`
                                 <label style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">
-                                    <input type="checkbox" name="student_uids[]" value="${st.student_uid}" class="cp-student-check" checked />
+                                    <input type="checkbox" name="student_uids[]" value="${st.student_uid}" class="cp-student-check" checked style="width:16px;height:16px;">
                                     <span>
-                                        <span style="display:block; font-weight:700;">${st.student_name || 'بدون اسم'}</span>
-                                        <span style="display:block; font-size:11px; color:#64748b;">${gradeName}</span>
+                                        <span style="display:block; font-weight:700;">${escHtml(st.student_name || 'بدون اسم')}</span>
+                                        <span style="display:block; font-size:11px; color:#64748b;">${escHtml(st.grade_name || '')}</span>
                                     </span>
-                                </label>
-                            `;
-                            $list.append(html);
+                                </label>`);
                         });
-                        calculateCustomTotal();
                     } else {
-                        $list.html('<div style="grid-column: 1/-1; color: #dc2626;">لا يوجد طلاب نشطين مسجلين لهذه العائلة.</div>');
+                        $list.html('<div style="grid-column:1/-1; color:#dc2626;">لا يوجد طلاب نشطين لهذه العائلة.</div>');
+                    }
+                    cpCalcTotal();
+                });
+        });
+
+        // Quick-add child during payment → saves to DB first
+        $(document).on('click', '#cp_ext_quick_add_child_btn', function() {
+            $('#cp_ext_new_child_row').show();
+            $('#cp_new_child_name').focus();
+        });
+        $(document).on('click', '#cp_new_child_cancel_btn', function() {
+            $('#cp_ext_new_child_row').hide();
+            $('#cp_new_child_name, #cp_new_child_grade').val('');
+        });
+        $(document).on('click', '#cp_new_child_save_btn', function() {
+            const customerId = parseInt($('#cp_ext_customer_id').val()) || 0;
+            const name       = $('#cp_new_child_name').val().trim();
+            const grade      = $('#cp_new_child_grade').val().trim();
+
+            if (!customerId) { alert('يرجى تحديد عميل خارجي أولاً.'); return; }
+            if (!name) { $('#cp_new_child_name').focus(); return; }
+
+            $('#cp_new_child_loading').show();
+
+            ajax('olama_reg_add_child_to_customer', { customer_id: customerId, child_name: name, grade })
+                .done(res => {
+                    $('#cp_new_child_loading').hide();
+                    if (res.success && res.data.child) {
+                        const ch = res.data.child;
+                        cpAddChildCheckbox(ch.id, ch.child_name, ch.grade, true);
+                        $('#cp_ext_new_child_row').hide();
+                        $('#cp_new_child_name, #cp_new_child_grade').val('');
+                        cpCalcTotal();
+                    } else {
+                        alert(res.data?.message || R.strings.error);
                     }
                 })
-                .fail(() => {
-                    $list.html('<div style="grid-column: 1/-1; color: #dc2626;">حدث خطأ أثناء جلب البيانات.</div>');
-                });
+                .fail(() => { $('#cp_new_child_loading').hide(); alert(R.strings.error); });
         });
 
-        $(document).on('change', '.cp-student-check, .cp-ext-student-check, #cp_amount, #cp_discount', calculateCustomTotal);
-        $(document).on('input', '#cp_amount, #cp_discount', calculateCustomTotal);
+        // Direct payment to customer (no child)
+        $(document).on('change', '#cp_ext_pay_customer_direct', function() {
+            if ($(this).is(':checked')) {
+                $('.cp-ext-student-check').prop('checked', false).prop('disabled', true);
+            } else {
+                $('.cp-ext-student-check').prop('disabled', false);
+            }
+            cpCalcTotal();
+        });
 
+        // Fee template → pre-fill amount
         $('#cp_fee_template').on('change', function() {
             const amount = $(this).find(':selected').data('amount');
-            if (amount !== undefined) {
-                $('#cp_amount').val(parseFloat(amount).toFixed(2));
-                calculateCustomTotal();
-            }
+            if (amount !== undefined) { $('#cp_amount').val(parseFloat(amount).toFixed(2)); cpCalcTotal(); }
         });
 
-        function calculateCustomTotal() {
-            const checkedCount = $('.cp-student-check:checked, .cp-ext-student-check:checked').length;
-            const amount = parseFloat($('#cp_amount').val()) || 0;
-            const discount = parseFloat($('#cp_discount').val()) || 0;
-            const total = Math.max(0, (checkedCount * amount) - discount);
-            $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
-            
-            if (checkedCount > 0) {
-                $('#cp_students_error').hide();
+        $(document).on('change input', '.cp-student-check, .cp-ext-student-check, #cp_amount, #cp_discount', cpCalcTotal);
+
+        function cpCalcTotal() {
+            const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
+            const isDirect   = $('#cp_ext_pay_customer_direct').is(':checked');
+            let count;
+            if (isExternal && isDirect) {
+                count = 1;
+            } else if (isExternal) {
+                count = $('.cp-ext-student-check:checked').length;
+            } else {
+                count = $('.cp-student-check:checked').length;
             }
+            const amount   = parseFloat($('#cp_amount').val()) || 0;
+            const discount = parseFloat($('#cp_discount').val()) || 0;
+            const total    = Math.max(0, (count * amount) - discount);
+            $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
+            if (count > 0) $('#cp_students_error').hide();
         }
 
+        // Submit
         $('#olama-reg-custom-payment-form').on('submit', function(e) {
             e.preventDefault();
-            
+
             const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
+            const isDirect   = $('#cp_ext_pay_customer_direct').is(':checked');
             const internalCount = $('.cp-student-check:checked').length;
-            const externalCount = $('.cp-ext-student-check:checked').length;
-            
-            if (!isExternal && internalCount === 0) {
-                $('#cp_students_error').show();
-                return;
-            }
-            if (isExternal && externalCount === 0) {
-                alert('يجب إضافة واختيار ابن واحد على الأقل للعميل الخارجي.');
-                return;
-            }
+            const externalCount = isDirect ? 1 : $('.cp-ext-student-check:checked').length;
 
-            const $form = $(this);
-            const $btn = $('#cp_submit_btn');
+            if (!isExternal && internalCount === 0) { $('#cp_students_error').show(); return; }
+            if (isExternal && externalCount === 0) { alert('يجب اختيار ابن واحد على الأقل، أو تفعيل "دفعة مباشرة للعميل".'); return; }
+
+            const $form    = $(this);
+            const $btn     = $('#cp_submit_btn');
             const $loading = $('#cp_loading');
-            const $msg = $('#cp_response_msg');
+            const $msg     = $('#cp_response_msg');
 
-            $btn.prop('disabled', true);
-            $loading.show();
-            $msg.hide();
+            $btn.prop('disabled', true); $loading.show(); $msg.hide();
 
-            const processPayment = function(familyUid, studentUids = []) {
-                $('#cp_family_uid').val(familyUid);
-                
-                // Inject student UIDs if passed
-                $('.cp_temp_student_uid').remove();
-                studentUids.forEach(uid => {
-                    $form.append(`<input type="hidden" name="student_uids[]" value="${uid}" class="cp_temp_student_uid">`);
-                });
+            let formData = $form.serialize();
 
-                // Serialize again now that family_uid and student_uids are set
-                let formData = $form.serialize();
+            if (isExternal) {
+                const extCustomerId = parseInt($('#cp_ext_customer_id').val()) || 0;
+                if (!extCustomerId) {
+                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>يرجى تحديد عميل خارجي.</p></div>').fadeIn();
+                    $btn.prop('disabled', false); $loading.hide(); return;
+                }
+                formData += '&is_external_customer=1';
+                // child_ids[] are already serialized from checkboxes (name="child_ids[]")
+                // If direct payment, remove any child_ids and signal no children
+                if (isDirect) {
+                    // Strip child_ids from serialized and send empty
+                    formData = formData.replace(/child_ids%5B%5D=[^&]*/g, '').replace(/child_ids%5B%5D/g, '');
+                }
+            }
 
-                $.post(R.ajaxurl, 'action=olama_reg_save_custom_payment&nonce=' + R.nonce + '&' + formData)
+            $.post(R.ajaxurl, 'action=olama_reg_save_custom_payment&nonce=' + R.nonce + '&' + formData)
                 .done(res => {
                     if (res.success) {
                         $msg.html('<div class="notice notice-success inline" style="padding:10px;"><p>' + res.data.message + '</p></div>').fadeIn();
-                        $('#olama-reg-custom-payment-form')[0].reset();
+                        $form[0].reset();
                         if (typeof $.fn.select2 !== 'undefined') {
-                            $('#cp_family_search').val('').trigger('change');
+                            $('#cp_family_search, #cp_ext_customer_search').val(null).trigger('change');
                         }
-                        calculateCustomTotal();
-                        
-                        if (res.data.payment_id) {
+                        $('#cp_ext_students_list').empty();
+                        $('#cp_ext_children_section').hide();
+                        $('#cp_ext_no_customer_msg').show();
+                        cpCalcTotal();
+
+                        // Open receipt in new tab
+                        const invoiceId = res.data.payment_id || (res.data.invoice_ids && res.data.invoice_ids[0]);
+                        if (invoiceId) {
                             const url = new URL(window.location.href);
                             url.searchParams.set('page', 'olama-registration-payments');
                             url.searchParams.set('action', 'print_receipt');
-                            url.searchParams.set('id', res.data.payment_id);
+                            url.searchParams.set('id', invoiceId);
                             window.open(url.toString(), '_blank');
                         }
                     } else {
-                        $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data.message || 'Error occurred.') + '</p></div>').fadeIn();
+                        $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data?.message || 'حدث خطأ.') + '</p></div>').fadeIn();
                     }
                 })
-                .always(() => {
-                    $btn.prop('disabled', false);
-                    $loading.hide();
-                });
-            };
-
-            if (isExternal) {
-                const extName = $('#cp_ext_name').val();
-                const extPhone = $('#cp_ext_phone').val();
-                
-                if (!extName || !extPhone) {
-                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>يرجى إدخال اسم العميل ورقم الهاتف.</p></div>').fadeIn();
-                    $btn.prop('disabled', false);
-                    $loading.hide();
-                    return;
-                }
-
-                const children = [];
-                $('.cp-ext-student-check:checked').each(function() {
-                    children.push({
-                        name: $(this).data('name'),
-                        grade: $(this).data('grade')
-                    });
-                });
-
-                $.post(R.ajaxurl, {
-                    action: 'olama_reg_create_external_customer',
-                    nonce: R.nonce,
-                    name: extName,
-                    phone: extPhone,
-                    children: JSON.stringify(children)
-                }).done(res => {
-                    if (res.success && res.data.family_uid) {
-                        processPayment(res.data.family_uid, res.data.student_uids || []);
-                    } else {
-                        $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data?.message || 'Error creating external customer.') + '</p></div>').fadeIn();
-                        $btn.prop('disabled', false);
-                        $loading.hide();
-                    }
-                }).fail(() => {
-                    $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>حدث خطأ في الاتصال بالخادم عند إنشاء العميل.</p></div>').fadeIn();
-                    $btn.prop('disabled', false);
-                    $loading.hide();
-                });
-            } else {
-                processPayment($('#cp_family_uid').val());
-            }
+                .always(() => { $btn.prop('disabled', false); $loading.hide(); });
         });
     }
 

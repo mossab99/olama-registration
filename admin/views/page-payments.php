@@ -19,6 +19,7 @@ if ( $action === 'print_receipt' && $payment_id ) {
     $payment = $receipt['payment'];
     $invoice = $receipt['invoice'];
     $family  = $receipt['family'];
+    $ext_customer_name = $receipt['ext_customer_name'] ?? null;
     $received_by_name = $receipt['received_by_name'];
     ?>
     <!DOCTYPE html>
@@ -80,10 +81,18 @@ if ( $action === 'print_receipt' && $payment_id ) {
             <table class="content-table">
                 <tr>
                     <td class="label">وصلنا من السيد/ة:</td>
-                    <td><strong><?php echo esc_html( $family ? $family->father_first_name . ' ' . $family->father_family_name : $payment->family_uid ); ?></strong></td>
+                    <td><strong><?php
+                        if ( $family ) {
+                            echo esc_html( trim( $family->father_first_name . ' ' . $family->father_family_name ) );
+                        } elseif ( $ext_customer_name ) {
+                            echo esc_html( $ext_customer_name );
+                        } else {
+                            echo esc_html( $payment->family_uid );
+                        }
+                    ?></strong></td>
                 </tr>
                 <tr>
-                    <td class="label">رقم ملف العائلة:</td>
+                    <td class="label">رقم الملف / العميل:</td>
                     <td><strong style="color:#E8920A;"><?php echo esc_html( $payment->family_uid ); ?></strong></td>
                 </tr>
                 <tr>

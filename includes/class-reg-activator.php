@@ -26,9 +26,138 @@ class Olama_Reg_Activator {
         self::create_financial_table( $wpdb, $charset );
         self::create_billing_tables( $wpdb, $charset );
         self::create_settlement_receipts_table( $wpdb, $charset );
+        self::create_customers_table( $wpdb, $charset );
+        self::create_customer_children_table( $wpdb, $charset );
+        self::upgrade_invoices_table( $wpdb );
     }
 
 
+
+
+    // ── Create olama_customers ───────────────────────────────────────────────
+    private static function create_customers_table( $wpdb, string $charset ): void {
+        $table = $wpdb->prefix . 'olama_customers';
+
+        $sql = "CREATE TABLE {$table} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            customer_uid varchar(20) NOT NULL DEFAULT '',
+            customer_name varchar(150) NOT NULL,
+            phone varchar(50) DEFAULT NULL,
+            notes text DEFAULT NULL,
+            is_active tinyint(1) NOT NULL DEFAULT 1,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            UNIQUE KEY customer_uid (customer_uid),
+            KEY idx_customer_name (customer_name),
+            KEY idx_phone (phone)
+        ) {$charset};";
+
+        dbDelta( $sql );
+
+        // Safely add columns on pre-existing tables
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'customer_uid', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `customer_uid` varchar(20) NOT NULL DEFAULT '' AFTER `id`" );
+        }
+        if ( ! in_array( 'notes', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `notes` text DEFAULT NULL AFTER `phone`" );
+        }
+        if ( ! in_array( 'is_active', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `is_active` tinyint(1) NOT NULL DEFAULT 1 AFTER `notes`" );
+        }
+        // Remove the broken UNIQUE constraint on phone (allow NULL duplicates safely)
+        $indexes = $wpdb->get_col( "SHOW INDEX FROM {$table} WHERE Key_name = 'phone'", 2 );
+        if ( ! empty( $indexes ) ) {
+            $wpdb->query( "ALTER TABLE {$table} DROP INDEX `phone`" );
+        }
+
+        // Backfill missing customer_uid values
+        $rows = $wpdb->get_results( "SELECT id FROM {$table} WHERE customer_uid = '' OR customer_uid IS NULL" );
+        foreach ( $rows as $row ) {
+            $uid = 'CUST-' . str_pad( $row->id, 4, '0', STR_PAD_LEFT );
+            $wpdb->update( $table, [ 'customer_uid' => $uid ], [ 'id' => $row->id ] );
+        }
+
+        // Drop children_names column (data migrated to olama_customer_children)
+        // Only drop after children table is populated (done in create_customer_children_table)
+    }
+
+    // ── Create olama_customer_children ───────────────────────────────────────
+    private static function create_customer_children_table( $wpdb, string $charset ): void {
+        $table = $wpdb->prefix . 'olama_customer_children';
+
+        $sql = "CREATE TABLE {$table} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            child_uid varchar(30) NOT NULL DEFAULT '',
+            customer_id bigint(20) UNSIGNED NOT NULL,
+            child_name varchar(150) NOT NULL,
+            grade varchar(100) DEFAULT NULL,
+            is_active tinyint(1) NOT NULL DEFAULT 1,
+            notes text DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            UNIQUE KEY child_uid (child_uid),
+            KEY idx_customer_id (customer_id)
+        ) {$charset};";
+
+        dbDelta( $sql );
+
+        // Safely add columns on pre-existing tables
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+        if ( ! in_array( 'is_active', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `is_active` tinyint(1) NOT NULL DEFAULT 1 AFTER `grade`" );
+        }
+        if ( ! in_array( 'notes', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `notes` text DEFAULT NULL AFTER `is_active`" );
+        }
+
+        // Backfill: migrate JSON children from olama_customers.children_names → this table
+        $customers_table = $wpdb->prefix . 'olama_customers';
+        $customers = $wpdb->get_results( "SELECT id, customer_uid, children_names FROM {$customers_table} WHERE children_names IS NOT NULL AND children_names != '' AND children_names != '[]'" );
+
+        foreach ( $customers as $cust ) {
+            $children = json_decode( $cust->children_names, true );
+            if ( ! is_array( $children ) || empty( $children ) ) continue;
+
+            $seq = 1;
+            foreach ( $children as $child ) {
+                $child_name = sanitize_text_field( $child['name'] ?? '' );
+                if ( empty( $child_name ) ) { $seq++; continue; }
+
+                $child_uid = $cust->customer_uid . '-C' . str_pad( $seq, 2, '0', STR_PAD_LEFT );
+
+                // Skip if this child_uid already exists
+                $exists = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} WHERE child_uid = %s", $child_uid ) );
+                if ( $exists ) { $seq++; continue; }
+
+                $wpdb->insert( $table, [
+                    'child_uid'   => $child_uid,
+                    'customer_id' => $cust->id,
+                    'child_name'  => $child_name,
+                    'grade'       => sanitize_text_field( $child['grade'] ?? '' ) ?: null,
+                    'is_active'   => 1,
+                ], [ '%s', '%d', '%s', '%s', '%d' ] );
+
+                $seq++;
+            }
+        }
+    }
+
+    // ── Add ext columns to olama_invoices ─────────────────────────────────────
+    private static function upgrade_invoices_table( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_invoices';
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'ext_customer_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `ext_customer_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `student_uid`" );
+        }
+        if ( ! in_array( 'ext_child_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `ext_child_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `ext_customer_id`" );
+        }
+    }
 
 
     // ── Create olama_reg_financial ───────────────────────────────────────────
