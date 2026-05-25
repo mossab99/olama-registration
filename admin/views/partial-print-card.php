@@ -59,7 +59,7 @@ $school_name = get_option( 'olama_school_settings', [] )['school_name_ar'] ?? ge
         <h3>بيانات الأب</h3>
         <div class="grid">
             <div class="field"><label>الاسم الكامل</label>
-                <span><?php echo esc_html( trim( implode( ' ', [ $family->father_first_name, $family->father_second_name, $family->father_third_name, $family->father_family_name ] ) ) ); ?></span>
+                <span><?php echo esc_html( trim( implode( ' ', array_filter( [ $family->father_first_name ?? '', $family->father_second_name ?? '', $family->father_third_name ?? '', $family->father_family_name ?? '' ] ) ) ) ?: ( $family->family_name ?? '—' ) ); ?></span>
             </div>
             <div class="field"><label>الجنسية</label><span><?php echo esc_html( $family->father_nationality ?? '—' ); ?></span></div>
             <div class="field"><label>المهنة</label><span><?php echo esc_html( $family->father_job ?? '—' ); ?></span></div>

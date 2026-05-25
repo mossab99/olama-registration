@@ -94,6 +94,8 @@ class Olama_Reg_Billing_Invoice {
             'student_uid'      => sanitize_text_field( $data['student_uid'] ?? '' ) ?: null,
             'academic_year_id' => $year_id,
             'fee_template_id'  => absint( $data['fee_template_id'] ?? 0 ) ?: null,
+            'ext_customer_id'  => absint( $data['ext_customer_id'] ?? 0 ) ?: null,
+            'ext_child_id'     => absint( $data['ext_child_id'] ?? 0 ) ?: null,
             'issue_date'       => $issue_date,
             'due_date'         => self::sanitize_date( $data['due_date'] ?? '' ) ?: null,
             'status'           => self::valid_status( $data['status'] ?? 'draft' ),
@@ -154,10 +156,16 @@ class Olama_Reg_Billing_Invoice {
 
         $payload = [];
 
+        if ( isset( $data['family_uid'] ) )
+            $payload['family_uid'] = sanitize_text_field( $data['family_uid'] ) ?: null;
         if ( isset( $data['student_uid'] ) )
             $payload['student_uid'] = sanitize_text_field( $data['student_uid'] ) ?: null;
         if ( isset( $data['fee_template_id'] ) )
             $payload['fee_template_id'] = absint( $data['fee_template_id'] ) ?: null;
+        if ( isset( $data['ext_customer_id'] ) )
+            $payload['ext_customer_id'] = absint( $data['ext_customer_id'] ) ?: null;
+        if ( isset( $data['ext_child_id'] ) )
+            $payload['ext_child_id'] = absint( $data['ext_child_id'] ) ?: null;
         if ( isset( $data['issue_date'] ) )
             $payload['issue_date'] = self::sanitize_date( $data['issue_date'] ) ?: $before->issue_date;
         if ( isset( $data['due_date'] ) )
@@ -245,6 +253,76 @@ class Olama_Reg_Billing_Invoice {
              ORDER BY issue_date DESC, id DESC",
             ...$params
         ) ) ?: [];
+    }
+
+    /**
+     * Get all invoices for an external customer/year.
+     */
+    public static function get_customer_invoices( int $customer_id, int $year_id ): array {
+        global $wpdb;
+
+        $customer_uid = $wpdb->get_var( $wpdb->prepare(
+            "SELECT customer_uid FROM {$wpdb->prefix}olama_customers WHERE id = %d",
+            $customer_id
+        ) );
+        if ( ! $customer_uid ) {
+            $customer_uid = 'CUST-' . str_pad( $customer_id, 4, '0', STR_PAD_LEFT );
+        }
+
+        $params      = [ $customer_id, $customer_uid ];
+        $year_clause = '';
+        if ( $year_id > 0 ) {
+            $year_clause = ' AND academic_year_id = %d';
+            $params[]    = $year_id;
+        }
+
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM " . self::t( 'olama_invoices' ) . "
+             WHERE ( ext_customer_id = %d OR ( family_uid = %s AND family_uid != '' ) ) {$year_clause}
+             ORDER BY issue_date DESC, id DESC",
+            ...$params
+        ) ) ?: [];
+    }
+
+    /**
+     * Lightweight summary for the external customer financial tab.
+     */
+    public static function get_customer_invoice_summary( int $customer_id, int $year_id ): object {
+        global $wpdb;
+
+        $customer_uid = $wpdb->get_var( $wpdb->prepare(
+            "SELECT customer_uid FROM {$wpdb->prefix}olama_customers WHERE id = %d",
+            $customer_id
+        ) );
+        if ( ! $customer_uid ) {
+            $customer_uid = 'CUST-' . str_pad( $customer_id, 4, '0', STR_PAD_LEFT );
+        }
+
+        $params      = [ $customer_id, $customer_uid ];
+        $year_clause = '';
+        if ( $year_id > 0 ) {
+            $year_clause = ' AND academic_year_id = %d';
+            $params[]    = $year_id;
+        }
+
+        $row = $wpdb->get_row( $wpdb->prepare(
+            "SELECT
+                COUNT(*) AS invoice_count,
+                COALESCE(SUM(total), 0)       AS total_invoiced,
+                COALESCE(SUM(amount_paid), 0) AS total_paid,
+                COALESCE(SUM(balance), 0)     AS balance
+             FROM " . self::t( 'olama_invoices' ) . "
+             WHERE ( ext_customer_id = %d OR ( family_uid = %s AND family_uid != '' ) ) {$year_clause}
+               AND status NOT IN ('draft','cancelled')",
+            ...$params
+        ) );
+
+        return $row ?: (object) [
+            'invoice_count'  => 0,
+            'total_invoiced' => 0,
+            'total_paid'     => 0,
+            'balance'        => 0,
+        ];
     }
 
     /**

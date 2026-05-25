@@ -197,14 +197,13 @@ if ( $filter_method ) {
 }
 if ( $search_q ) {
     $like = '%' . $wpdb->esc_like( $search_q ) . '%';
-    $where .= " AND (p.family_uid LIKE %s OR i.invoice_number LIKE %s OR f.father_first_name LIKE %s OR f.father_family_name LIKE %s)";
-    $params[] = $like;
+    $where .= " AND (p.family_uid LIKE %s OR i.invoice_number LIKE %s OR f.family_name LIKE %s)";
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
 }
 
-$query = "SELECT p.*, i.invoice_number, f.father_first_name, f.father_family_name, u.display_name AS received_by_name
+$query = "SELECT p.*, i.invoice_number, f.family_name AS father_first_name, '' AS father_family_name, u.display_name AS received_by_name
           FROM " . $wpdb->prefix . "olama_payments p
           LEFT JOIN " . $wpdb->prefix . "olama_invoices i ON i.id = p.invoice_id
           LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = p.family_uid

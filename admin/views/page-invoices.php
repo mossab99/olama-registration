@@ -255,14 +255,13 @@ if ( $filter_year ) {
 }
 if ( $search_q ) {
     $like = '%' . $wpdb->esc_like( $search_q ) . '%';
-    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.father_first_name LIKE %s OR f.father_family_name LIKE %s)";
-    $params[] = $like;
+    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.family_name LIKE %s)";
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
 }
 
-$query = "SELECT i.*, f.father_first_name, f.father_family_name
+$query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_name
           FROM " . $wpdb->prefix . "olama_invoices i
           LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = i.family_uid
           WHERE {$where}

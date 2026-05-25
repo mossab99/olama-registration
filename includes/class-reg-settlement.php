@@ -212,7 +212,7 @@ class Olama_Reg_Settlement {
         
         $order_by = "ORDER BY r.id DESC";
 
-        $sql = "SELECT r.*, f.father_first_name, f.father_family_name 
+        $sql = "SELECT r.*, f.family_name AS father_first_name, '' AS father_family_name 
                 FROM {$table} r
                 LEFT JOIN {$wpdb->prefix}olama_families f ON f.family_uid = r.family_id
                 WHERE {$where_sql} {$order_by}";

@@ -13,7 +13,7 @@ class Olama_Reg_Student {
         global $wpdb;
         return $wpdb->get_row( $wpdb->prepare(
             "SELECT s.*,
-                    f.family_uid, f.father_first_name, f.father_family_name
+                    f.family_uid, f.family_name AS father_first_name, '' AS father_family_name
              FROM {$wpdb->prefix}olama_students s
              LEFT JOIN {$wpdb->prefix}olama_families f ON f.family_uid = s.family_id
              WHERE s.student_uid = %s",
@@ -38,7 +38,7 @@ class Olama_Reg_Student {
              ) e ON e.student_uid = s.student_uid
              LEFT JOIN {$wpdb->prefix}olama_sections sec ON sec.id = e.section_id
              LEFT JOIN {$wpdb->prefix}olama_grades g   ON g.id = sec.grade_id
-             WHERE s.family_id = %s
+             WHERE s.family_id = %s AND s.student_uid NOT LIKE 'ext_%'
              ORDER BY s.sequence_in_family ASC, s.id ASC",
             $family_uid
         ) ) ?: [];

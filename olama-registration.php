@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-define( 'OLAMA_REG_VERSION',             '1.1.4' );
+define( 'OLAMA_REG_VERSION',             '1.2.2' );
 define( 'OLAMA_REG_MIN_SCHOOL_VERSION',  '2.3.9' );
 define( 'OLAMA_REG_PATH',               plugin_dir_path( __FILE__ ) );
 define( 'OLAMA_REG_URL',                plugin_dir_url( __FILE__ ) );
@@ -57,6 +57,14 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-student.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-customer.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-child.php';
+    
+    // Agreements
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-fees.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-clauses.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-clause-bank.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-invoice.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-templates.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-financial.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-fees.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-invoice.php';
@@ -118,6 +126,13 @@ function olama_reg_deactivate() {
 
 // ── Temporary DB Cleanup Script ──────────────────────────────────────────────
 add_action( 'admin_init', function() {
+    if ( isset( $_GET['force_db_create'] ) ) {
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        require_once OLAMA_REG_PATH . 'includes/class-reg-activator.php';
+        Olama_Reg_Activator::run_migrations();
+        wp_die( '<h1>تم تحديث قاعدة البيانات</h1><p>تم إنشاء الجداول المفقودة بنجاح.</p>', 'تم' );
+    }
+
     if ( ! isset( $_GET['olama_db_cleanup'] ) ) return;
     
     global $wpdb;

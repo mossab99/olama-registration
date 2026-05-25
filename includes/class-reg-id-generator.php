@@ -8,6 +8,21 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class Olama_Reg_ID_Generator {
 
     /**
+     * Generate a sequential ID with a prefix for agreements, invoices, etc.
+     */
+    public static function generate_id( string $prefix ): string {
+        global $wpdb;
+
+        if ( $prefix === 'AGR' ) {
+            $table = $wpdb->prefix . 'olama_agreements';
+            $max = (int) $wpdb->get_var( "SELECT MAX(id) FROM {$table}" );
+            return 'AGR-' . str_pad( (string) ( $max + 1 ), 5, '0', STR_PAD_LEFT );
+        }
+        
+        return $prefix . '-' . substr( md5( uniqid( '', true ) ), 0, 6 );
+    }
+
+    /**
      * Generate the next available family UID (pure numeric string).
      * Looks at MAX of existing family_uid values cast to integer.
      */

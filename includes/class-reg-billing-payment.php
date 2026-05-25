@@ -329,7 +329,7 @@ class Olama_Reg_Billing_Payment {
         $family = null;
         if ( $payment->family_uid ) {
             $family = $wpdb->get_row( $wpdb->prepare(
-                "SELECT family_uid, father_first_name, father_family_name
+                "SELECT family_uid, family_name AS father_first_name, '' AS father_family_name
                  FROM {$wpdb->prefix}olama_families
                  WHERE family_uid = %s",
                 $payment->family_uid

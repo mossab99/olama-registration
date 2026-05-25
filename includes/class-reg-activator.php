@@ -28,6 +28,7 @@ class Olama_Reg_Activator {
         self::create_settlement_receipts_table( $wpdb, $charset );
         self::create_customers_table( $wpdb, $charset );
         self::create_customer_children_table( $wpdb, $charset );
+        self::create_agreements_tables( $wpdb, $charset );
         self::upgrade_invoices_table( $wpdb );
     }
 
@@ -156,6 +157,10 @@ class Olama_Reg_Activator {
         }
         if ( ! in_array( 'ext_child_id', (array) $existing, true ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `ext_child_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `ext_customer_id`" );
+        }
+        if ( ! in_array( 'agreement_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `agreement_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `id`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `agreement_id` (`agreement_id`)" );
         }
     }
 
@@ -330,5 +335,116 @@ class Olama_Reg_Activator {
         ) {$charset};";
 
         dbDelta( $sql );
+    }
+
+    // ── Create Agreements Tables ──────────────────────────────────────────────
+    public static function create_agreements_tables( $wpdb, string $charset ): void {
+        // 1. Agreements
+        $sql_agreements = "CREATE TABLE {$wpdb->prefix}olama_agreements (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            agreement_number VARCHAR(30) NOT NULL,
+            payer_type VARCHAR(20) NOT NULL,
+            payer_id VARCHAR(50) NOT NULL,
+            participant_type VARCHAR(20) NOT NULL,
+            participant_id BIGINT UNSIGNED NOT NULL,
+            participant_ids TEXT DEFAULT NULL,
+            activity_type VARCHAR(60) NOT NULL,
+            template_id BIGINT UNSIGNED DEFAULT NULL,
+            academic_year_id INT UNSIGNED DEFAULT NULL,
+            start_date DATE NOT NULL,
+            end_date DATE DEFAULT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'draft',
+            total_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            notes TEXT DEFAULT NULL,
+            created_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY agreement_number (agreement_number),
+            KEY payer (payer_type, payer_id),
+            KEY participant (participant_type, participant_id),
+            KEY status (status)
+        ) {$charset};";
+
+        // 2. Agreement Fees
+        $sql_fees = "CREATE TABLE {$wpdb->prefix}olama_agreement_fees (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            agreement_id BIGINT UNSIGNED NOT NULL,
+            fee_category VARCHAR(60) NOT NULL,
+            label VARCHAR(255) NOT NULL,
+            amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            discount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            net_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            due_date DATE DEFAULT NULL,
+            invoice_id BIGINT UNSIGNED DEFAULT NULL,
+            paid_status VARCHAR(20) NOT NULL DEFAULT 'unpaid',
+            sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            KEY agreement_id (agreement_id),
+            KEY invoice_id (invoice_id)
+        ) {$charset};";
+
+        // 3. Agreement Clauses
+        $sql_clauses = "CREATE TABLE {$wpdb->prefix}olama_agreement_clauses (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            agreement_id BIGINT UNSIGNED NOT NULL,
+            clause_text TEXT NOT NULL,
+            sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            KEY agreement_id (agreement_id)
+        ) {$charset};";
+
+        // 4. Agreement Templates
+        $sql_templates = "CREATE TABLE {$wpdb->prefix}olama_agreement_templates (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            activity_type VARCHAR(60) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            description TEXT DEFAULT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY activity_type (activity_type)
+        ) {$charset};";
+
+        // 5. Template Fees
+        $sql_tpl_fees = "CREATE TABLE {$wpdb->prefix}olama_agreement_template_fees (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            template_id BIGINT UNSIGNED NOT NULL,
+            fee_category VARCHAR(60) NOT NULL,
+            label VARCHAR(255) NOT NULL,
+            amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            discount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            net_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            KEY template_id (template_id)
+        ) {$charset};";
+
+        // 6. Template Clauses
+        $sql_tpl_clauses = "CREATE TABLE {$wpdb->prefix}olama_agreement_template_clauses (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            template_id BIGINT UNSIGNED NOT NULL,
+            clause_text TEXT NOT NULL,
+            sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            KEY template_id (template_id)
+        ) {$charset};";
+
+        // 7. Clause Bank
+        $sql_clause_bank = "CREATE TABLE {$wpdb->prefix}olama_agreement_clause_bank (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            title VARCHAR(255) NOT NULL,
+            clause_text TEXT NOT NULL,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            PRIMARY KEY (id)
+        ) {$charset};";
+
+        dbDelta( $sql_agreements );
+        dbDelta( $sql_fees );
+        dbDelta( $sql_clauses );
+        dbDelta( $sql_templates );
+        dbDelta( $sql_tpl_fees );
+        dbDelta( $sql_tpl_clauses );
+        dbDelta( $sql_clause_bank );
     }
 }

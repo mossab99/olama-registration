@@ -45,6 +45,18 @@ class Olama_Reg_Ajax {
             'olama_reg_add_child_to_customer',
             'olama_reg_update_child',
             'olama_reg_delete_child',
+
+            // Agreements
+            'olama_reg_agr_save_header',
+            'olama_reg_agr_search_payer',
+            'olama_reg_agr_get_participants',
+            'olama_reg_agr_save_fee',
+            'olama_reg_agr_delete_fee',
+            'olama_reg_agr_add_clause',
+            'olama_reg_agr_save_clause',
+            'olama_reg_agr_delete_clause',
+            'olama_reg_agr_reorder_clauses',
+            'olama_reg_agr_generate_invoice',
         ];
 
         foreach ( $actions as $action ) {
@@ -370,11 +382,11 @@ class Olama_Reg_Ajax {
         $like   = '%' . $wpdb->esc_like( $q ) . '%';
 
         $families = $wpdb->get_results( $wpdb->prepare(
-            "SELECT family_uid, father_first_name, father_family_name, is_active
+            "SELECT family_uid, family_name AS father_first_name, '' AS father_family_name
              FROM {$wpdb->prefix}olama_families
-             WHERE family_uid LIKE %s OR father_first_name LIKE %s OR father_family_name LIKE %s
+             WHERE family_uid LIKE %s OR family_name LIKE %s
              LIMIT 10",
-            $like, $like, $like
+            $like, $like
         ) );
 
         $students = $wpdb->get_results( $wpdb->prepare(
@@ -767,6 +779,218 @@ class Olama_Reg_Ajax {
 
         wp_send_json_success( [
             'message' => __( 'تم إلغاء الإيصال بنجاح.', 'olama-registration' ),
+        ] );
+    }
+
+    // ── Agreements ────────────────────────────────────────────────────────────
+
+    public function ajax_agr_save_header(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+        
+        $participant_id  = 0;
+        $participant_ids = [];
+        if ( isset( $_POST['participant_id'] ) ) {
+            if ( is_array( $_POST['participant_id'] ) ) {
+                $participant_ids = array_map( 'intval', $_POST['participant_id'] );
+                $participant_id  = $participant_ids[0] ?? 0;
+            } else {
+                $participant_id  = (int) $_POST['participant_id'];
+                $participant_ids = [ $participant_id ];
+            }
+        }
+
+        $data = [
+            'payer_type'       => sanitize_text_field( $_POST['payer_type'] ?? '' ),
+            'payer_id'         => sanitize_text_field( $_POST['payer_id'] ?? '' ),
+            'participant_type' => ( sanitize_text_field( $_POST['payer_type'] ?? '' ) === 'family' ) ? 'student' : 'child',
+            'participant_id'   => $participant_id,
+            'participant_ids'  => $participant_ids,
+            'activity_type'    => sanitize_text_field( $_POST['activity_type'] ?? '' ),
+            'start_date'       => sanitize_text_field( $_POST['start_date'] ?? '' ),
+            'end_date'         => sanitize_text_field( $_POST['end_date'] ?? '' ),
+            'notes'            => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+            'template_id'      => absint( $_POST['template_id'] ?? 0 ) ?: null,
+        ];
+
+        if ( empty( $data['end_date'] ) ) {
+            $data['end_date'] = null; // Important for DB
+        }
+
+        if ( $id > 0 ) {
+            $old = Olama_Reg_Agreement::get( $id );
+            $old_template_id = $old ? $old->template_id : null;
+            $old_participant_count = $old ? count( $old->participant_ids_array ) : 0;
+            
+            $result = Olama_Reg_Agreement::update( $id, $data );
+            if ( $result ) {
+                $new_participant_count = count( $participant_ids );
+                if ( $data['template_id'] && ( $data['template_id'] != $old_template_id || $new_participant_count != $old_participant_count ) ) {
+                    Olama_Reg_Agreement_Fees::apply_template_fees( $id, $data['template_id'] );
+                }
+                wp_send_json_success( [ 'message' => __( 'تم تحديث العقد.', 'olama-registration' ), 'id' => $id ] );
+            }
+        } else {
+            $id = Olama_Reg_Agreement::create( $data );
+            if ( $id ) {
+                if ( $data['template_id'] ) {
+                    Olama_Reg_Agreement_Fees::apply_template_fees( $id, $data['template_id'] );
+                }
+                wp_send_json_success( [ 'message' => __( 'تم إنشاء العقد.', 'olama-registration' ), 'id' => $id ] );
+            }
+        }
+
+        wp_send_json_error( [ 'message' => __( 'حدث خطأ أثناء الحفظ.', 'olama-registration' ) ] );
+    }
+
+    public function ajax_agr_search_payer(): void {
+        $this->guard();
+        global $wpdb;
+        $q          = sanitize_text_field( $_POST['q'] ?? '' );
+        $payer_type = sanitize_text_field( $_POST['payer_type'] ?? 'customer' );
+        $like       = '%' . $wpdb->esc_like( $q ) . '%';
+        $results    = [];
+
+        if ( $payer_type === 'customer' ) {
+            $table = $wpdb->prefix . 'olama_customers';
+            $rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT id, customer_name AS text FROM {$table} WHERE customer_name LIKE %s OR phone LIKE %s LIMIT 15",
+                $like, $like
+            ) );
+            foreach ( $rows as $r ) $results[] = [ 'id' => $r->id, 'text' => $r->text ];
+        } elseif ( $payer_type === 'family' ) {
+            $table = $wpdb->prefix . 'olama_families';
+            $rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT family_uid AS id, family_name AS text FROM {$table} WHERE family_name LIKE %s OR family_uid LIKE %s LIMIT 15",
+                $like, $like
+            ) );
+            foreach ( $rows as $r ) $results[] = [ 'id' => $r->id, 'text' => $r->id . ' - ' . $r->text ];
+        }
+
+        wp_send_json_success( [ 'results' => $results ] );
+    }
+
+    public function ajax_agr_get_participants(): void {
+        $this->guard();
+        global $wpdb;
+        $payer_type = sanitize_text_field( $_POST['payer_type'] ?? 'customer' );
+        $payer_id   = sanitize_text_field( $_POST['payer_id'] ?? '' );
+        $results    = [];
+
+        if ( $payer_type === 'customer' && is_numeric( $payer_id ) ) {
+            $table = $wpdb->prefix . 'olama_customer_children';
+            $rows = $wpdb->get_results( $wpdb->prepare( "SELECT id, child_name AS text FROM {$table} WHERE customer_id = %d AND is_active = 1", (int) $payer_id ) );
+            foreach ( $rows as $r ) $results[] = [ 'id' => $r->id, 'text' => $r->text ];
+        } elseif ( $payer_type === 'family' && $payer_id ) {
+            $table = $wpdb->prefix . 'olama_students';
+            $rows = $wpdb->get_results( $wpdb->prepare( "SELECT student_uid AS id, student_name AS text FROM {$table} WHERE family_id = %s", $payer_id ) );
+            foreach ( $rows as $r ) $results[] = [ 'id' => $r->id, 'text' => $r->text ];
+        }
+
+        wp_send_json_success( [ 'results' => $results ] );
+    }
+
+    public function ajax_agr_save_fee(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+        $agreement_id = (int) ( $_POST['agreement_id'] ?? 0 );
+        
+        $data = [
+            'fee_category' => sanitize_text_field( $_POST['fee_category'] ?? '' ),
+            'label'        => sanitize_text_field( $_POST['label'] ?? '' ),
+            'amount'       => (float) ( $_POST['amount'] ?? 0 ),
+            'discount'     => (float) ( $_POST['discount'] ?? 0 ),
+            'due_date'     => sanitize_text_field( $_POST['due_date'] ?? '' ),
+        ];
+        if ( empty( $data['due_date'] ) ) $data['due_date'] = null;
+
+        if ( $id > 0 ) {
+            $result = Olama_Reg_Agreement_Fees::update( $id, $data );
+            if ( $result ) {
+                wp_send_json_success( [ 'message' => __( 'تم تحديث الرسم.', 'olama-registration' ), 'total' => Olama_Reg_Agreement::get( $agreement_id )->total_amount ] );
+            }
+        } else {
+            $data['agreement_id'] = $agreement_id;
+            $new_id = Olama_Reg_Agreement_Fees::add( $agreement_id, $data );
+            if ( $new_id ) {
+                wp_send_json_success( [ 'message' => __( 'تمت إضافة الرسم.', 'olama-registration' ), 'id' => $new_id, 'total' => Olama_Reg_Agreement::get( $agreement_id )->total_amount ] );
+            }
+        }
+        wp_send_json_error( [ 'message' => __( 'حدث خطأ أثناء حفظ الرسم.', 'olama-registration' ) ] );
+    }
+
+    public function ajax_agr_delete_fee(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+        $agreement_id = (int) ( $_POST['agreement_id'] ?? 0 );
+        
+        if ( Olama_Reg_Agreement_Fees::delete( $id ) ) {
+            wp_send_json_success( [ 'message' => __( 'تم حذف الرسم.', 'olama-registration' ), 'total' => Olama_Reg_Agreement::get( $agreement_id )->total_amount ] );
+        }
+        wp_send_json_error( [ 'message' => __( 'لا يمكن حذف هذا الرسم.', 'olama-registration' ) ] );
+    }
+
+    public function ajax_agr_add_clause(): void {
+        $this->guard();
+        $agreement_id = (int) ( $_POST['agreement_id'] ?? 0 );
+        $text = sanitize_textarea_field( $_POST['clause_text'] ?? '' );
+        
+        $id = Olama_Reg_Agreement_Clauses::add( $agreement_id, $text );
+        if ( $id ) {
+            wp_send_json_success( [ 'message' => __( 'تمت الإضافة.', 'olama-registration' ), 'id' => $id ] );
+        }
+        wp_send_json_error( [ 'message' => __( 'حدث خطأ.', 'olama-registration' ) ] );
+    }
+
+    public function ajax_agr_save_clause(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+        $text = sanitize_textarea_field( $_POST['clause_text'] ?? '' );
+        
+        if ( Olama_Reg_Agreement_Clauses::update( $id, $text ) ) {
+            wp_send_json_success( [ 'message' => __( 'تم الحفظ.', 'olama-registration' ) ] );
+        }
+        wp_send_json_error( [ 'message' => __( 'حدث خطأ.', 'olama-registration' ) ] );
+    }
+
+    public function ajax_agr_delete_clause(): void {
+        $this->guard();
+        $id = (int) ( $_POST['id'] ?? 0 );
+        
+        if ( Olama_Reg_Agreement_Clauses::delete( $id ) ) {
+            wp_send_json_success( [ 'message' => __( 'تم الحذف.', 'olama-registration' ) ] );
+        }
+        wp_send_json_error( [ 'message' => __( 'حدث خطأ.', 'olama-registration' ) ] );
+    }
+
+    public function ajax_agr_reorder_clauses(): void {
+        $this->guard();
+        $ordered_ids = isset( $_POST['ordered_ids'] ) && is_array( $_POST['ordered_ids'] ) ? array_map( 'intval', $_POST['ordered_ids'] ) : [];
+        if ( ! empty( $ordered_ids ) ) {
+            Olama_Reg_Agreement_Clauses::reorder( $ordered_ids );
+            wp_send_json_success();
+        }
+        wp_send_json_error();
+    }
+
+    public function ajax_agr_generate_invoice(): void {
+        $this->guard();
+        $agreement_id = (int) ( $_POST['agreement_id'] ?? 0 );
+        $fee_ids = isset( $_POST['fee_ids'] ) && is_array( $_POST['fee_ids'] ) ? array_map( 'intval', $_POST['fee_ids'] ) : [];
+
+        if ( empty( $fee_ids ) ) {
+            wp_send_json_error( [ 'message' => __( 'يجب تحديد رسم واحد على الأقل.', 'olama-registration' ) ] );
+        }
+
+        $result = Olama_Reg_Agreement_Invoice::generate_invoice( $agreement_id, $fee_ids );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success( [ 
+            'message' => __( 'تم إصدار الفاتورة بنجاح.', 'olama-registration' ),
+            'invoice_id' => $result 
         ] );
     }
 }

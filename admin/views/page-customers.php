@@ -4,6 +4,14 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+$action      = sanitize_text_field( $_GET['action'] ?? '' );
+$customer_id = absint( $_GET['customer_id'] ?? 0 );
+
+if ( $action === 'financial' && $customer_id ) {
+    include OLAMA_REG_PATH . 'admin/views/page-customer-financial.php';
+    return;
+}
+
 $per_page = 50;
 $offset   = max( 0, (int) ( $_GET['paged'] ?? 0 ) ) * $per_page;
 $search   = sanitize_text_field( $_GET['s'] ?? '' );
@@ -110,6 +118,12 @@ $total = Olama_Reg_Customer::count( [ 'search' => $search ] );
                         <?php endif; ?>
                     </td>
                     <td style="text-align:center; white-space:nowrap;">
+                        <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'financial', 'customer_id' => $cust->id ] ) ); ?>"
+                           class="button button-small"
+                           title="<?php esc_attr_e( 'الاستحقاق المالي', 'olama-registration' ); ?>"
+                           style="margin-left:3px; background:#fffdf5; border-color:#fef08a; color:#a16207; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0;">
+                            <span class="dashicons dashicons-money-alt" style="font-size:14px; width:14px; height:14px; line-height:1.8;"></span>
+                        </a>
                         <button class="button button-small cust-btn-edit"
                                 data-id="<?php echo esc_attr($cust->id); ?>"
                                 title="تعديل"

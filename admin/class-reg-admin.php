@@ -46,6 +46,33 @@ class Olama_Reg_Admin {
 
         add_submenu_page(
             'olama-registration',
+            __( 'Agreements', 'olama-registration' ),
+            __( 'العقود', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-agreements',
+            [ $this, 'render_agreements' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Agreement Templates', 'olama-registration' ),
+            __( 'نماذج العقود', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-agreement-templates',
+            [ $this, 'render_agreement_templates' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Clause Bank', 'olama-registration' ),
+            __( 'بنود العقود', 'olama-registration' ),
+            'manage_options',
+            'olama-registration-clause-bank',
+            [ $this, 'render_clause_bank' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
             __( 'Invoices', 'olama-registration' ),
             __( 'الفواتير', 'olama-registration' ),
             'olama_manage_registration_invoices',
@@ -129,6 +156,31 @@ class Olama_Reg_Admin {
     public function render_fees(): void {
         if ( ! current_user_can( 'olama_manage_registration_fees' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-fee-templates.php';
+    }
+
+    public function render_agreements(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        
+        $action = sanitize_text_field( $_GET['action'] ?? '' );
+        $id     = (int) ( $_GET['id'] ?? 0 );
+
+        if ( $action === 'edit' || $action === 'new' ) {
+            include OLAMA_REG_PATH . 'admin/views/html-agreements-edit.php';
+        } elseif ( $action === 'print' && $id ) {
+            include OLAMA_REG_PATH . 'admin/views/html-agreements-print.php';
+        } else {
+            include OLAMA_REG_PATH . 'admin/views/html-agreements-list.php';
+        }
+    }
+
+    public function render_agreement_templates(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-agreement-templates.php';
+    }
+
+    public function render_clause_bank(): void {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-clause-bank.php';
     }
 
     public function render_invoices(): void {

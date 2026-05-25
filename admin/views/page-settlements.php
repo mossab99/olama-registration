@@ -123,7 +123,7 @@ $receipts = Olama_Reg_Settlement::get_receipts( $args );
 </div>
 
 <!-- Modal: New Receipt -->
-<div id="modal-new-settlement" class="olama-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;" dir="rtl">
+<div id="modal-new-settlement" class="olama-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;" dir="rtl">
     <div class="olama-modal-content" style="background:#fff; width:500px; padding:25px; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
         <h2 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:15px; color:#1a1a2e;"><?php esc_html_e( 'إنشاء إيصال تسوية جديد', 'olama-registration' ); ?></h2>
         <form id="form-new-settlement">
@@ -176,7 +176,7 @@ $receipts = Olama_Reg_Settlement::get_receipts( $args );
 </div>
 
 <!-- Modal: Settle Receipt -->
-<div id="modal-settle-receipt" class="olama-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center;" dir="rtl">
+<div id="modal-settle-receipt" class="olama-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;" dir="rtl">
     <div class="olama-modal-content" style="background:#fff; width:500px; padding:25px; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
         <h2 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:15px; color:#1a1a2e;"><?php esc_html_e( 'تسوية الإيصال في النظام', 'olama-registration' ); ?></h2>
         <form id="form-settle-receipt">
@@ -211,7 +211,7 @@ jQuery(document).ready(function($) {
     // Open New Receipt Modal
     $('#btn-new-settlement').on('click', function(e) {
         e.preventDefault();
-        $('#modal-new-settlement').fadeIn();
+        $('#modal-new-settlement').css('display', 'flex').hide().fadeIn();
         
         // Initialize Select2 with AJAX
         if ($.fn.select2) {
@@ -288,7 +288,7 @@ jQuery(document).ready(function($) {
         var amount = $(this).data('amount');
         $('#settle-receipt-id').val(id);
         $('#settle-amount-display').val(amount);
-        $('#modal-settle-receipt').fadeIn();
+        $('#modal-settle-receipt').css('display', 'flex').hide().fadeIn();
     });
 
     // Submit Settlement

@@ -2289,6 +2289,448 @@
                 })
                 .always(() => { $btn.prop('disabled', false); $loading.hide(); });
         });
+
+
     }
+
+    // Auto-open invoice details if action=view and id is in URL
+    $(function() {
+        setTimeout(function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const action = urlParams.get('action');
+            const id = urlParams.get('id');
+            const page = urlParams.get('page');
+            if (page === 'olama-registration-invoices' && action === 'view' && id) {
+                const $btn = $(`.olama-reg-view-invoice-btn[data-id="${id}"]`);
+                if ($btn.length) {
+                    $btn.trigger('click');
+                } else {
+                    ajax('olama_reg_get_invoice', { id })
+                        .done(res => {
+                            if (res.success && res.data.invoice) {
+                                const inv = res.data.invoice;
+
+                                $('#drawer-invoice-number').text(inv.invoice_number);
+                                $('#drawer-total-val').text(parseFloat(inv.total).toFixed(2) + ' د.أ');
+                                $('#drawer-discount-val').text(parseFloat(inv.discount || 0).toFixed(2) + ' د.أ');
+                                $('#drawer-paid-val').text(parseFloat(inv.amount_paid).toFixed(2) + ' د.أ');
+                                $('#drawer-balance-val').text(parseFloat(inv.balance).toFixed(2) + ' د.أ');
+                                $('#drawer-family-uid').text(inv.family_uid);
+                                $('#drawer-issue-date').text(inv.issue_date);
+                                $('#drawer-due-date').text(inv.due_date || '—');
+
+                                let statusClass = 'olama-reg-badge--inactive';
+                                let statusLabel = 'مسودة';
+                                switch (inv.status) {
+                                    case 'issued':
+                                        statusClass = 'olama-reg-badge--active';
+                                        statusLabel = 'صادرة';
+                                        break;
+                                    case 'partial':
+                                        statusClass = 'olama-reg-badge--active';
+                                        statusLabel = 'جزئية';
+                                        break;
+                                    case 'paid':
+                                        statusClass = 'olama-reg-badge--active';
+                                        statusLabel = 'مدفوعة';
+                                        break;
+                                    case 'overdue':
+                                        statusClass = 'olama-reg-badge--blacklist';
+                                        statusLabel = 'متأخرة';
+                                        break;
+                                    case 'cancelled':
+                                        statusClass = 'olama-reg-badge--inactive';
+                                        statusLabel = 'ملغاة';
+                                        break;
+                                }
+                                $('#drawer-status-badge').html(`<span class="olama-reg-badge ${statusClass}">${statusLabel}</span>`);
+
+                                // Populate items
+                                const $itemsBody = $('#drawer-items-table tbody');
+                                $itemsBody.empty();
+                                if (inv.items && inv.items.length) {
+                                    inv.items.forEach(item => {
+                                        $itemsBody.append(`
+                                        <tr>
+                                            <td>${item.description}</td>
+                                            <td style="text-align:center;">${parseFloat(item.quantity).toFixed(0)}</td>
+                                            <td>${parseFloat(item.unit_price).toFixed(2)}</td>
+                                            <td style="font-weight:700;">${parseFloat(item.line_total).toFixed(2)}</td>
+                                        </tr>`);
+                                    });
+                                }
+
+                                // Populate installments
+                                const $instBody = $('#drawer-installments-table tbody');
+                                $instBody.empty();
+                                if (inv.installments && inv.installments.length) {
+                                    inv.installments.forEach(inst => {
+                                        let instStatusClass = 'olama-reg-badge--inactive';
+                                        let instStatusLabel = 'معلق';
+                                        switch (inst.status) {
+                                            case 'paid':
+                                                instStatusClass = 'olama-reg-badge--active';
+                                                instStatusLabel = 'مسدد';
+                                                break;
+                                            case 'partial':
+                                                instStatusClass = 'olama-reg-badge--active';
+                                                instStatusLabel = 'جزئي';
+                                                break;
+                                            case 'overdue':
+                                                instStatusClass = 'olama-reg-badge--blacklist';
+                                                instStatusLabel = 'متأخر';
+                                                break;
+                                        }
+
+                                        $instBody.append(`
+                                        <tr>
+                                            <td>${inst.installment_no}</td>
+                                            <td>${inst.due_date}</td>
+                                            <td style="font-weight:700;">${parseFloat(inst.amount_due).toFixed(2)}</td>
+                                            <td>${parseFloat(inst.amount_paid).toFixed(2)}</td>
+                                            <td><span class="olama-reg-badge ${instStatusClass}">${instStatusLabel}</span></td>
+                                        </tr>`);
+                                    });
+                                }
+
+                                // Payment record trigger
+                                const $drawerActions = $('#olama-reg-invoice-drawer').find('.olama-reg-form-actions');
+                                $drawerActions.find('.olama-reg-pay-invoice-trigger').remove();
+                                if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                                    $drawerActions.prepend(`
+                                        <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger" 
+                                                data-id="${inv.id}" data-no="${inv.invoice_number}" data-bal="${inv.balance}" data-family="${inv.family_uid}">
+                                            تسجيل دفعة ماليّة
+                                        </button>
+                                    `);
+                                }
+
+                                $('#olama-reg-invoice-drawer').fadeIn(200);
+                            }
+                        });
+                }
+            }
+        }, 250);
+    });
+
+    // ── Agreements Module ────────────────────────────────────────────────────
+
+    // Agreement Tabs
+    $(document).on('click', '.os-nav-tabs .nav-tab', function(e) {
+        e.preventDefault();
+        if ($(this).hasClass('os-disabled')) return;
+        
+        $('.os-nav-tabs .nav-tab').removeClass('nav-tab-active');
+        $(this).addClass('nav-tab-active');
+        
+        const target = $(this).attr('href');
+        $('.os-tab-content').hide().removeClass('active');
+        $(target).show().addClass('active');
+
+        // Update URL hash
+        if (history.replaceState) {
+            history.replaceState(null, '', target);
+        }
+    });
+
+    // Auto-open tab from hash on load
+    $(document).ready(function() {
+        if (window.location.hash && window.location.hash.startsWith('#tab-')) {
+            const $targetTab = $('.os-nav-tabs .nav-tab[href="' + window.location.hash + '"]');
+            if ($targetTab.length && !$targetTab.hasClass('os-disabled')) {
+                $targetTab.trigger('click');
+            }
+        }
+    });
+
+    // Init payer select2
+    function initAgrPayerSelect() {
+        const $payer = $('#os-agr-payer');
+        if (!$payer.length) return;
+
+        const payerType = $('input[name="payer_type"]:checked').val() || 'customer';
+
+        $payer.select2({
+            dir: 'rtl',
+            ajax: {
+                url: R.ajaxurl,
+                type: 'POST',
+                dataType: 'json',
+                delay: 250,
+                data: function(params) {
+                    return {
+                        action: 'olama_reg_agr_search_payer',
+                        nonce: R.nonce,
+                        q: params.term,
+                        payer_type: payerType
+                    };
+                },
+                processResults: function(data) {
+                    return { results: data.success ? data.data.results : [] };
+                }
+            },
+            placeholder: 'ابحث عن الجهة الدافعة...',
+            minimumInputLength: 2
+        });
+    }
+
+    if ($('#os-agreement-app').length) {
+        initAgrPayerSelect();
+        $('#os-agr-participant').select2({ dir: 'rtl', placeholder: 'اختر المشترك', multiple: true });
+        $('#os-agr-activity').select2({ dir: 'rtl' });
+    }
+
+    $(document).on('change', 'input[name="payer_type"]', function() {
+        $('#os-agr-payer').empty().trigger('change');
+        $('#os-agr-participant').empty().trigger('change');
+        initAgrPayerSelect(); // re-init with new type
+    });
+
+    let hasPreloadedParticipants = $('#os-agr-participant option').length > 0;
+
+    $(document).on('change', '#os-agr-payer', function(e, isInit) {
+        if (hasPreloadedParticipants) {
+            hasPreloadedParticipants = false; // consume the page-load trigger
+            return;
+        }
+        if (isInit) return; // Prevent clearing on init if we have preloaded data
+        const payerId = $(this).val();
+        const payerType = $('input[name="payer_type"]:checked').val();
+        const $participant = $('#os-agr-participant');
+        
+        $participant.empty().trigger('change');
+        if (!payerId) return;
+
+        ajax('olama_reg_agr_get_participants', { payer_type: payerType, payer_id: payerId })
+            .done(res => {
+                if (res.success && res.data.results) {
+                    res.data.results.forEach(p => {
+                        $participant.append(new Option(p.text, p.id, false, false));
+                    });
+                    $participant.trigger('change');
+                }
+            });
+    });
+
+    $(document).on('submit', '#os-form-agreement-header', function(e) {
+        e.preventDefault();
+        const $btn = $('#os-btn-save-header');
+        const formData = {};
+        $(this).serializeArray().forEach(item => {
+            if (item.name.endsWith('[]')) {
+                const cleanName = item.name.replace('[]', '');
+                if (!formData[cleanName]) formData[cleanName] = [];
+                formData[cleanName].push(item.value);
+            } else {
+                formData[item.name] = item.value;
+            }
+        });
+
+        ajax('olama_reg_agr_save_header', formData, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    if (formData.id == 0 && res.data.id) {
+                        setTimeout(() => {
+                            window.location.href = R.ajaxurl.replace('admin-ajax.php', 'admin.php') + '?page=olama-registration-agreements&action=edit&id=' + res.data.id;
+                        }, 1000);
+                    }
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
+    // ── Agreements: Fees ─────────────────────────────────────────────────────
+
+    $(document).on('click', '#os-agr-add-fee-row', function() {
+        const $template = $('#os-agr-fee-row-template').find('tr').clone();
+        $('#os-agr-fees-table tbody').append($template);
+        initDatepickers($('#os-agr-fees-table tbody tr').last());
+    });
+
+    // Auto-fill label and amount when a fee template is selected
+    $(document).on('change', '.os-agr-fee-template-select', function() {
+        const $option = $(this).find('option:selected');
+        const $tr = $(this).closest('tr');
+        const name = $option.data('name');
+        const amount = $option.data('amount');
+        
+        if (name && $tr.find('[name="label"]').val() === '') {
+            $tr.find('[name="label"]').val(name);
+        }
+        
+        if (amount !== undefined) {
+            $tr.find('[name="amount"]').val(amount).trigger('input');
+        }
+    });
+
+    $(document).on('input', '.os-agr-fee-calc', function() {
+        const $tr = $(this).closest('tr');
+        const amt = parseFloat($tr.find('[name="amount"]').val()) || 0;
+        const dsc = parseFloat($tr.find('[name="discount"]').val()) || 0;
+        const net = Math.max(0, amt - dsc);
+        $tr.find('.os-agr-fee-net').text(net.toFixed(3));
+    });
+
+    $(document).on('click', '.os-agr-save-fee', function() {
+        const $btn = $(this);
+        const $tr = $btn.closest('tr');
+        const agrId = $('#os-agr-fees-table').data('agr-id');
+        const data = {
+            id: $tr.data('fee-id'),
+            agreement_id: agrId,
+            fee_category: $tr.find('[name="fee_category"]').val(),
+            label: $tr.find('[name="label"]').val(),
+            amount: $tr.find('[name="amount"]').val(),
+            discount: $tr.find('[name="discount"]').val(),
+            due_date: $tr.find('[name="due_date"]').val(),
+        };
+
+        ajax('olama_reg_agr_save_fee', data, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    if (res.data.id) $tr.attr('data-fee-id', res.data.id);
+                    if (res.data.total !== undefined) $('#os-agr-total-label').text(parseFloat(res.data.total).toFixed(3));
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    $(document).on('click', '.os-agr-delete-fee', function() {
+        if (!confirm(R.strings.confirmDelete)) return;
+        const $tr = $(this).closest('tr');
+        const id = $tr.data('fee-id');
+        const agrId = $('#os-agr-fees-table').data('agr-id');
+
+        if (!id || id == 0) {
+            $tr.remove();
+            return;
+        }
+
+        ajax('olama_reg_agr_delete_fee', { id, agreement_id: agrId })
+            .done(res => {
+                if (res.success) {
+                    $tr.remove();
+                    if (res.data.total !== undefined) $('#os-agr-total-label').text(parseFloat(res.data.total).toFixed(3));
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    // ── Agreements: Clauses ──────────────────────────────────────────────────
+
+    if (typeof $.fn.sortable !== 'undefined' && $('#os-agr-clauses-list').length) {
+        $('#os-agr-clauses-list').sortable({
+            update: function() {
+                const orderedIds = [];
+                $(this).find('li').each(function() {
+                    orderedIds.push($(this).data('clause-id'));
+                });
+                ajax('olama_reg_agr_reorder_clauses', { ordered_ids: orderedIds });
+            }
+        });
+    }
+
+    $(document).on('change', '#os-agr-clause-bank-select', function() {
+        const text = $(this).val();
+        if (text) {
+            $('#os-agr-new-clause').val(text);
+            $(this).val(''); // Reset selection
+        }
+    });
+
+    $(document).on('click', '#os-agr-add-clause', function() {
+        const $btn = $(this);
+        const agrId = $btn.data('agr-id');
+        const text = $('#os-agr-new-clause').val().trim();
+        
+        if (!text) return;
+
+        ajax('olama_reg_agr_add_clause', { agreement_id: agrId, clause_text: text }, $btn)
+            .done(res => {
+                if (res.success) {
+                    $('#os-agr-new-clause').val('');
+                    const li = `
+                    <li data-clause-id="${res.data.id}" style="background:#fff; border:1px solid #ccd0d4; padding:10px; margin-bottom:5px; cursor:move;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span class="dashicons dashicons-menu" style="color:#ccc; margin-left:10px;"></span>
+                            <textarea class="os-agr-clause-text" style="flex-grow:1; margin-left:10px;" rows="2">${text}</textarea>
+                            <button type="button" class="button button-small os-agr-save-clause" style="margin-right:5px;">حفظ</button>
+                            <button type="button" class="button button-small os-agr-delete-clause" style="color:red; margin-right:5px;">X</button>
+                        </div>
+                    </li>`;
+                    $('#os-agr-clauses-list').append(li);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    $(document).on('click', '.os-agr-save-clause', function() {
+        const $btn = $(this);
+        const $li = $btn.closest('li');
+        const id = $li.data('clause-id');
+        const text = $li.find('.os-agr-clause-text').val().trim();
+
+        ajax('olama_reg_agr_save_clause', { id, clause_text: text }, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    $(document).on('click', '.os-agr-delete-clause', function() {
+        if (!confirm(R.strings.confirmDelete)) return;
+        const $li = $(this).closest('li');
+        const id = $li.data('clause-id');
+
+        ajax('olama_reg_agr_delete_clause', { id })
+            .done(res => {
+                if (res.success) {
+                    $li.remove();
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            });
+    });
+
+    // ── Agreements: Invoice Modal ────────────────────────────────────────────
+
+    $(document).on('click', '#os-agr-open-invoice-modal', function() {
+        $('#os-agr-invoice-modal').fadeIn(200);
+    });
+
+    $(document).on('click', '#os-agr-close-invoice-modal', function() {
+        $('#os-agr-invoice-modal').fadeOut(200);
+    });
+
+    $(document).on('change', '#os-agr-inv-check-all', function() {
+        $('.os-agr-inv-check').prop('checked', this.checked);
+    });
+
+    $(document).on('submit', '#os-agr-invoice-form', function(e) {
+        e.preventDefault();
+        const formData = $(this).serialize();
+        const $btn = $(this).find('button[type="submit"]');
+
+        ajax('olama_reg_agr_generate_invoice', formData, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
 
 })(jQuery);
