@@ -84,6 +84,12 @@ $mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mothe
             <span class="dashicons dashicons-money-alt"></span>
             <?php esc_html_e( 'الاستحقاق المالي', 'olama-registration' ); ?>
         </button>
+        <button class="olama-reg-tab <?php echo $active_tab === 'agreements' ? 'active' : ''; ?>"
+                data-tab="agreements" role="tab"
+                <?php echo ! $f ? 'disabled title="' . esc_attr__( 'احفظ بيانات العائلة أولاً', 'olama-registration' ) . '"' : ''; ?>>
+            <span class="dashicons dashicons-media-document"></span>
+            <?php esc_html_e( 'العقود', 'olama-registration' ); ?>
+        </button>
     </nav>
 
     <!-- ════════════════════════════════════════════════════════════════
@@ -350,9 +356,13 @@ $mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mothe
                         <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-invoices&action=view&id=' . $inv->id ) ); ?>" class="olama-reg-btn" style="background:#fff; border:1px solid #cbd5e1; color:#475569;">
                             <span class="dashicons dashicons-visibility"></span> <?php esc_html_e('عرض الفاتورة', 'olama-registration'); ?>
                         </a>
-                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-payments&action=new&invoice_id=' . $inv->id ) ); ?>" class="olama-reg-btn olama-reg-btn--primary">
+                        <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger"
+                                data-id="<?php echo esc_attr( $inv->id ); ?>"
+                                data-no="<?php echo esc_attr( $inv->invoice_number ); ?>"
+                                data-bal="<?php echo esc_attr( $inv->balance ); ?>"
+                                data-family="<?php echo esc_attr( $family_uid ); ?>">
                             <span class="dashicons dashicons-plus"></span> <?php esc_html_e('تسجيل دفعة', 'olama-registration'); ?>
-                        </a>
+                        </button>
                         <?php if ( (float)$inv->amount_paid == 0 && $inv->status !== 'cancelled' ): ?>
                             <button class="olama-reg-btn olama-reg-cancel-invoice-btn" data-id="<?php echo esc_attr( $inv->id ); ?>" style="background:#fff; border:1px solid #fca5a5; color:#dc2626;">
                                 <span class="dashicons dashicons-dismiss"></span> <?php esc_html_e('إلغاء الفاتورة', 'olama-registration'); ?>
@@ -366,5 +376,97 @@ $mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mothe
 
         <?php endif; // $f check ?>
     </div><!-- #tab-financial -->
+
+    <!-- ════════════════════════════════════════════════════════════════
+         TAB 4 — AGREEMENTS
+    ════════════════════════════════════════════════════════════════ -->
+    <div class="olama-reg-tab-pane <?php echo $active_tab === 'agreements' ? 'active' : ''; ?>" id="tab-agreements">
+        <?php if ( ! $f ): ?>
+            <div class="olama-reg-empty-state">
+                <span class="dashicons dashicons-media-document"></span>
+                <p><?php esc_html_e( 'يرجى حفظ بيانات العائلة أولاً.', 'olama-registration' ); ?></p>
+            </div>
+        <?php else: 
+            $family_agreements = Olama_Reg_Agreement::get_list(['payer_id' => $family_uid, 'payer_type' => 'family']);
+            // Also fetch by integer ID if needed
+            if (empty($family_agreements) && isset($school_family->id)) {
+                $family_agreements = Olama_Reg_Agreement::get_list(['payer_id' => $school_family->id, 'payer_type' => 'family']);
+            }
+            if (empty($family_agreements) && isset($f->id)) {
+                $family_agreements = Olama_Reg_Agreement::get_list(['payer_id' => $f->id, 'payer_type' => 'family']);
+            }
+
+            // We need invoices to map them to agreements
+            $all_family_invoices = Olama_Reg_Billing_Invoice::get_family_invoices( $family_uid, 0 );
+        ?>
+
+        <div class="olama-reg-agreements-list">
+            <?php if ( empty( $family_agreements ) ): ?>
+                <div class="olama-reg-empty-state">
+                    <span class="dashicons dashicons-media-document"></span>
+                    <p><?php esc_html_e( 'لا توجد عقود مسجلة لهذه العائلة.', 'olama-registration' ); ?></p>
+                </div>
+            <?php else: ?>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th><?php esc_html_e('رقم العقد', 'olama-registration'); ?></th>
+                            <th><?php esc_html_e('الفواتير المرتبطة', 'olama-registration'); ?></th>
+                            <th><?php esc_html_e('قيمة الفواتير', 'olama-registration'); ?></th>
+                            <th><?php esc_html_e('المتبقي من الفواتير', 'olama-registration'); ?></th>
+                            <th><?php esc_html_e('الإجراءات', 'olama-registration'); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $family_agreements as $agr ): 
+                            // Find related invoices for this agreement
+                            $related_invoices = array_filter($all_family_invoices, fn($i) => (int)$i->agreement_id === (int)$agr->id);
+                            
+                            $invoice_numbers = [];
+                            $total_invoice_value = 0;
+                            $total_invoice_balance = 0;
+                            
+                            foreach ($related_invoices as $ri) {
+                                $invoice_numbers[] = $ri->invoice_number;
+                                $total_invoice_value += (float)$ri->total;
+                                $total_invoice_balance += (float)$ri->balance;
+                            }
+                        ?>
+                        <tr>
+                            <td><strong><?php echo esc_html($agr->agreement_number); ?></strong></td>
+                            <td>
+                                <?php if (!empty($invoice_numbers)): ?>
+                                    <?php echo esc_html(implode('، ', $invoice_numbers)); ?>
+                                <?php else: ?>
+                                    <span style="color:#94a3b8;"><?php esc_html_e('لا يوجد', 'olama-registration'); ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?php echo number_format($total_invoice_value, 2); ?></td>
+                            <td>
+                                <span style="color: <?php echo $total_invoice_balance > 0 ? '#ef4444' : '#10b981'; ?>">
+                                    <?php echo number_format($total_invoice_balance, 2); ?>
+                                </span>
+                            </td>
+                            <td>
+                                <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-agreements&action=print&id=' . $agr->id ) ); ?>" target="_blank" class="button button-small">
+                                    <span class="dashicons dashicons-printer" style="margin-top:2px;"></span> <?php esc_html_e('طباعة العقد', 'olama-registration'); ?>
+                                </a>
+                                <?php if (!empty($related_invoices)): 
+                                    // Take the first related invoice id to print
+                                    $first_invoice_id = reset($related_invoices)->id;
+                                ?>
+                                <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-invoices&action=print&id=' . $first_invoice_id ) ); ?>" target="_blank" class="button button-small">
+                                    <span class="dashicons dashicons-media-text" style="margin-top:2px;"></span> <?php esc_html_e('طباعة تفاصيل الفاتورة', 'olama-registration'); ?>
+                                </a>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+    </div><!-- #tab-agreements -->
 
 </div><!-- .olama-reg-form-wrapper -->

@@ -56,7 +56,8 @@
 
 .olama-reg-wrap .dashicons,
 .olama-reg-wrap .dashicons::before,
-.olama-reg-wrap .dashicons::after {
+.olama-reg-wrap .dashicons::after,
+.olama-reg-wrap .sorting-indicator::before {
     font-family: dashicons !important;
 }
 

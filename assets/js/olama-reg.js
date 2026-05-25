@@ -9,9 +9,9 @@
     function showNotice(msg, isError = false) {
         const $n = $('#olama-reg-notice');
         $n.removeClass('olama-reg-notice--error')
-          .text(msg)
-          .show()
-          .css('display', 'block');
+            .text(msg)
+            .show()
+            .css('display', 'block');
         if (isError) $n.addClass('olama-reg-notice--error');
         clearTimeout(window._regNoticeTimer);
         window._regNoticeTimer = setTimeout(() => $n.fadeOut(), 6000);
@@ -140,15 +140,15 @@
 
     $(document).on('click', '#olama-reg-add-student', function () {
         const familyUid = $(this).data('family-uid');
-        const $btn      = $(this);
+        const $btn = $(this);
 
         ajax('olama_reg_save_student', { family_uid: familyUid }, $btn)
             .done(res => {
                 if (res.success) {
                     showNotice(R.strings.studentAdded);
                     // Redirect to show the new student expanded
-                    const uid      = res.data.student_uid;
-                    const url      = new URL(window.location.href);
+                    const uid = res.data.student_uid;
+                    const url = new URL(window.location.href);
                     url.searchParams.set('tab', 'students');
                     url.searchParams.set('student_uid', uid);
                     window.location.href = url.toString();
@@ -162,16 +162,16 @@
     // ── Save Student ──────────────────────────────────────────────────────────
 
     $(document).on('click', '.olama-reg-save-student', function () {
-        const $btn       = $(this);
+        const $btn = $(this);
         const studentUid = $btn.data('student-uid');
-        const familyUid  = $btn.data('family-uid');
-        const $row       = $('#student-' + studentUid);
+        const familyUid = $btn.data('family-uid');
+        const $row = $('#student-' + studentUid);
 
         const data = { student_uid: studentUid, family_uid: familyUid };
 
         // Collect student basic fields
         $row.find('.s-field').each(function () {
-            const el   = this;
+            const el = this;
             const name = $(el).data('field') || $(el).attr('name');
             if (!name) return;
             if (el.type === 'radio') {
@@ -202,13 +202,13 @@
     // ── Save Transport ────────────────────────────────────────────────────────
 
     $(document).on('click', '.olama-reg-save-transport', function () {
-        const $btn       = $(this);
+        const $btn = $(this);
         const studentUid = $btn.data('student-uid');
-        const $pane      = $btn.closest('[id^="transport-"]');
-        const data       = { student_uid: studentUid };
+        const $pane = $btn.closest('[id^="transport-"]');
+        const data = { student_uid: studentUid };
 
         $pane.find('.st-field').each(function () {
-            const el   = this;
+            const el = this;
             const name = $(el).attr('name');
             if (!name) return;
             if (el.type === 'checkbox') {
@@ -239,10 +239,10 @@
     let mediaUploader;
     $(document).on('click', '.olama-reg-upload-photo', function (e) {
         e.preventDefault();
-        const $btn      = $(this);
-        const $wrap     = $btn.closest('.olama-reg-photo-upload');
-        const $preview  = $wrap.find('.olama-reg-photo-preview');
-        const $input    = $wrap.find('[name="photo_attachment_id"]');
+        const $btn = $(this);
+        const $wrap = $btn.closest('.olama-reg-photo-upload');
+        const $preview = $wrap.find('.olama-reg-photo-preview');
+        const $input = $wrap.find('[name="photo_attachment_id"]');
 
         if (mediaUploader) {
             mediaUploader.open();
@@ -269,7 +269,7 @@
 
     $(document).on('click', '.olama-reg-deactivate', function () {
         if (!confirm(R.strings.confirmDeact)) return;
-        const uid  = $(this).data('uid');
+        const uid = $(this).data('uid');
         const $btn = $(this);
         ajax('olama_reg_soft_delete_family', { family_uid: uid }, $btn)
             .done(res => {
@@ -290,7 +290,7 @@
     // Reload financial data when year changes
     $(document).on('change', '#olama-reg-fin-year', function () {
         const familyUid = $(this).data('family-uid');
-        const yearId    = $(this).val();
+        const yearId = $(this).val();
         ajax('olama_reg_get_financial', { family_uid: familyUid, academic_year_id: yearId })
             .done(res => {
                 if (res.success) {
@@ -336,33 +336,33 @@
 
     // Live balance calculation
     $(document).on('input', '.olama-reg-fin-calc', function () {
-        const $tr      = $(this).closest('tr');
-        const due      = parseFloat($tr.find('[name="amount_due"]').val()) || 0;
-        const paid     = parseFloat($tr.find('[name="amount_paid"]').val()) || 0;
-        const revolving= parseFloat($tr.find('[name="payments_revolving"]').val()) || 0;
+        const $tr = $(this).closest('tr');
+        const due = parseFloat($tr.find('[name="amount_due"]').val()) || 0;
+        const paid = parseFloat($tr.find('[name="amount_paid"]').val()) || 0;
+        const revolving = parseFloat($tr.find('[name="payments_revolving"]').val()) || 0;
         $tr.find('.olama-reg-balance-cell').text((due - paid + revolving).toFixed(2));
     });
 
     // Save financial row
     $(document).on('click', '.olama-reg-save-fin-row', function () {
-        const $btn      = $(this);
-        const $tr       = $btn.closest('tr');
+        const $btn = $(this);
+        const $tr = $btn.closest('tr');
         const familyUid = $('#olama-reg-family-uid').val();
-        const yearId    = $('#olama-reg-fin-year').val() || 0;
-        const id        = parseInt($tr.data('fin-id')) || 0;
+        const yearId = $('#olama-reg-fin-year').val() || 0;
+        const id = parseInt($tr.data('fin-id')) || 0;
 
         const data = {
-            family_uid:         familyUid,
-            academic_year_id:   yearId,
+            family_uid: familyUid,
+            academic_year_id: yearId,
             id,
-            entitlement_date:   $tr.find('[name="entitlement_date"]').val(),
+            entitlement_date: $tr.find('[name="entitlement_date"]').val(),
             calculation_method: $tr.find('[name="calculation_method"]').val(),
-            percentage:         $tr.find('[name="percentage"]').val(),
-            amount_due:         $tr.find('[name="amount_due"]').val(),
-            amount_paid:        $tr.find('[name="amount_paid"]').val(),
+            percentage: $tr.find('[name="percentage"]').val(),
+            amount_due: $tr.find('[name="amount_due"]').val(),
+            amount_paid: $tr.find('[name="amount_paid"]').val(),
             payments_revolving: $tr.find('[name="payments_revolving"]').val(),
-            payment_reference:  $tr.find('[name="payment_reference"]').val(),
-            fin_notes:          $tr.find('[name="fin_notes"]').val(),
+            payment_reference: $tr.find('[name="payment_reference"]').val(),
+            fin_notes: $tr.find('[name="fin_notes"]').val(),
         };
 
         ajax('olama_reg_save_financial_row', data, $btn)
@@ -380,10 +380,10 @@
     // Delete financial row
     $(document).on('click', '.olama-reg-delete-fin-row', function () {
         if (!confirm(R.strings.confirmDelete)) return;
-        const $tr       = $(this).closest('tr');
-        const id        = parseInt($tr.data('fin-id')) || 0;
+        const $tr = $(this).closest('tr');
+        const id = parseInt($tr.data('fin-id')) || 0;
         const familyUid = $('#olama-reg-family-uid').val();
-        const yearId    = $('#olama-reg-fin-year').val() || 0;
+        const yearId = $('#olama-reg-fin-year').val() || 0;
 
         if (!id) { $tr.remove(); return; }
 
@@ -427,24 +427,24 @@
     });
 
     $(document).on('click', '.olama-reg-save-hist-row', function () {
-        const $btn  = $(this);
-        const $tr   = $btn.closest('tr');
-        const $tbody= $tr.closest('.olama-reg-history-body');
+        const $btn = $(this);
+        const $tr = $btn.closest('tr');
+        const $tbody = $tr.closest('.olama-reg-history-body');
         const studentUid = $tbody.data('student-uid');
-        const id    = parseInt($tr.data('hist-id')) || 0;
+        const id = parseInt($tr.data('hist-id')) || 0;
 
         const data = {
             student_uid: studentUid,
             id,
-            academic_year:     $tr.find('[name="academic_year"]').val(),
-            school_name:       $tr.find('[name="school_name"]').val(),
-            grade:             $tr.find('[name="grade"]').val(),
-            branch:            $tr.find('[name="branch"]').val(),
-            section:           $tr.find('[name="section"]').val(),
+            academic_year: $tr.find('[name="academic_year"]').val(),
+            school_name: $tr.find('[name="school_name"]').val(),
+            grade: $tr.find('[name="grade"]').val(),
+            branch: $tr.find('[name="branch"]').val(),
+            section: $tr.find('[name="section"]').val(),
             registration_date: $tr.find('[name="registration_date"]').val(),
-            withdrawal_date:   $tr.find('[name="withdrawal_date"]').val(),
-            student_status:    $tr.find('[name="student_status"]').val(),
-            is_current:        $tr.find('[name="is_current"]').is(':checked') ? 1 : 0,
+            withdrawal_date: $tr.find('[name="withdrawal_date"]').val(),
+            student_status: $tr.find('[name="student_status"]').val(),
+            is_current: $tr.find('[name="is_current"]').is(':checked') ? 1 : 0,
         };
 
         ajax('olama_reg_save_academic_history', data, $btn)
@@ -459,7 +459,7 @@
     $(document).on('click', '.olama-reg-delete-hist-row', function () {
         if (!confirm(R.strings.confirmDelete)) return;
         const $tr = $(this).closest('tr');
-        const id  = parseInt($tr.data('hist-id')) || 0;
+        const id = parseInt($tr.data('hist-id')) || 0;
         if (!id) { $tr.remove(); return; }
         ajax('olama_reg_delete_history_row', { id })
             .done(res => { if (res.success) $tr.remove(); });
@@ -666,7 +666,7 @@
 
         let items = [];
         if (typeof itemsRaw === 'string') {
-            try { items = JSON.parse(itemsRaw); } catch(e) {}
+            try { items = JSON.parse(itemsRaw); } catch (e) { }
         } else if (Array.isArray(itemsRaw)) {
             items = itemsRaw;
         }
@@ -1016,7 +1016,7 @@
         </div>
     </div>`;
 
-    $(document).on('click', '.olama-reg-pay-invoice-trigger', function() {
+    $(document).on('click', '.olama-reg-pay-invoice-trigger', function () {
         const id = $(this).data('id');
         const no = $(this).data('no');
         const bal = parseFloat($(this).data('bal')) || 0;
@@ -1039,7 +1039,7 @@
         initDatepickers($('#olama-reg-payment-modal'));
     });
 
-    $(document).on('click', '#olama-reg-open-general-payment-btn', function() {
+    $(document).on('click', '#olama-reg-open-general-payment-btn', function () {
         $('#pay_family_search_wrap, #pay_invoice_select_wrap').show();
         $('#pay_invoice_display_wrap').hide();
 
@@ -1054,14 +1054,16 @@
                 dropdownParent: $('#olama-reg-payment-modal'),
                 ajax: {
                     url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
-                    data: function(params) { return { action: 'olama_reg_search', nonce: R.nonce, q: params.term }; },
-                    processResults: function(data) {
-                        return { results: (data.success && data.data.families) ? data.data.families.map(f => {
-                            const name1 = f.father_first_name || '';
-                            const name2 = f.father_family_name || '';
-                            const fullName = (name1 + ' ' + name2).trim() || 'بدون اسم';
-                            return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
-                        }) : [] };
+                    data: function (params) { return { action: 'olama_reg_search', nonce: R.nonce, q: params.term }; },
+                    processResults: function (data) {
+                        return {
+                            results: (data.success && data.data.families) ? data.data.families.map(f => {
+                                const name1 = f.father_first_name || '';
+                                const name2 = f.father_family_name || '';
+                                const fullName = (name1 + ' ' + name2).trim() || 'بدون اسم';
+                                return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
+                            }) : []
+                        };
                     }
                 },
                 placeholder: 'ابحث عن العائلة للوصول إلى فواتيرها...',
@@ -1076,7 +1078,7 @@
         initDatepickers($('#olama-reg-payment-modal'));
     });
 
-    $(document).on('change', '#pay_search_family', function() {
+    $(document).on('change', '#pay_search_family', function () {
         const familyUid = $(this).val();
         $('#pay_family_uid').val(familyUid);
         const $invSelect = $('#pay_select_invoice');
@@ -1102,7 +1104,7 @@
             });
     });
 
-    $(document).on('change', '#pay_select_invoice', function() {
+    $(document).on('change', '#pay_select_invoice', function () {
         const id = $(this).val();
         $('#pay_invoice_id').val(id);
         const bal = parseFloat($(this).find(':selected').data('bal')) || 0;
@@ -1315,7 +1317,7 @@
 
     function loadFamilyBilling() {
         const familyUid = $('#olama-reg-family-uid').val();
-        const yearId    = $('#olama-reg-fin-year').val() || 0;
+        const yearId = $('#olama-reg-fin-year').val() || 0;
         if (!familyUid) return;
 
         if ($('#olama-reg-family-billing-section').length === 0) {
@@ -1341,7 +1343,7 @@
     // Reload family billing in sync when the year changes
     $(document).on('change', '#olama-reg-fin-year', function () {
         const familyUid = $(this).data('family-uid');
-        const yearId    = $(this).val();
+        const yearId = $(this).val();
         ajax('olama_reg_get_financial', { family_uid: familyUid, academic_year_id: yearId })
             .done(res => {
                 if (res.success) {
@@ -1396,12 +1398,12 @@
         const $n = $('#cust_notice');
         if (!$n.length) { showNotice(msg, isError); return; }
         $n.text(msg)
-          .css({
-              background: isError ? '#fee2e2' : '#dcfce7',
-              color:      isError ? '#dc2626' : '#16a34a',
-              border:     '1px solid ' + (isError ? '#fca5a5' : '#86efac'),
-          })
-          .show();
+            .css({
+                background: isError ? '#fee2e2' : '#dcfce7',
+                color: isError ? '#dc2626' : '#16a34a',
+                border: '1px solid ' + (isError ? '#fca5a5' : '#86efac'),
+            })
+            .show();
         clearTimeout(window._custNoticeTimer);
         window._custNoticeTimer = setTimeout(() => $n.fadeOut(), 5000);
     }
@@ -1436,7 +1438,7 @@
     }
 
     function escHtml(str) {
-        return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     let _custPendingChildren = []; // for create mode
@@ -1444,7 +1446,7 @@
 
     // ── Open Modal (Create) ────────────────────────────────────────────────────
 
-    $(document).on('click', '#cust_btn_add_new', function() {
+    $(document).on('click', '#cust_btn_add_new', function () {
         _custEditId = 0;
         _custPendingChildren = [];
         $('#cust-modal-customer-id').val('');
@@ -1457,13 +1459,13 @@
         $('#cust-modal-pending-children').empty();
         $('#cust-modal-new-child-form').hide();
         $('#cust-modal-no-children').show();
-        $('#cust-modal-overlay').css('display','flex');
+        $('#cust-modal-overlay').css('display', 'flex');
         setTimeout(() => $('#cust-modal-name').focus(), 100);
     });
 
     // ── Open Modal (Edit) ──────────────────────────────────────────────────────
 
-    $(document).on('click', '.cust-btn-edit', function() {
+    $(document).on('click', '.cust-btn-edit', function () {
         const id = parseInt($(this).data('id'));
         _custEditId = id;
         _custPendingChildren = [];
@@ -1475,7 +1477,7 @@
         $('#cust-modal-pending-children').empty();
         $('#cust-modal-new-child-form').hide();
         $('#cust-modal-no-children').hide();
-        $('#cust-modal-overlay').css('display','flex');
+        $('#cust-modal-overlay').css('display', 'flex');
 
         ajax('olama_reg_get_external_customer', { customer_id: id })
             .done(res => {
@@ -1499,30 +1501,30 @@
 
     // ── Close Modal ────────────────────────────────────────────────────────────
 
-    $(document).on('click', '#cust-modal-close, #cust-modal-cancel', function() {
+    $(document).on('click', '#cust-modal-close, #cust-modal-cancel', function () {
         $('#cust-modal-overlay').hide();
     });
-    $(document).on('click', '#cust-modal-overlay', function(e) {
+    $(document).on('click', '#cust-modal-overlay', function (e) {
         if (e.target === this) $('#cust-modal-overlay').hide();
     });
 
     // ── Show new child form ────────────────────────────────────────────────────
 
-    $(document).on('click', '#cust-modal-add-child-btn', function() {
+    $(document).on('click', '#cust-modal-add-child-btn', function () {
         $('#cust-modal-new-child-name').val('');
         $('#cust-modal-new-child-grade').val('');
         $('#cust-modal-new-child-form').show();
         setTimeout(() => $('#cust-modal-new-child-name').focus(), 50);
     });
 
-    $(document).on('click', '#cust-modal-cancel-new-child', function() {
+    $(document).on('click', '#cust-modal-cancel-new-child', function () {
         $('#cust-modal-new-child-form').hide();
     });
 
     // ── Save new child (AJAX in edit mode, pending in create mode) ─────────────
 
-    $(document).on('click', '#cust-modal-save-new-child', function() {
-        const name  = $('#cust-modal-new-child-name').val().trim();
+    $(document).on('click', '#cust-modal-save-new-child', function () {
+        const name = $('#cust-modal-new-child-name').val().trim();
         const grade = $('#cust-modal-new-child-grade').val().trim();
         if (!name) { $('#cust-modal-new-child-name').focus(); return; }
 
@@ -1556,7 +1558,7 @@
 
     // ── Remove pending child ───────────────────────────────────────────────────
 
-    $(document).on('click', '.cust-pending-child-remove', function() {
+    $(document).on('click', '.cust-pending-child-remove', function () {
         const idx = parseInt($(this).closest('.cust-pending-child-row').data('idx'));
         _custPendingChildren.splice(idx, 1);
         $(this).closest('.cust-pending-child-row').remove();
@@ -1571,11 +1573,11 @@
 
     // ── Edit saved child inline ────────────────────────────────────────────────
 
-    $(document).on('click', '.cust-child-edit-btn', function() {
-        const $row    = $(this).closest('.cust-saved-child-row');
+    $(document).on('click', '.cust-child-edit-btn', function () {
+        const $row = $(this).closest('.cust-saved-child-row');
         const childId = parseInt($row.data('child-id'));
         const curName = $row.find('.cust-child-name').text().trim();
-        const curGrade= $row.find('.cust-child-grade').text().trim();
+        const curGrade = $row.find('.cust-child-grade').text().trim();
 
         // Replace row with inline edit form
         $row.html(`
@@ -1593,21 +1595,21 @@
             </div>`);
     });
 
-    $(document).on('click', '.cust-child-edit-cancel', function() {
-        const $row    = $(this).closest('.cust-saved-child-row');
+    $(document).on('click', '.cust-child-edit-cancel', function () {
+        const $row = $(this).closest('.cust-saved-child-row');
         const childId = parseInt($(this).data('child-id'));
-        const name    = $(this).data('name');
-        const grade   = $(this).data('grade');
+        const name = $(this).data('name');
+        const grade = $(this).data('grade');
         $row.html(buildSavedChildRow({ id: childId, child_name: name, grade }).match(/<div class="cust-saved-child-row"[^>]*>([\/\s\S]*)<\/div>/)?.[1] || '');
         // Simpler: just rebuild the row entirely
         $row.replaceWith(buildSavedChildRow({ id: childId, child_name: name, grade }));
     });
 
-    $(document).on('click', '.cust-child-edit-save', function() {
-        const $row    = $(this).closest('.cust-saved-child-row');
+    $(document).on('click', '.cust-child-edit-save', function () {
+        const $row = $(this).closest('.cust-saved-child-row');
         const childId = parseInt($(this).data('child-id'));
-        const name    = $row.find('.cust-child-edit-name').val().trim();
-        const grade   = $row.find('.cust-child-edit-grade').val().trim();
+        const name = $row.find('.cust-child-edit-name').val().trim();
+        const grade = $row.find('.cust-child-edit-grade').val().trim();
         if (!name) { $row.find('.cust-child-edit-name').focus(); return; }
 
         ajax('olama_reg_update_child', { child_id: childId, child_name: name, grade })
@@ -1622,15 +1624,15 @@
 
     // ── Delete saved child ─────────────────────────────────────────────────────
 
-    $(document).on('click', '.cust-child-delete-btn', function() {
+    $(document).on('click', '.cust-child-delete-btn', function () {
         if (!confirm('هل تريد حذف هذا الابن؟')) return;
-        const $row    = $(this).closest('.cust-saved-child-row');
+        const $row = $(this).closest('.cust-saved-child-row');
         const childId = parseInt($row.data('child-id'));
 
         ajax('olama_reg_delete_child', { child_id: childId })
             .done(res => {
                 if (res.success) {
-                    $row.fadeOut(200, function() {
+                    $row.fadeOut(200, function () {
                         $(this).remove();
                         // Update count
                         if (_custEditId) {
@@ -1649,9 +1651,9 @@
 
     // ── Save Customer (Create or Update) ──────────────────────────────────────
 
-    $(document).on('click', '#cust-modal-save', function() {
+    $(document).on('click', '#cust-modal-save', function () {
         const $btn = $(this);
-        const name  = $('#cust-modal-name').val().trim();
+        const name = $('#cust-modal-name').val().trim();
         const phone = $('#cust-modal-phone').val().trim();
         const notes = $('#cust-modal-notes').val().trim();
 
@@ -1701,8 +1703,8 @@
 
     // ── Delete Customer ────────────────────────────────────────────────────────
 
-    $(document).on('click', '.cust-btn-delete', function() {
-        const id   = parseInt($(this).data('id'));
+    $(document).on('click', '.cust-btn-delete', function () {
+        const id = parseInt($(this).data('id'));
         const name = $(this).data('name');
         if (!confirm(`هل تريد حذف العميل "${name}"؟ سيتم إخفاء جميع أبنائه أيضاً.`)) return;
 
@@ -1710,7 +1712,7 @@
             .done(res => {
                 if (res.success) {
                     // Remove customer row + children row
-                    $(`.cust-row[data-id="${id}"]`).fadeOut(300, function() { $(this).remove(); });
+                    $(`.cust-row[data-id="${id}"]`).fadeOut(300, function () { $(this).remove(); });
                     $(`.cust-children-row[data-parent-id="${id}"]`).remove();
                     custNotice('تم حذف العميل بنجاح.');
                 } else {
@@ -1721,8 +1723,8 @@
 
     // ── Expand/Collapse Children Row ──────────────────────────────────────────
 
-    $(document).on('click', '.cust-toggle-children', function() {
-        const id    = parseInt($(this).data('id'));
+    $(document).on('click', '.cust-toggle-children', function () {
+        const id = parseInt($(this).data('id'));
         const $icon = $(this).find('.cust-toggle-icon');
         const $childRow = $(`.cust-children-row[data-parent-id="${id}"]`);
 
@@ -1805,24 +1807,24 @@
     }
 
     // Show inline add form
-    $(document).on('click', '.cust-inline-add-btn', function() {
+    $(document).on('click', '.cust-inline-add-btn', function () {
         const $wrap = $(this).closest('.cust-inline-children');
         $wrap.find('.cust-inline-add-form').show();
         $wrap.find('.cust-inline-new-name').focus();
         $(this).hide();
     });
-    $(document).on('click', '.cust-inline-cancel-add', function() {
+    $(document).on('click', '.cust-inline-cancel-add', function () {
         const $wrap = $(this).closest('.cust-inline-children');
         $wrap.find('.cust-inline-add-form').hide().find('input').val('');
         $wrap.find('.cust-inline-add-btn').show();
     });
 
     // Save inline new child
-    $(document).on('click', '.cust-inline-save-child', function() {
-        const $wrap      = $(this).closest('.cust-inline-children');
+    $(document).on('click', '.cust-inline-save-child', function () {
+        const $wrap = $(this).closest('.cust-inline-children');
         const customerId = parseInt($(this).data('customer-id'));
-        const name       = $wrap.find('.cust-inline-new-name').val().trim();
-        const grade      = $wrap.find('.cust-inline-new-grade').val().trim();
+        const name = $wrap.find('.cust-inline-new-name').val().trim();
+        const grade = $wrap.find('.cust-inline-new-grade').val().trim();
         if (!name) { $wrap.find('.cust-inline-new-name').focus(); return; }
 
         ajax('olama_reg_add_child_to_customer', { customer_id: customerId, child_name: name, grade })
@@ -1860,11 +1862,11 @@
     });
 
     // Edit inline child
-    $(document).on('click', '.cust-inline-edit-child', function() {
-        const $tr     = $(this).closest('.cust-inline-child-tr');
+    $(document).on('click', '.cust-inline-edit-child', function () {
+        const $tr = $(this).closest('.cust-inline-child-tr');
         const childId = parseInt($tr.data('child-id'));
-        const name    = $tr.find('td').eq(0).text().trim();
-        const grade   = $tr.find('td').eq(1).text().trim().replace('—','');
+        const name = $tr.find('td').eq(0).text().trim();
+        const grade = $tr.find('td').eq(1).text().trim().replace('—', '');
 
         $tr.html(`
             <td colspan="2" style="padding:6px 4px;">
@@ -1879,12 +1881,12 @@
             </td>`);
     });
 
-    $(document).on('click', '.cust-inline-cancel-edit', function() {
-        const $tr     = $(this).closest('.cust-inline-child-tr');
+    $(document).on('click', '.cust-inline-cancel-edit', function () {
+        const $tr = $(this).closest('.cust-inline-child-tr');
         const childId = parseInt($(this).data('child-id'));
         const customerId = parseInt($tr.closest('.cust-inline-children').data('customer-id'));
-        const name    = $(this).data('name');
-        const grade   = $(this).data('grade');
+        const name = $(this).data('name');
+        const grade = $(this).data('grade');
         $tr.html(`
             <td style="padding:6px 10px; font-weight:600;">${escHtml(name)}</td>
             <td style="padding:6px 10px; color:#64748b;">${escHtml(grade || '—')}</td>
@@ -1894,12 +1896,12 @@
             </td>`);
     });
 
-    $(document).on('click', '.cust-inline-update-child', function() {
-        const $tr     = $(this).closest('.cust-inline-child-tr');
+    $(document).on('click', '.cust-inline-update-child', function () {
+        const $tr = $(this).closest('.cust-inline-child-tr');
         const childId = parseInt($(this).data('child-id'));
         const customerId = parseInt($tr.closest('.cust-inline-children').data('customer-id'));
-        const name    = $tr.find('.cust-inline-edit-name').val().trim();
-        const grade   = $tr.find('.cust-inline-edit-grade').val().trim();
+        const name = $tr.find('.cust-inline-edit-name').val().trim();
+        const grade = $tr.find('.cust-inline-edit-grade').val().trim();
         if (!name) { $tr.find('.cust-inline-edit-name').focus(); return; }
 
         ajax('olama_reg_update_child', { child_id: childId, child_name: name, grade })
@@ -1920,16 +1922,16 @@
     });
 
     // Delete inline child
-    $(document).on('click', '.cust-inline-delete-child', function() {
+    $(document).on('click', '.cust-inline-delete-child', function () {
         if (!confirm('هل تريد حذف هذا الابن؟')) return;
-        const $tr        = $(this).closest('.cust-inline-child-tr');
-        const childId    = parseInt($(this).data('child-id'));
+        const $tr = $(this).closest('.cust-inline-child-tr');
+        const childId = parseInt($(this).data('child-id'));
         const customerId = parseInt($(this).data('customer-id'));
 
         ajax('olama_reg_delete_child', { child_id: childId })
             .done(res => {
                 if (res.success) {
-                    $tr.fadeOut(200, function() {
+                    $tr.fadeOut(200, function () {
                         $(this).remove();
                         const $cnt = $(`.cust-children-count[data-id="${customerId}"]`);
                         $cnt.text(Math.max(0, parseInt($cnt.text() || 0) - 1));
@@ -1943,7 +1945,7 @@
     // ── Search debounce ────────────────────────────────────────────────────────
 
     let _custSearchTimer;
-    $(document).on('input', '#cust_search_input', function() {
+    $(document).on('input', '#cust_search_input', function () {
         clearTimeout(_custSearchTimer);
         const q = $(this).val();
         _custSearchTimer = setTimeout(() => {
@@ -1959,18 +1961,18 @@
     // Quick-Add External Customer Modal (custom-payments page)
     // =========================================================================
 
-    $(document).on('click', '#cp_btn_add_ext_customer', function() {
+    $(document).on('click', '#cp_btn_add_ext_customer', function () {
         $('#modal_ext_children_list').empty();
         $('#modal_ext_name, #modal_ext_phone, #modal_ext_notes').val('');
-        $('#ext-quick-modal-overlay').css('display','flex');
+        $('#ext-quick-modal-overlay').css('display', 'flex');
         setTimeout(() => $('#modal_ext_name').focus(), 50);
     });
 
-    $(document).on('click', '#modal_ext_btn_cancel, #modal_ext_btn_cancel2', function() {
+    $(document).on('click', '#modal_ext_btn_cancel, #modal_ext_btn_cancel2', function () {
         $('#ext-quick-modal-overlay').hide();
     });
 
-    $(document).on('click', '#modal_ext_add_child_btn', function() {
+    $(document).on('click', '#modal_ext_add_child_btn', function () {
         $('#modal_ext_children_list').append(`
             <div style="display:flex; gap:5px;" class="modal-child-row">
                 <input type="text" class="modal-child-name regular-text" placeholder="اسم الابن/الابنة" style="flex:2">
@@ -1980,21 +1982,21 @@
         `);
     });
 
-    $(document).on('click', '.btn-remove-modal-child', function() {
+    $(document).on('click', '.btn-remove-modal-child', function () {
         $(this).closest('.modal-child-row').remove();
     });
 
-    $(document).on('click', '#modal_ext_btn_save', function() {
-        const name  = $('#modal_ext_name').val().trim();
+    $(document).on('click', '#modal_ext_btn_save', function () {
+        const name = $('#modal_ext_name').val().trim();
         const phone = $('#modal_ext_phone').val().trim();
         const notes = $('#modal_ext_notes').val().trim();
-        const $btn  = $(this);
+        const $btn = $(this);
 
         if (!name) { alert('الرجاء إدخال اسم العميل'); return; }
 
         const children = [];
-        $('#modal_ext_children_list .modal-child-row').each(function() {
-            const cName  = $(this).find('.modal-child-name').val().trim();
+        $('#modal_ext_children_list .modal-child-row').each(function () {
+            const cName = $(this).find('.modal-child-name').val().trim();
             const cGrade = $(this).find('.modal-child-grade').val().trim();
             if (cName) children.push({ name: cName, grade: cGrade });
         });
@@ -2035,10 +2037,12 @@
                 ajax: {
                     url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
                     data: params => ({ action: 'olama_reg_search', nonce: R.nonce, q: params.term }),
-                    processResults: data => ({ results: (data.success && data.data.families) ? data.data.families.map(f => {
-                        const fullName = ((f.father_first_name || '') + ' ' + (f.father_family_name || '')).trim() || 'بدون اسم';
-                        return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
-                    }) : [] })
+                    processResults: data => ({
+                        results: (data.success && data.data.families) ? data.data.families.map(f => {
+                            const fullName = ((f.father_first_name || '') + ' ' + (f.father_family_name || '')).trim() || 'بدون اسم';
+                            return { id: f.family_uid, text: `${fullName} (${f.family_uid})` };
+                        }) : []
+                    })
                 },
                 placeholder: '-- ابحث باسم الأب، الأم، أو رقم العائلة --',
                 minimumInputLength: 3
@@ -2052,14 +2056,16 @@
                 ajax: {
                     url: R.ajaxurl, type: 'POST', dataType: 'json', delay: 250,
                     data: params => ({ action: 'olama_reg_search_external_customers', nonce: R.nonce, q: params.term }),
-                    processResults: data => ({ results: (data.success && data.data.customers) ? data.data.customers.map(c => {
-                        const uid = c.customer_uid ? `[${c.customer_uid}] ` : '';
-                        return { id: c.id, text: `${uid}${c.customer_name}${c.phone ? ' - ' + c.phone : ''}` };
-                    }) : [] })
+                    processResults: data => ({
+                        results: (data.success && data.data.customers) ? data.data.customers.map(c => {
+                            const uid = c.customer_uid ? `[${c.customer_uid}] ` : '';
+                            return { id: c.id, text: `${uid}${c.customer_name}${c.phone ? ' - ' + c.phone : ''}` };
+                        }) : []
+                    })
                 },
                 placeholder: '-- ابحث بالاسم أو الهاتف أو اسم الابن --',
                 minimumInputLength: 2
-            }).on('change', function() {
+            }).on('change', function () {
                 const customerId = parseInt($(this).val()) || 0;
                 $('#cp_ext_customer_id').val(customerId);
 
@@ -2108,7 +2114,7 @@
         }
 
         // Toggle UI
-        $('input[name="customer_type"]').on('change', function() {
+        $('input[name="customer_type"]').on('change', function () {
             if ($(this).val() === 'external') {
                 $('#cp_internal_customer_wrap').hide();
                 $('#cp_external_customer_wrap').show();
@@ -2123,7 +2129,7 @@
         });
 
         // Family change → load students
-        $('#cp_family_search').on('change', function() {
+        $('#cp_family_search').on('change', function () {
             const familyUid = $(this).val();
             $('#cp_family_uid').val(familyUid);
             const $list = $('#cp_students_list');
@@ -2155,18 +2161,18 @@
         });
 
         // Quick-add child during payment → saves to DB first
-        $(document).on('click', '#cp_ext_quick_add_child_btn', function() {
+        $(document).on('click', '#cp_ext_quick_add_child_btn', function () {
             $('#cp_ext_new_child_row').show();
             $('#cp_new_child_name').focus();
         });
-        $(document).on('click', '#cp_new_child_cancel_btn', function() {
+        $(document).on('click', '#cp_new_child_cancel_btn', function () {
             $('#cp_ext_new_child_row').hide();
             $('#cp_new_child_name, #cp_new_child_grade').val('');
         });
-        $(document).on('click', '#cp_new_child_save_btn', function() {
+        $(document).on('click', '#cp_new_child_save_btn', function () {
             const customerId = parseInt($('#cp_ext_customer_id').val()) || 0;
-            const name       = $('#cp_new_child_name').val().trim();
-            const grade      = $('#cp_new_child_grade').val().trim();
+            const name = $('#cp_new_child_name').val().trim();
+            const grade = $('#cp_new_child_grade').val().trim();
 
             if (!customerId) { alert('يرجى تحديد عميل خارجي أولاً.'); return; }
             if (!name) { $('#cp_new_child_name').focus(); return; }
@@ -2190,7 +2196,7 @@
         });
 
         // Direct payment to customer (no child)
-        $(document).on('change', '#cp_ext_pay_customer_direct', function() {
+        $(document).on('change', '#cp_ext_pay_customer_direct', function () {
             if ($(this).is(':checked')) {
                 $('.cp-ext-student-check').prop('checked', false).prop('disabled', true);
             } else {
@@ -2200,7 +2206,7 @@
         });
 
         // Fee template → pre-fill amount
-        $('#cp_fee_template').on('change', function() {
+        $('#cp_fee_template').on('change', function () {
             const amount = $(this).find(':selected').data('amount');
             if (amount !== undefined) { $('#cp_amount').val(parseFloat(amount).toFixed(2)); cpCalcTotal(); }
         });
@@ -2209,7 +2215,7 @@
 
         function cpCalcTotal() {
             const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
-            const isDirect   = $('#cp_ext_pay_customer_direct').is(':checked');
+            const isDirect = $('#cp_ext_pay_customer_direct').is(':checked');
             let count;
             if (isExternal && isDirect) {
                 count = 1;
@@ -2218,29 +2224,37 @@
             } else {
                 count = $('.cp-student-check:checked').length;
             }
-            const amount   = parseFloat($('#cp_amount').val()) || 0;
+            const amount = parseFloat($('#cp_amount').val()) || 0;
             const discount = parseFloat($('#cp_discount').val()) || 0;
-            const total    = Math.max(0, (count * amount) - discount);
+            
+            let hasTemplate = $('#cp_fee_template').val() ? true : false;
+            let total = 0;
+            if (hasTemplate || window.OS_LINKED_AGREEMENT) {
+                total = count * amount;
+            } else {
+                total = Math.max(0, (count * amount) - (count * discount));
+            }
+            
             $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
             if (count > 0) $('#cp_students_error').hide();
         }
 
         // Submit
-        $('#olama-reg-custom-payment-form').on('submit', function(e) {
+        $('#olama-reg-custom-payment-form').on('submit', function (e) {
             e.preventDefault();
 
             const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
-            const isDirect   = $('#cp_ext_pay_customer_direct').is(':checked');
+            const isDirect = $('#cp_ext_pay_customer_direct').is(':checked');
             const internalCount = $('.cp-student-check:checked').length;
             const externalCount = isDirect ? 1 : $('.cp-ext-student-check:checked').length;
 
             if (!isExternal && internalCount === 0) { $('#cp_students_error').show(); return; }
             if (isExternal && externalCount === 0) { alert('يجب اختيار ابن واحد على الأقل، أو تفعيل "دفعة مباشرة للعميل".'); return; }
 
-            const $form    = $(this);
-            const $btn     = $('#cp_submit_btn');
+            const $form = $(this);
+            const $btn = $('#cp_submit_btn');
             const $loading = $('#cp_loading');
-            const $msg     = $('#cp_response_msg');
+            const $msg = $('#cp_response_msg');
 
             $btn.prop('disabled', true); $loading.show(); $msg.hide();
 
@@ -2289,13 +2303,75 @@
                 })
                 .always(() => { $btn.prop('disabled', false); $loading.hide(); });
         });
+        if (window.OS_LINKED_AGREEMENT) {
+            const agr = window.OS_LINKED_AGREEMENT;
+            // 1. Set customer type
+            if (agr.payer_type === 'external' || agr.payer_type === 'customer') {
+                $('#cp_type_external').prop('checked', true).trigger('change');
+                if (agr.payer_id && agr.payer_name) {
+                    const newOption = new Option(agr.payer_name, agr.payer_id, true, true);
+                    $('#cp_ext_customer_search').append(newOption).trigger('change');
+                }
+            } else {
+                $('#cp_type_internal').prop('checked', true).trigger('change');
+                if (agr.payer_id && agr.payer_name) {
+                    const newOption = new Option(agr.payer_name, agr.payer_id, true, true);
+                    $('#cp_family_search').append(newOption).trigger('change');
+                }
+            }
 
+            // 2. Set Service Type
+            if (agr.activity_type) {
+                let serviceMap = {
+                    'kindergarten': 'رياض الأطفال',
+                    'summer_club': 'النادي الصيفي',
+                    'karate': 'كاراتيه'
+                };
+                let serviceName = serviceMap[agr.activity_type] || agr.activity_type;
+                let $srvOpt = $('#cp_service_type option').filter(function () { return $(this).text() === serviceName || $(this).val() === serviceName; });
+                if ($srvOpt.length) {
+                    $('#cp_service_type').val($srvOpt.val());
+                } else {
+                    $('#cp_service_type').append(new Option(serviceName, serviceName, true, true));
+                }
+            }
+
+            // 3. Set amounts and check children after AJAX
+            $(document).ajaxStop(function () {
+                if (!window._os_linked_agr_processed) {
+                    let childCount = 0;
+                    if (agr.participants && agr.participants.length) {
+                        $('.cp-student-check, .cp-ext-student-check').each(function () {
+                            let val = $(this).val();
+                            if (agr.participants.includes(parseInt(val)) || agr.participants.includes(val)) {
+                                $(this).prop('checked', true);
+                                childCount++;
+                            } else {
+                                $(this).prop('checked', false).prop('disabled', true);
+                            }
+                        });
+                    }
+
+                    if (childCount === 0) childCount = 1;
+
+                    let perChild = parseFloat(agr.amount);
+                    let perChildDiscount = parseFloat(agr.discount);
+
+                    $('#cp_amount').val(perChild.toFixed(2));
+                    $('#cp_discount').val(perChildDiscount.toFixed(2));
+                    $('select[name="payment_method"]').val('cash');
+
+                    cpCalcTotal();
+                    window._os_linked_agr_processed = true;
+                }
+            });
+        }
 
     }
 
     // Auto-open invoice details if action=view and id is in URL
-    $(function() {
-        setTimeout(function() {
+    $(function () {
+        setTimeout(function () {
             const urlParams = new URLSearchParams(window.location.search);
             const action = urlParams.get('action');
             const id = urlParams.get('id');
@@ -2416,13 +2492,13 @@
     // ── Agreements Module ────────────────────────────────────────────────────
 
     // Agreement Tabs
-    $(document).on('click', '.os-nav-tabs .nav-tab', function(e) {
+    $(document).on('click', '.os-nav-tabs .nav-tab', function (e) {
         e.preventDefault();
         if ($(this).hasClass('os-disabled')) return;
-        
+
         $('.os-nav-tabs .nav-tab').removeClass('nav-tab-active');
         $(this).addClass('nav-tab-active');
-        
+
         const target = $(this).attr('href');
         $('.os-tab-content').hide().removeClass('active');
         $(target).show().addClass('active');
@@ -2434,7 +2510,7 @@
     });
 
     // Auto-open tab from hash on load
-    $(document).ready(function() {
+    $(document).ready(function () {
         if (window.location.hash && window.location.hash.startsWith('#tab-')) {
             const $targetTab = $('.os-nav-tabs .nav-tab[href="' + window.location.hash + '"]');
             if ($targetTab.length && !$targetTab.hasClass('os-disabled')) {
@@ -2457,7 +2533,7 @@
                 type: 'POST',
                 dataType: 'json',
                 delay: 250,
-                data: function(params) {
+                data: function (params) {
                     return {
                         action: 'olama_reg_agr_search_payer',
                         nonce: R.nonce,
@@ -2465,7 +2541,7 @@
                         payer_type: payerType
                     };
                 },
-                processResults: function(data) {
+                processResults: function (data) {
                     return { results: data.success ? data.data.results : [] };
                 }
             },
@@ -2480,7 +2556,7 @@
         $('#os-agr-activity').select2({ dir: 'rtl' });
     }
 
-    $(document).on('change', 'input[name="payer_type"]', function() {
+    $(document).on('change', 'input[name="payer_type"]', function () {
         $('#os-agr-payer').empty().trigger('change');
         $('#os-agr-participant').empty().trigger('change');
         initAgrPayerSelect(); // re-init with new type
@@ -2488,7 +2564,7 @@
 
     let hasPreloadedParticipants = $('#os-agr-participant option').length > 0;
 
-    $(document).on('change', '#os-agr-payer', function(e, isInit) {
+    $(document).on('change', '#os-agr-payer', function (e, isInit) {
         if (hasPreloadedParticipants) {
             hasPreloadedParticipants = false; // consume the page-load trigger
             return;
@@ -2497,7 +2573,7 @@
         const payerId = $(this).val();
         const payerType = $('input[name="payer_type"]:checked').val();
         const $participant = $('#os-agr-participant');
-        
+
         $participant.empty().trigger('change');
         if (!payerId) return;
 
@@ -2512,7 +2588,7 @@
             });
     });
 
-    $(document).on('submit', '#os-form-agreement-header', function(e) {
+    $(document).on('submit', '#os-form-agreement-header', function (e) {
         e.preventDefault();
         const $btn = $('#os-btn-save-header');
         const formData = {};
@@ -2544,29 +2620,29 @@
 
     // ── Agreements: Fees ─────────────────────────────────────────────────────
 
-    $(document).on('click', '#os-agr-add-fee-row', function() {
+    $(document).on('click', '#os-agr-add-fee-row', function () {
         const $template = $('#os-agr-fee-row-template').find('tr').clone();
         $('#os-agr-fees-table tbody').append($template);
         initDatepickers($('#os-agr-fees-table tbody tr').last());
     });
 
     // Auto-fill label and amount when a fee template is selected
-    $(document).on('change', '.os-agr-fee-template-select', function() {
+    $(document).on('change', '.os-agr-fee-template-select', function () {
         const $option = $(this).find('option:selected');
         const $tr = $(this).closest('tr');
         const name = $option.data('name');
         const amount = $option.data('amount');
-        
+
         if (name && $tr.find('[name="label"]').val() === '') {
             $tr.find('[name="label"]').val(name);
         }
-        
+
         if (amount !== undefined) {
             $tr.find('[name="amount"]').val(amount).trigger('input');
         }
     });
 
-    $(document).on('input', '.os-agr-fee-calc', function() {
+    $(document).on('input', '.os-agr-fee-calc', function () {
         const $tr = $(this).closest('tr');
         const amt = parseFloat($tr.find('[name="amount"]').val()) || 0;
         const dsc = parseFloat($tr.find('[name="discount"]').val()) || 0;
@@ -2574,12 +2650,12 @@
         $tr.find('.os-agr-fee-net').text(net.toFixed(3));
     });
 
-    $(document).on('click', '.os-agr-save-fee', function() {
+    $(document).on('click', '.os-agr-save-fee', function () {
         const $btn = $(this);
         const $tr = $btn.closest('tr');
         const agrId = $('#os-agr-fees-table').data('agr-id');
         const data = {
-            id: $tr.data('fee-id'),
+            id: $tr.attr('data-fee-id'),
             agreement_id: agrId,
             fee_category: $tr.find('[name="fee_category"]').val(),
             label: $tr.find('[name="label"]').val(),
@@ -2593,17 +2669,26 @@
                 if (res.success) {
                     showNotice(res.data.message);
                     if (res.data.id) $tr.attr('data-fee-id', res.data.id);
-                    if (res.data.total !== undefined) $('#os-agr-total-label').text(parseFloat(res.data.total).toFixed(3));
+                    if (res.data.total !== undefined) {
+                        $('#os-agr-total-label').text(parseFloat(res.data.total).toFixed(3));
+                        
+                        let perChild = 0;
+                        $('#os-agr-fees-table tbody tr').each(function() {
+                            const net = parseFloat($(this).find('.os-agr-fee-net').text()) || 0;
+                            perChild += net;
+                        });
+                        $('#os-agr-per-child-total').text(perChild.toFixed(3));
+                    }
                 } else {
                     showNotice(res.data?.message || R.strings.error, true);
                 }
             });
     });
 
-    $(document).on('click', '.os-agr-delete-fee', function() {
+    $(document).on('click', '.os-agr-delete-fee', function () {
         if (!confirm(R.strings.confirmDelete)) return;
         const $tr = $(this).closest('tr');
-        const id = $tr.data('fee-id');
+        const id = $tr.attr('data-fee-id');
         const agrId = $('#os-agr-fees-table').data('agr-id');
 
         if (!id || id == 0) {
@@ -2615,7 +2700,16 @@
             .done(res => {
                 if (res.success) {
                     $tr.remove();
-                    if (res.data.total !== undefined) $('#os-agr-total-label').text(parseFloat(res.data.total).toFixed(3));
+                    if (res.data.total !== undefined) {
+                        $('#os-agr-total-label').text(parseFloat(res.data.total).toFixed(3));
+                        
+                        let perChild = 0;
+                        $('#os-agr-fees-table tbody tr').each(function() {
+                            const net = parseFloat($(this).find('.os-agr-fee-net').text()) || 0;
+                            perChild += net;
+                        });
+                        $('#os-agr-per-child-total').text(perChild.toFixed(3));
+                    }
                 } else {
                     showNotice(res.data?.message || R.strings.error, true);
                 }
@@ -2626,9 +2720,9 @@
 
     if (typeof $.fn.sortable !== 'undefined' && $('#os-agr-clauses-list').length) {
         $('#os-agr-clauses-list').sortable({
-            update: function() {
+            update: function () {
                 const orderedIds = [];
-                $(this).find('li').each(function() {
+                $(this).find('li').each(function () {
                     orderedIds.push($(this).data('clause-id'));
                 });
                 ajax('olama_reg_agr_reorder_clauses', { ordered_ids: orderedIds });
@@ -2636,7 +2730,7 @@
         });
     }
 
-    $(document).on('change', '#os-agr-clause-bank-select', function() {
+    $(document).on('change', '#os-agr-clause-bank-select', function () {
         const text = $(this).val();
         if (text) {
             $('#os-agr-new-clause').val(text);
@@ -2644,11 +2738,11 @@
         }
     });
 
-    $(document).on('click', '#os-agr-add-clause', function() {
+    $(document).on('click', '#os-agr-add-clause', function () {
         const $btn = $(this);
         const agrId = $btn.data('agr-id');
         const text = $('#os-agr-new-clause').val().trim();
-        
+
         if (!text) return;
 
         ajax('olama_reg_agr_add_clause', { agreement_id: agrId, clause_text: text }, $btn)
@@ -2671,7 +2765,7 @@
             });
     });
 
-    $(document).on('click', '.os-agr-save-clause', function() {
+    $(document).on('click', '.os-agr-save-clause', function () {
         const $btn = $(this);
         const $li = $btn.closest('li');
         const id = $li.data('clause-id');
@@ -2687,7 +2781,7 @@
             });
     });
 
-    $(document).on('click', '.os-agr-delete-clause', function() {
+    $(document).on('click', '.os-agr-delete-clause', function () {
         if (!confirm(R.strings.confirmDelete)) return;
         const $li = $(this).closest('li');
         const id = $li.data('clause-id');
@@ -2704,33 +2798,95 @@
 
     // ── Agreements: Invoice Modal ────────────────────────────────────────────
 
-    $(document).on('click', '#os-agr-open-invoice-modal', function() {
-        $('#os-agr-invoice-modal').fadeIn(200);
+    $(document).on('click', '#os-agr-open-invoice-modal', function () {
+        const $btn = $(this);
+        const agrId = $('#os-agreement-app').data('id');
+        const status = $('select[name="status"]').val() || $(this).data('status');
+
+        if (!agrId) {
+            alert('الرجاء حفظ العقد أولاً.');
+            return;
+        }
+
+        $btn.prop('disabled', true);
+
+        $.post(R.ajaxurl, {
+            action: 'olama_reg_agr_get_unpaid_fees',
+            nonce: R.nonce,
+            agreement_id: agrId
+        }).done(function (res) {
+            $btn.prop('disabled', false);
+            if (res.success) {
+                const fees = res.data.fees;
+                if (!fees || fees.length === 0) {
+                    alert('لا يمكن معالجة الرسوم: لا يوجد بنود رسوم غير مدفوعة في هذا العقد.');
+                    return;
+                }
+
+                if (status === 'draft') {
+                    if (!confirm('العقد لا يزال مسودة، هل تريد المتابعة؟')) {
+                        return;
+                    }
+                }
+
+                const $tbody = $('#os-agr-invoice-form tbody');
+                $tbody.empty();
+
+                fees.forEach(fee => {
+                    const label = fee.label || fee.fee_category;
+                    const amount = parseFloat(fee.net_amount).toFixed(3);
+
+                    const tr = `
+                        <tr>
+                            <td><input type="checkbox" name="fee_ids[]" value="${fee.id}" class="os-agr-inv-check" checked></td>
+                            <td>${label}</td>
+                            <td>${amount}</td>
+                        </tr>
+                    `;
+                    $tbody.append(tr);
+                });
+
+                $('#os-agr-invoice-modal').fadeIn(200);
+                $('#os-agr-invoice-form button[type="submit"]').prop('disabled', false);
+            } else {
+                alert(res.data?.message || 'حدث خطأ.');
+            }
+        }).fail(function () {
+            $btn.prop('disabled', false);
+            alert('حدث خطأ في الاتصال.');
+        });
     });
 
-    $(document).on('click', '#os-agr-close-invoice-modal', function() {
+    $(document).on('click', '#os-agr-close-invoice-modal', function () {
         $('#os-agr-invoice-modal').fadeOut(200);
     });
 
-    $(document).on('change', '#os-agr-inv-check-all', function() {
+    $(document).on('change', '#os-agr-inv-check-all', function () {
         $('.os-agr-inv-check').prop('checked', this.checked);
     });
 
-    $(document).on('submit', '#os-agr-invoice-form', function(e) {
+    $(document).on('submit', '#os-agr-invoice-form', function (e) {
         e.preventDefault();
-        const formData = $(this).serialize();
-        const $btn = $(this).find('button[type="submit"]');
+        const formDataArray = $(this).serializeArray();
 
-        ajax('olama_reg_agr_generate_invoice', formData, $btn)
-            .done(res => {
-                if (res.success) {
-                    showNotice(res.data.message);
-                    setTimeout(() => window.location.reload(), 1500);
-                } else {
-                    showNotice(res.data?.message || R.strings.error, true);
-                }
-            })
-            .fail(() => showNotice(R.strings.error, true));
+        let agreementId = '';
+        let feeIds = [];
+
+        formDataArray.forEach(item => {
+            if (item.name === 'agreement_id') agreementId = item.value;
+            if (item.name === 'fee_ids[]') feeIds.push(item.value);
+        });
+
+        if (!feeIds.length) {
+            alert('يرجى تحديد الرسوم التي ترغب بمعالجتها.');
+            return;
+        }
+
+        const url = R.ajaxurl.replace('admin-ajax.php', 'admin.php') +
+            '?page=olama-registration-custom-payments&from_agreement=' + agreementId +
+            '&fee_ids=' + feeIds.join(',');
+
+        window.location.href = url;
     });
 
 })(jQuery);

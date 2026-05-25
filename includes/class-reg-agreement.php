@@ -135,6 +135,11 @@ class Olama_Reg_Agreement {
             $values[] = $args['payer_type'];
         }
 
+        if ( ! empty( $args['payer_id'] ) ) {
+            $where[] = "payer_id = %s";
+            $values[] = $args['payer_id'];
+        }
+
         if ( ! empty( $args['activity_type'] ) ) {
             $where[] = "activity_type = %s";
             $values[] = $args['activity_type'];
@@ -193,6 +198,15 @@ class Olama_Reg_Agreement {
             $id
         ) );
 
+        $participant_ids = $wpdb->get_var( $wpdb->prepare( "SELECT participant_ids FROM {$agr_table} WHERE id = %d", $id ) );
+        $participant_ids_array = json_decode( $participant_ids, true );
+        $multiplier = 1;
+        if (is_array($participant_ids_array) && count($participant_ids_array) > 0) {
+            $multiplier = count($participant_ids_array);
+        }
+
+        $total = $total * $multiplier;
+
         $wpdb->update(
             $agr_table,
             [ 'total_amount' => $total, 'updated_at' => current_time( 'mysql' ) ],
@@ -211,11 +225,9 @@ class Olama_Reg_Agreement {
             $name = $wpdb->get_var( $wpdb->prepare( "SELECT customer_name FROM {$table} WHERE customer_uid = %s OR id = %d", $id, (int)$id ) );
             return $name ? $name : 'Unknown Customer';
         } elseif ( $type === 'family' ) {
-            if ( class_exists( 'Olama_School_DB' ) ) {
-                $family = Olama_School_DB::get_family( $id );
-                if ( $family ) return $family->guardian_name ?? 'Unknown Family';
-            }
-            return $id;
+            $table = $wpdb->prefix . 'olama_families';
+            $name = $wpdb->get_var( $wpdb->prepare( "SELECT family_name FROM {$table} WHERE family_uid = %s OR id = %d", $id, (int)$id ) );
+            return $name ? $name : 'Unknown Family';
         }
         return '';
     }
@@ -227,11 +239,9 @@ class Olama_Reg_Agreement {
             $name = $wpdb->get_var( $wpdb->prepare( "SELECT child_name FROM {$table} WHERE child_uid = %s OR id = %d", $id, (int)$id ) );
             return $name ? $name : 'Unknown Child';
         } elseif ( $type === 'student' ) {
-            if ( class_exists( 'Olama_School_DB' ) ) {
-                $student = Olama_School_DB::get_student( $id );
-                if ( $student ) return ( $student->first_name ?? '' ) . ' ' . ( $student->last_name ?? '' );
-            }
-            return $id;
+            $table = $wpdb->prefix . 'olama_students';
+            $name = $wpdb->get_var( $wpdb->prepare( "SELECT student_name FROM {$table} WHERE student_uid = %s OR id = %d", $id, (int)$id ) );
+            return $name ? $name : 'Unknown Student';
         }
         return '';
     }

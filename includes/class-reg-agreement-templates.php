@@ -61,6 +61,61 @@ class Olama_Reg_Agreement_Templates {
         return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$wpdb->prefix}olama_agreement_template_clauses WHERE template_id = %d ORDER BY sort_order ASC", $template_id ) );
     }
 
+    public static function save_template_relations( int $template_id, array $fees, array $clauses ) {
+        global $wpdb;
+
+        // Clear existing
+        $wpdb->delete( $wpdb->prefix . 'olama_agreement_template_fees', [ 'template_id' => $template_id ] );
+        $wpdb->delete( $wpdb->prefix . 'olama_agreement_template_clauses', [ 'template_id' => $template_id ] );
+
+        // Insert fees
+        if ( ! empty( $fees['category'] ) && is_array( $fees['category'] ) ) {
+            $sort = 1;
+            foreach ( $fees['category'] as $i => $cat ) {
+                $category = sanitize_text_field( $cat );
+                $label    = sanitize_text_field( $fees['label'][$i] ?? '' );
+                $amount   = floatval( $fees['amount'][$i] ?? 0 );
+                $discount = floatval( $fees['discount'][$i] ?? 0 );
+                $net      = $amount - $discount;
+
+                if ( ! empty( $label ) ) {
+                    $wpdb->insert(
+                        $wpdb->prefix . 'olama_agreement_template_fees',
+                        [
+                            'template_id'  => $template_id,
+                            'fee_category' => $category,
+                            'label'        => $label,
+                            'amount'       => $amount,
+                            'discount'     => $discount,
+                            'net_amount'   => $net,
+                            'sort_order'   => $sort++
+                        ],
+                        [ '%d', '%s', '%s', '%f', '%f', '%f', '%d' ]
+                    );
+                }
+            }
+        }
+
+        // Insert clauses
+        if ( ! empty( $clauses ) && is_array( $clauses ) ) {
+            $sort = 1;
+            foreach ( $clauses as $clause_text ) {
+                $text = wp_kses_post( $clause_text );
+                if ( ! empty( trim( $text ) ) ) {
+                    $wpdb->insert(
+                        $wpdb->prefix . 'olama_agreement_template_clauses',
+                        [
+                            'template_id' => $template_id,
+                            'clause_text' => $text,
+                            'sort_order'  => $sort++
+                        ],
+                        [ '%d', '%s', '%d' ]
+                    );
+                }
+            }
+        }
+    }
+
     /**
      * Apply template to an agreement
      */

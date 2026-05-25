@@ -6,6 +6,40 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 $services      = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 $fee_templates = Olama_Reg_Billing_Fees::get_templates();
+
+$linked_agreement = null;
+if ( isset($_GET['from_agreement']) && !empty($_GET['fee_ids']) ) {
+    $agr_id = (int) $_GET['from_agreement'];
+    $fee_ids = array_map('intval', explode(',', $_GET['fee_ids']));
+    
+    $agreement = Olama_Reg_Agreement::get($agr_id);
+    if ( $agreement ) {
+        $fees = Olama_Reg_Agreement_Fees::get_by_agreement($agr_id);
+        
+        $total_amount = 0;
+        $total_discount = 0;
+        
+        foreach ( $fees as $f ) {
+            if ( in_array( $f->id, $fee_ids ) ) {
+                $total_amount += (float) $f->amount;
+                $total_discount += (float) $f->discount;
+            }
+        }
+        
+        $linked_agreement = [
+            'id' => $agreement->id,
+            'number' => $agreement->agreement_number,
+            'payer_type' => $agreement->payer_type, // 'customer' or 'family'
+            'payer_id' => $agreement->payer_id,
+            'payer_name' => $agreement->payer_name,
+            'participants' => $agreement->participant_ids_array, // array of child IDs or UIDs
+            'activity_type' => $agreement->activity_type,
+            'amount' => $total_amount,
+            'discount' => $total_discount,
+            'fee_ids' => $fee_ids,
+        ];
+    }
+}
 ?>
 
 <div class="wrap olama-reg-wrap">
@@ -16,6 +50,15 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
     <div class="olama-reg-box" style="max-width: 860px; margin-top: 20px;">
         <form id="olama-reg-custom-payment-form">
             <?php wp_nonce_field( 'olama_reg_custom_payment', 'custom_payment_nonce' ); ?>
+            
+            <?php if ( $linked_agreement ) : ?>
+                <div style="background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:12px; margin-bottom:20px; font-weight:700; color:var(--reg-success);">
+                    <span class="dashicons dashicons-paperclip"></span>
+                    مرتبط بالعقد رقم: <?php echo esc_html( $linked_agreement['number'] ); ?>
+                </div>
+                <input type="hidden" name="linked_agreement_id" value="<?php echo esc_attr( $linked_agreement['id'] ); ?>">
+                <input type="hidden" name="linked_fee_ids" value="<?php echo esc_attr( implode(',', $linked_agreement['fee_ids']) ); ?>">
+            <?php endif; ?>
 
             <!-- ── Step 1 Header ────────────────────────────────────────── -->
             <div style="background:var(--reg-primary); color:#fff; padding:12px 20px; border-radius:8px 8px 0 0; font-weight:700; margin:-20px -20px 20px -20px;">
@@ -212,3 +255,9 @@ $fee_templates = Olama_Reg_Billing_Fees::get_templates();
 </div>
 
 <?php include OLAMA_REG_PATH . 'admin/views/partial-customer-modal.php'; ?>
+
+<?php if ( $linked_agreement ) : ?>
+<script>
+    window.OS_LINKED_AGREEMENT = <?php echo wp_json_encode( $linked_agreement ); ?>;
+</script>
+<?php endif; ?>

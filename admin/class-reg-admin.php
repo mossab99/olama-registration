@@ -53,24 +53,9 @@ class Olama_Reg_Admin {
             [ $this, 'render_agreements' ]
         );
 
-        add_submenu_page(
-            'olama-registration',
-            __( 'Agreement Templates', 'olama-registration' ),
-            __( 'نماذج العقود', 'olama-registration' ),
-            'manage_options',
-            'olama-registration-agreement-templates',
-            [ $this, 'render_agreement_templates' ]
-        );
+        // Agreement Templates submenu removed, now a tab under agreements
 
-        add_submenu_page(
-            'olama-registration',
-            __( 'Clause Bank', 'olama-registration' ),
-            __( 'بنود العقود', 'olama-registration' ),
-            'manage_options',
-            'olama-registration-clause-bank',
-            [ $this, 'render_clause_bank' ]
-        );
-
+        // Clause bank submenu removed, now a tab under agreement-templates
         add_submenu_page(
             'olama-registration',
             __( 'Invoices', 'olama-registration' ),
@@ -161,6 +146,18 @@ class Olama_Reg_Admin {
     public function render_agreements(): void {
         if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         
+        $tab = sanitize_text_field( $_GET['tab'] ?? 'agreements' );
+        
+        if ( $tab === 'templates' ) {
+            include OLAMA_REG_PATH . 'admin/views/page-agreement-templates.php';
+            return;
+        }
+        
+        if ( $tab === 'clauses' ) {
+            include OLAMA_REG_PATH . 'admin/views/page-clause-bank.php';
+            return;
+        }
+
         $action = sanitize_text_field( $_GET['action'] ?? '' );
         $id     = (int) ( $_GET['id'] ?? 0 );
 
@@ -173,15 +170,10 @@ class Olama_Reg_Admin {
         }
     }
 
-    public function render_agreement_templates(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
-        include OLAMA_REG_PATH . 'admin/views/page-agreement-templates.php';
-    }
+    // render_agreement_templates method removed as it is now handled via tabs
 
-    public function render_clause_bank(): void {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
-        include OLAMA_REG_PATH . 'admin/views/page-clause-bank.php';
-    }
+    // render_clause_bank method removed as it is now handled via tabs
+
 
     public function render_invoices(): void {
         if ( ! current_user_can( 'olama_manage_registration_invoices' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );

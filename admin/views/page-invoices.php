@@ -37,6 +37,11 @@ if ( $action === 'print' && $id ) {
         ) );
         if ( $ay ) $year_name = $ay->year_name;
     }
+
+    $payments = [];
+    if ( class_exists( 'Olama_Reg_Billing_Payment' ) ) {
+        $payments = Olama_Reg_Billing_Payment::get_invoice_payments( $id );
+    }
     ?>
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
@@ -44,33 +49,44 @@ if ( $action === 'print' && $id ) {
         <meta charset="UTF-8">
         <title><?php echo esc_html( $invoice->invoice_number ); ?></title>
         <style>
-            body { font-family: 'Tajawal', sans-serif; margin: 40px; color: #1a1a2e; }
-            .print-wrap { max-width: 800px; margin: 0 auto; border: 1px solid #e0c090; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(232,146,10,0.1); }
-            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            .header-table td { vertical-align: top; }
-            .logo-title { font-size: 24px; font-weight: 800; color: #E8920A; }
-            .invoice-title { font-size: 28px; font-weight: 800; text-align: left; color: #1a1a2e; }
-            .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
-            .meta-table td { padding: 6px; border-bottom: 1px solid #f0f0f0; }
-            .label { font-weight: 700; color: #6B7280; width: 150px; }
-            .items-table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            .items-table th { background: #FFF3E0; color: #C4780A; font-weight: 700; padding: 10px; border: 1px solid #e0c090; text-align: right; }
-            .items-table td { padding: 10px; border: 1px solid #eee; }
-            .totals-table { width: 250px; margin-right: auto; margin-left: 0; border-collapse: collapse; }
-            .totals-table td { padding: 8px; border-bottom: 1px dashed #e0c090; }
-            .totals-table tr.grand-total td { font-weight: 800; font-size: 16px; color: #E8920A; border-bottom: 2px solid #E8920A; }
-            .installments-title { font-size: 16px; font-weight: 700; color: #C4780A; margin-top: 30px; margin-bottom: 10px; }
-            .installments-table { width: 100%; border-collapse: collapse; }
-            .installments-table th { background: #f9f9f9; padding: 8px; border: 1px solid #eee; text-align: right; }
-            .installments-table td { padding: 8px; border: 1px solid #eee; }
-            .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 15px; }
+            :root {
+                --primary: #E8920A;
+                --text-main: #1a1a2e;
+                --text-muted: #6B7280;
+                --border-color: #e2e8f0;
+                --bg-light: #fafaf9;
+            }
+            body { font-family: 'Tajawal', sans-serif; margin: 40px; color: var(--text-main); background: #f8fafc; }
+            .print-wrap { background: #fff; max-width: 850px; margin: 0 auto; border: 1px solid var(--border-color); padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 40px; border-bottom: 2px solid var(--primary); padding-bottom: 20px; }
+            .header-table td { vertical-align: middle; }
+            .logo-title { font-size: 28px; font-weight: 900; color: var(--primary); letter-spacing: -0.5px; }
+            .invoice-title { font-size: 32px; font-weight: 900; text-align: left; color: var(--text-main); }
+            .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 35px; background: var(--bg-light); border-radius: 8px; overflow: hidden; }
+            .meta-table td { padding: 12px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; }
+            .label { font-weight: 800; color: var(--text-muted); width: 160px; }
+            .items-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 35px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; }
+            .items-table th { background: var(--bg-light); color: var(--text-main); font-weight: 800; padding: 14px; text-align: right; border-bottom: 2px solid var(--border-color); }
+            .items-table td { padding: 14px; border-bottom: 1px solid var(--border-color); }
+            .items-table tr:last-child td { border-bottom: none; }
+            .totals-container { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; }
+            .totals-table { width: 320px; border-collapse: collapse; background: var(--bg-light); border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); }
+            .totals-table td { padding: 12px 16px; border-bottom: 1px solid var(--border-color); }
+            .totals-table tr:last-child td { border-bottom: none; }
+            .totals-table tr.grand-total td { font-weight: 900; font-size: 18px; color: #fff; background: var(--primary); border: none; }
+            .installments-title, .payments-title { font-size: 18px; font-weight: 800; color: var(--text-main); margin-top: 40px; margin-bottom: 15px; border-right: 4px solid var(--primary); padding-right: 10px; }
+            .installments-table, .payments-table { width: 100%; border-collapse: collapse; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; margin-bottom: 30px; }
+            .installments-table th, .payments-table th { background: var(--bg-light); padding: 12px; border-bottom: 2px solid var(--border-color); text-align: right; font-weight: 800; }
+            .installments-table td, .payments-table td { padding: 12px; border-bottom: 1px solid var(--border-color); }
+            .installments-table tr:last-child td, .payments-table tr:last-child td { border-bottom: none; }
+            .footer { margin-top: 60px; text-align: center; font-size: 13px; color: var(--text-muted); border-top: 1px solid var(--border-color); padding-top: 20px; }
             @media print {
-                body { margin: 0; }
-                .print-wrap { border: none; box-shadow: none; padding: 0; }
-                .no-print { display: none; }
+                body { margin: 0; background: #fff; }
+                .print-wrap { border: none; box-shadow: none; padding: 0; max-width: 100%; }
+                .no-print { display: none !important; }
             }
         </style>
-        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;800&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
     </head>
     <body>
         <div class="no-print" style="max-width: 800px; margin: 0 auto 20px; text-align: left;">
@@ -161,28 +177,33 @@ if ( $action === 'print' && $id ) {
                 </tbody>
             </table>
 
-            <table class="totals-table">
-                <tr>
-                    <td class="label">المجموع الفرعي:</td>
-                    <td style="text-align: left; font-weight:700;"><?php echo esc_html( number_format( $invoice->subtotal, 2 ) ); ?></td>
-                </tr>
-                <tr>
-                    <td class="label">الخصم الممنوح:</td>
-                    <td style="text-align: left; color:#c62828; font-weight:700;">- <?php echo esc_html( number_format( $invoice->discount, 2 ) ); ?></td>
-                </tr>
-                <tr class="grand-total">
-                    <td class="label">الإجمالي النهائي:</td>
-                    <td style="text-align: left;"><?php echo esc_html( number_format( $invoice->total, 2 ) ); ?></td>
-                </tr>
-                <tr>
-                    <td class="label">المبلغ المدفوع:</td>
-                    <td style="text-align: left; color:#2e7d32; font-weight:700;"><?php echo esc_html( number_format( $invoice->amount_paid, 2 ) ); ?></td>
-                </tr>
-                <tr>
-                    <td class="label">المتبقي المستحق:</td>
-                    <td style="text-align: left; font-weight:800; color:#E8920A;"><?php echo esc_html( number_format( $invoice->balance, 2 ) ); ?></td>
-                </tr>
-            </table>
+            <div class="totals-container">
+                <div style="flex:1;">
+                    <!-- Space for additional info like QR code or notes if needed -->
+                </div>
+                <table class="totals-table">
+                    <tr>
+                        <td class="label">المجموع الفرعي:</td>
+                        <td style="text-align: left; font-weight:800;"><?php echo esc_html( number_format( $invoice->subtotal, 2 ) ); ?></td>
+                    </tr>
+                    <tr>
+                        <td class="label">الخصم الممنوح:</td>
+                        <td style="text-align: left; color:#dc2626; font-weight:800;">- <?php echo esc_html( number_format( $invoice->discount, 2 ) ); ?></td>
+                    </tr>
+                    <tr class="grand-total">
+                        <td class="label" style="color:#fff;">الإجمالي النهائي:</td>
+                        <td style="text-align: left;"><?php echo esc_html( number_format( $invoice->total, 2 ) ); ?></td>
+                    </tr>
+                    <tr>
+                        <td class="label">المبلغ المدفوع:</td>
+                        <td style="text-align: left; color:#16a34a; font-weight:800;"><?php echo esc_html( number_format( $invoice->amount_paid, 2 ) ); ?></td>
+                    </tr>
+                    <tr>
+                        <td class="label">المتبقي المستحق:</td>
+                        <td style="text-align: left; font-weight:900; color:var(--primary); font-size: 18px;"><?php echo esc_html( number_format( $invoice->balance, 2 ) ); ?></td>
+                    </tr>
+                </table>
+            </div>
 
             <?php if ( ! empty( $invoice->installments ) ): ?>
                 <div class="installments-title">جدول أقساط السداد المتفق عليه</div>
@@ -214,6 +235,40 @@ if ( $action === 'print' && $id ) {
                                     echo esc_html( $inst_labels[ $inst->status ] ?? $inst->status );
                                     ?>
                                 </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+
+            <?php if ( ! empty( $payments ) ): ?>
+                <div class="payments-title">سجل الدفعات السابقة (السندات المرتبطة)</div>
+                <table class="payments-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 100px;">رقم السند</th>
+                            <th>تاريخ الدفع</th>
+                            <th>طريقة الدفع</th>
+                            <th style="text-align: left;">المبلغ المدفوع</th>
+                            <th>المرجع</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $payments as $pay ): 
+                            $method_label = match($pay->method) {
+                                'cash' => 'نقدي', 'bank_transfer' => 'حوالة بنكية', 'cheque' => 'شيك', 'online' => 'دفع إلكتروني', 'reversal' => 'عكس سند', default => 'أخرى'
+                            };
+                            $is_reversal = ($pay->method === 'reversal');
+                            $color = $is_reversal ? '#dc2626' : '#16a34a';
+                        ?>
+                            <tr>
+                                <td><strong>#<?php echo esc_html( $pay->id ); ?></strong></td>
+                                <td><?php echo esc_html( $pay->payment_date ); ?></td>
+                                <td><?php echo esc_html( $method_label ); ?></td>
+                                <td style="text-align: left; font-weight: 800; color: <?php echo $color; ?>;">
+                                    <?php echo esc_html( number_format( (float) $pay->amount, 2 ) ); ?>
+                                </td>
+                                <td style="font-size: 13px; color: var(--text-muted);"><?php echo esc_html( $pay->reference ?: '—' ); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -280,6 +335,7 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
 }
 
 $fee_templates = Olama_Reg_Billing_Fees::get_templates();
+$agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
 ?>
 <?php
 // Quick stats for the banner
@@ -527,10 +583,21 @@ $_inv_stats = $wpdb->get_row(
                     <div class="olama-reg-section">
                         <h3 class="olama-reg-section-title"><?php esc_html_e( 'النموذج والجدولة الافتراضية', 'olama-registration' ); ?></h3>
                         <div class="olama-reg-grid">
-                            <div class="olama-reg-field">
+                            <div class="olama-reg-field olama-reg-field--required">
+                                <label for="inv_service_type"><?php esc_html_e( 'طبيعة الخدمة', 'olama-registration' ); ?></label>
+                                <select id="inv_service_type" name="service_type" required>
+                                    <option value=""><?php esc_html_e( '— اختر طبيعة الخدمة —', 'olama-registration' ); ?></option>
+                                    <?php foreach ( $agreement_natures as $nature ): ?>
+                                        <option value="<?php echo esc_attr( $nature ); ?>">
+                                            <?php echo esc_html( $nature ); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="olama-reg-field olama-reg-field--required">
                                 <label for="inv_fee_template_id"><?php esc_html_e( 'استيراد بنود نموذج رسوم', 'olama-registration' ); ?></label>
-                                <select id="inv_fee_template_id" name="fee_template_id">
-                                    <option value=""><?php esc_html_e( '— بنود مخصصة (لا شيء) —', 'olama-registration' ); ?></option>
+                                <select id="inv_fee_template_id" name="fee_template_id" required>
+                                    <option value=""><?php esc_html_e( '— اختر نموذج الرسوم —', 'olama-registration' ); ?></option>
                                     <?php foreach ( $fee_templates as $tpl ): ?>
                                         <option value="<?php echo esc_attr( $tpl->id ); ?>" data-items="<?php echo esc_attr( wp_json_encode( $tpl->items ) ); ?>" data-inst="<?php echo esc_attr( $tpl->installments ); ?>">
                                             <?php echo esc_html( $tpl->template_name ); ?>

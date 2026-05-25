@@ -220,9 +220,14 @@ $summary  = Olama_Reg_Billing_Invoice::get_customer_invoice_summary( $customer_i
                     <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-invoices&action=view&id=' . $inv->id ) ); ?>" class="olama-reg-btn" style="background:#fff; border:1px solid #cbd5e1; color:#475569; display:inline-flex; align-items:center; gap:4px; text-decoration:none;">
                         <span class="dashicons dashicons-visibility"></span> <?php esc_html_e('عرض الفاتورة', 'olama-registration'); ?>
                     </a>
-                    <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-payments&action=new&invoice_id=' . $inv->id ) ); ?>" class="olama-reg-btn olama-reg-btn--primary" style="display:inline-flex; align-items:center; gap:4px; text-decoration:none;">
+                    <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger"
+                            data-id="<?php echo esc_attr( $inv->id ); ?>"
+                            data-no="<?php echo esc_attr( $inv->invoice_number ); ?>"
+                            data-bal="<?php echo esc_attr( $inv->balance ); ?>"
+                            data-family="<?php echo esc_attr( $customer_uid ); ?>"
+                            style="display:inline-flex; align-items:center; gap:4px; text-decoration:none; cursor:pointer;">
                         <span class="dashicons dashicons-plus"></span> <?php esc_html_e('تسجيل دفعة', 'olama-registration'); ?>
-                    </a>
+                    </button>
                     <?php if ( (float)$inv->amount_paid == 0 && $inv->status !== 'cancelled' ): ?>
                         <button class="olama-reg-btn olama-reg-cancel-invoice-btn" data-id="<?php echo esc_attr( $inv->id ); ?>" style="background:#fff; border:1px solid #fca5a5; color:#dc2626; display:inline-flex; align-items:center; gap:4px; cursor:pointer;">
                             <span class="dashicons dashicons-dismiss"></span> <?php esc_html_e('إلغاء الفاتورة', 'olama-registration'); ?>
