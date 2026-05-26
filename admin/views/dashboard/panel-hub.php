@@ -88,9 +88,10 @@ $tiles = [
              aria-label="<?php esc_attr_e( 'إجراءات سريعة', 'olama-registration' ); ?>">
             <a href="#"
                id="os-hub-qaction-invoice"
-               class="button button-primary button-small os-hub-qaction"
+               class="button button-primary button-small os-hub-qaction os-hub-qaction--family-only"
                title="<?php esc_attr_e( 'فاتورة جديدة', 'olama-registration' ); ?>"
-               aria-label="<?php esc_attr_e( 'إنشاء فاتورة جديدة', 'olama-registration' ); ?>">
+               aria-label="<?php esc_attr_e( 'إنشاء فاتورة جديدة', 'olama-registration' ); ?>"
+               style="display:none;">
                 <span class="dashicons dashicons-media-text" aria-hidden="true"></span>
                 <?php _e( 'فاتورة', 'olama-registration' ); ?>
             </a>
@@ -104,10 +105,9 @@ $tiles = [
             </a>
             <a href="#"
                id="os-hub-qaction-payment"
-               class="button button-small os-hub-qaction os-hub-qaction--family-only"
+               class="button button-small os-hub-qaction"
                title="<?php esc_attr_e( 'تسجيل دفعة', 'olama-registration' ); ?>"
-               aria-label="<?php esc_attr_e( 'تسجيل دفعة جديدة', 'olama-registration' ); ?>"
-               style="display:none;">
+               aria-label="<?php esc_attr_e( 'تسجيل دفعة جديدة', 'olama-registration' ); ?>">
                 <span class="dashicons dashicons-money-alt" aria-hidden="true"></span>
                 <?php _e( 'دفعة', 'olama-registration' ); ?>
             </a>

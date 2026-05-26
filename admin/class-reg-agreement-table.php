@@ -29,11 +29,13 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
             'cb' => '<input type="checkbox" />',
             'agreement_number' => __('رقم العقد', 'olama-registration'),
             'payer' => __('الجهة الدافعة', 'olama-registration'),
-            'participant' => __('المشترك', 'olama-registration'),
-            'activity_type' => __('النشاط', 'olama-registration'),
+            'participant' => __('الطلاب المشتركين', 'olama-registration'),
+            'activity_type' => __('طبيعة العقد', 'olama-registration'),
             'status' => __('الحالة', 'olama-registration'),
-            'invoices' => __('الفواتير', 'olama-registration'),
-            'total_amount' => __('الإجمالي', 'olama-registration'),
+            'invoices' => __('الفواتير المرتبطة', 'olama-registration'),
+            'total_amount' => __('اجمالي العقد', 'olama-registration'),
+            'collected_amount' => __('المبلغ المحصل', 'olama-registration'),
+            'remaining_amount' => __('المبلغ المتبقي', 'olama-registration'),
             'created_at' => __('التاريخ', 'olama-registration'),
         ];
     }
@@ -72,6 +74,7 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
 
     protected function column_agreement_number($item)
     {
+        global $wpdb;
         $edit_url = admin_url('admin.php?page=olama-registration-agreements&action=edit&id=' . $item->id);
         $print_url = admin_url('admin.php?page=olama-registration-agreements&action=print&id=' . $item->id);
 
@@ -79,6 +82,22 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
             'edit' => sprintf('<a href="%s">%s</a>', esc_url($edit_url), __('تعديل', 'olama-registration')),
             'print' => sprintf('<a href="%s" target="_blank">%s</a>', esc_url($print_url), __('طباعة', 'olama-registration')),
         ];
+
+        // Only allow cancel/delete if there is NO active invoice/payment impact!
+        $has_invoices = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+            $item->id
+        )) > 0;
+
+        if (!$has_invoices) {
+            $cancel_url = admin_url('admin.php?page=olama-registration-agreements&action=cancel&id=' . $item->id);
+            $actions['cancel'] = sprintf(
+                '<a href="%s" style="color:#d63638;" onclick="return confirm(\'%s\');">%s</a>',
+                esc_url($cancel_url),
+                esc_attr__('هل أنت متأكد من إلغاء وحذف هذا العقد؟', 'olama-registration'),
+                __('إلغاء', 'olama-registration')
+            );
+        }
 
         return sprintf(
             '<strong><a href="%s">%s</a></strong>%s',
@@ -158,6 +177,29 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
             }
         }
         return implode('<br>', $links);
+    }
+
+    protected function column_collected_amount($item)
+    {
+        global $wpdb;
+        $collected = (float) $wpdb->get_var($wpdb->prepare(
+            "SELECT SUM(amount_paid) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+            $item->id
+        ));
+        return '<span style="color:#16a34a; font-weight:700;">' . number_format($collected, 3) . ' JD</span>';
+    }
+
+    protected function column_remaining_amount($item)
+    {
+        global $wpdb;
+        $collected = (float) $wpdb->get_var($wpdb->prepare(
+            "SELECT SUM(amount_paid) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+            $item->id
+        ));
+        $total = (float) $item->total_amount;
+        $remaining = max(0, $total - $collected);
+        $color = $remaining > 0 ? '#e8920a' : '#16a34a';
+        return '<span style="color:' . $color . '; font-weight:700;">' . number_format($remaining, 3) . ' JD</span>';
     }
 
     public function prepare_items()

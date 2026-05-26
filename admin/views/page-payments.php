@@ -210,9 +210,11 @@ if ($action === 'print_receipt' && $payment_id) {
 
             <table class="content-table">
                 <tr>
-                    <td class="label">وصلنا من السيد/ة:</td>
+                    <td class="label"><?php echo (strpos($payment->family_uid, 'CUST-') === 0) ? '' : 'وصلنا من السيد/ة:'; ?></td>
                     <td><strong><?php
-                    if ($family) {
+                    if (strpos($payment->family_uid, 'CUST-') === 0) {
+                        echo '';
+                    } elseif ($family) {
                         echo esc_html(trim($family->father_first_name . ' ' . $family->father_family_name));
                     } elseif ($ext_customer_name) {
                         echo esc_html($ext_customer_name);
@@ -517,7 +519,14 @@ $_pay_total = $wpdb->get_var(
                                 <?php esc_html_e('لا يوجد أي عمليات دفع مسجلة مطابقة.', 'olama-registration'); ?>
                             </td>
                         </tr>
-                    <?php else: ?>
+                    <?php else: 
+                        $reversed_ids = [];
+                        foreach ($payments as $p) {
+                            if (strpos($p->reference ?? '', 'REVERSAL-') === 0) {
+                                $reversed_ids[] = (int) str_replace('REVERSAL-', '', $p->reference);
+                            }
+                        }
+                    ?>
                         <?php foreach ($payments as $pay):
                             $method_cfg = [
                                 'cash' => ['label' => 'نقدي', 'class' => 'reg-method-pill--cash'],
@@ -526,8 +535,9 @@ $_pay_total = $wpdb->get_var(
                                 'online' => ['label' => 'دفع إلكتروني', 'class' => 'reg-method-pill--online'],
                             ];
                             $m = $method_cfg[$pay->method] ?? ['label' => $pay->method, 'class' => 'reg-method-pill--cash'];
+                            $is_reversal = (float) $pay->amount < 0;
                             ?>
-                            <tr>
+                            <tr<?php echo $is_reversal ? ' class="os-hub-row--reversal"' : ''; ?>>
                                 <td><span
                                         style="font-weight:700; color:var(--reg-text-muted);">#<?php echo esc_html($pay->id); ?></span>
                                 </td>
@@ -551,14 +561,23 @@ $_pay_total = $wpdb->get_var(
                                         title="<?php esc_attr_e('طباعة سند القبض', 'olama-registration'); ?>">
                                         <span class="dashicons dashicons-printer"></span>
                                     </a>
-                                    <?php if ((float) $pay->amount > 0 && $pay->method !== 'reversal'): ?>
+                                    <?php if ((float) $pay->amount > 0 && $pay->method !== 'reversal'): 
+                                        $is_already_reversed = in_array((int) $pay->id, $reversed_ids, true);
+                                        if ($is_already_reversed):
+                                    ?>
+                                        <button class="button button-small" disabled
+                                            style="opacity:0.5; cursor:not-allowed;"
+                                            title="<?php esc_attr_e('هذا السند معكوس مسبقاً', 'olama-registration'); ?>">
+                                            <span class="dashicons dashicons-undo"></span>
+                                        </button>
+                                    <?php else: ?>
                                         <button class="button button-small olama-reg-reverse-payment-btn"
                                             data-id="<?php echo esc_attr($pay->id); ?>"
                                             title="<?php esc_attr_e('عكس السند', 'olama-registration'); ?>"
                                             style="color:#c62828;">
                                             <span class="dashicons dashicons-undo"></span>
                                         </button>
-                                    <?php endif; ?>
+                                    <?php endif; endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

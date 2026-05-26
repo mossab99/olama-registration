@@ -11,11 +11,20 @@ $id = (int) ($_GET['id'] ?? 0);
 $is_new = empty($id);
 $agreement = null;
 $is_context_locked = false;
+$has_financial_impact = false;
 
 if (!$is_new) {
     $agreement = Olama_Reg_Agreement::get($id);
     if (!$agreement) {
         wp_die(__('العقد غير موجود.', 'olama-registration'));
+    }
+    global $wpdb;
+    $has_financial_impact = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+        $id
+    )) > 0;
+    if ($has_financial_impact) {
+        $is_context_locked = true;
     }
 } else {
     // Defaults for new
@@ -159,7 +168,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
 
                     <div class="olama-reg-field olama-reg-field--required">
                         <label><?php esc_html_e('طبيعة العقد', 'olama-registration'); ?></label>
-                        <select name="activity_type" id="os-agr-activity" style="width: 100%;" required>
+                        <select name="activity_type" id="os-agr-activity" style="width: 100%;" required <?php disabled($has_financial_impact); ?>>
                             <option value=""><?php esc_html_e('اختر طبيعة العقد', 'olama-registration'); ?></option>
                             <?php
                             $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
@@ -176,38 +185,59 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                             }
                             ?>
                         </select>
+                        <?php if ($has_financial_impact): ?>
+                            <input type="hidden" name="activity_type" value="<?php echo esc_attr($agreement->activity_type); ?>">
+                        <?php endif; ?>
                     </div>
 
                     <div class="olama-reg-field olama-reg-field--required">
                         <label><?php esc_html_e('تاريخ البداية', 'olama-registration'); ?></label>
-                        <input type="text" name="start_date" class="os-datepicker" value="<?php echo esc_attr($agreement->start_date); ?>" required style="width:100%;">
+                        <input type="text" name="start_date" class="os-datepicker" value="<?php echo esc_attr($agreement->start_date); ?>" required style="width:100%;" <?php disabled($has_financial_impact); ?>>
+                        <?php if ($has_financial_impact): ?>
+                            <input type="hidden" name="start_date" value="<?php echo esc_attr($agreement->start_date); ?>">
+                        <?php endif; ?>
                     </div>
 
                     <div class="olama-reg-field">
                         <label><?php esc_html_e('تاريخ النهاية', 'olama-registration'); ?> <span style="font-weight:normal; font-size:12px; color:#999;">(اختياري)</span></label>
-                        <input type="text" name="end_date" class="os-datepicker" value="<?php echo esc_attr($agreement->end_date); ?>" style="width:100%;">
+                        <input type="text" name="end_date" class="os-datepicker" value="<?php echo esc_attr($agreement->end_date); ?>" style="width:100%;" <?php disabled($has_financial_impact); ?>>
+                        <?php if ($has_financial_impact): ?>
+                            <input type="hidden" name="end_date" value="<?php echo esc_attr($agreement->end_date); ?>">
+                        <?php endif; ?>
                     </div>
 
                     <div class="olama-reg-field olama-reg-field--required">
                         <label><?php esc_html_e('حالة العقد', 'olama-registration'); ?></label>
-                        <select name="status" style="width: 100%;" required>
+                        <select name="status" style="width: 100%;" required <?php disabled($has_financial_impact); ?>>
                             <option value="draft" <?php selected($agreement->status, 'draft'); ?>><?php esc_html_e('مسودة', 'olama-registration'); ?></option>
                             <option value="active" <?php selected($agreement->status, 'active'); ?>><?php esc_html_e('نشط', 'olama-registration'); ?></option>
                             <option value="cancelled" <?php selected($agreement->status, 'cancelled'); ?>><?php esc_html_e('ملغى', 'olama-registration'); ?></option>
                             <option value="completed" <?php selected($agreement->status, 'completed'); ?>><?php esc_html_e('مكتمل', 'olama-registration'); ?></option>
                         </select>
+                        <?php if ($has_financial_impact): ?>
+                            <input type="hidden" name="status" value="<?php echo esc_attr($agreement->status); ?>">
+                        <?php endif; ?>
                     </div>
 
                     <div class="olama-reg-field" style="grid-column: 1 / -1;">
                         <label><?php esc_html_e('ملاحظات', 'olama-registration'); ?></label>
-                        <textarea name="notes" rows="4" style="width: 100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;"><?php echo esc_textarea($agreement->notes); ?></textarea>
+                        <textarea name="notes" rows="4" style="width: 100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;" <?php disabled($has_financial_impact); ?>><?php echo esc_textarea($agreement->notes); ?></textarea>
+                        <?php if ($has_financial_impact): ?>
+                            <input type="hidden" name="notes" value="<?php echo esc_attr($agreement->notes); ?>">
+                        <?php endif; ?>
                     </div>
                 </div>
                 
                 <div class="olama-reg-form-actions" style="margin-top: 20px;">
-                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="os-btn-save-header">
-                        <span class="dashicons dashicons-saved"></span> <?php esc_html_e('حفظ البيانات', 'olama-registration'); ?>
-                    </button>
+                    <?php if (!$has_financial_impact): ?>
+                        <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="os-btn-save-header">
+                            <span class="dashicons dashicons-saved"></span> <?php esc_html_e('حفظ البيانات', 'olama-registration'); ?>
+                        </button>
+                    <?php else: ?>
+                        <div class="notice notice-warning inline" style="padding:10px; margin:0; width:100%;">
+                            <p><?php esc_html_e('العقد مرتبط بمدفوعات/فواتير نشطة. لا يمكن تعديل البيانات الأساسية؛ يسمح فقط بإضافة بنود رسوم جديدة.', 'olama-registration'); ?></p>
+                        </div>
+                    <?php endif; ?>
                     <span class="spinner" style="float:none;"></span>
                 </div>
             </form>
@@ -242,7 +272,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                             $fees = Olama_Reg_Agreement_Fees::get_by_agreement($id);
                             if ($fees) {
                                 foreach ($fees as $fee) {
-                                    $is_locked = in_array($fee->paid_status, ['invoiced', 'paid'], true);
+                                    $is_locked = $has_financial_impact || in_array($fee->paid_status, ['invoiced', 'paid'], true);
                                     ?>
                                 <tr data-fee-id="<?php echo esc_attr($fee->id); ?>">
                                     <td>

@@ -76,7 +76,7 @@ $receipts = Olama_Reg_Settlement::get_receipts( $args );
                 <th style="width: 120px;"><?php esc_html_e( 'رقم الإيصال', 'olama-registration' ); ?></th>
                 <th style="width: 100px;"><?php esc_html_e( 'رقم العائلة', 'olama-registration' ); ?></th>
                 <th><?php esc_html_e( 'اسم العائلة', 'olama-registration' ); ?></th>
-                <th><?php esc_html_e( 'الفئة', 'olama-registration' ); ?></th>
+                <th><?php esc_html_e( 'قائمة الخدمات', 'olama-registration' ); ?></th>
                 <th><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></th>
                 <th><?php esc_html_e( 'المتبقي', 'olama-registration' ); ?></th>
                 <th><?php esc_html_e( 'التاريخ', 'olama-registration' ); ?></th>
@@ -123,82 +123,98 @@ $receipts = Olama_Reg_Settlement::get_receipts( $args );
 </div>
 
 <!-- Modal: New Receipt -->
-<div id="modal-new-settlement" class="olama-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;" dir="rtl">
-    <div class="olama-modal-content" style="background:#fff; width:500px; padding:25px; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
-        <h2 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:15px; color:#1a1a2e;"><?php esc_html_e( 'إنشاء إيصال تسوية جديد', 'olama-registration' ); ?></h2>
+<div id="modal-new-settlement" class="olama-reg-modal olama-reg-wrap" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);" dir="rtl">
+    <div class="olama-reg-modal-dialog" style="max-width:550px; width:90%;">
+        <div class="olama-reg-modal-header">
+            <h2 class="olama-reg-modal-title">
+                <span class="dashicons dashicons-clipboard"></span>
+                <?php esc_html_e( 'إنشاء إيصال تسوية جديد', 'olama-registration' ); ?>
+            </h2>
+            <button type="button" class="olama-reg-modal-close btn-close-modal">&times;</button>
+        </div>
         <form id="form-new-settlement">
-            <table class="form-table">
-                <tr>
-                    <th><label><?php esc_html_e( 'العائلة', 'olama-registration' ); ?></label></th>
-                    <td>
-                        <select name="family_id" class="olama-reg-family-search" style="width:100%;" required>
-                            <option value="">-- ابحث بالاسم أو رقم العائلة --</option>
-                        </select>
-                    </td>
-                </tr>
-                <tr>
-                    <th><label><?php esc_html_e( 'الفئة / التصنيف', 'olama-registration' ); ?></label></th>
-                    <td>
-                        <select name="payment_category" required class="regular-text" style="width:100%;">
-                            <option value="">-- اختر --</option>
-                            <option value="Tuition Fees">رسوم دراسية</option>
-                            <option value="Transportation">مواصلات</option>
-                            <option value="Activities">أنشطة</option>
-                            <option value="Miscellaneous">متفرقات</option>
-                        </select>
-                    </td>
-                </tr>
-                <tr>
-                    <th><label><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></label></th>
-                    <td><input type="number" name="original_amount" step="0.01" min="0.01" required class="regular-text" style="width:100%;"></td>
-                </tr>
-                <tr>
-                    <th><label><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></label></th>
-                    <td>
-                        <select name="payment_method" class="regular-text" style="width:100%;">
-                            <option value="cash">نقدي (Cash)</option>
-                            <option value="card">بطاقة (Card)</option>
-                            <option value="transfer">تحويل بنكي (Transfer)</option>
-                        </select>
-                    </td>
-                </tr>
-                <tr>
-                    <th><label><?php esc_html_e( 'ملاحظات', 'olama-registration' ); ?></label></th>
-                    <td><textarea name="notes" rows="3" class="regular-text" style="width:100%;"></textarea></td>
-                </tr>
-            </table>
-            <p class="submit" style="margin-bottom:0; text-align:left; border-top:1px solid #eee; padding-top:15px; margin-top:15px;">
+            <div class="olama-reg-modal-body">
+                <div class="olama-reg-section" style="border:none; box-shadow:none; margin:0; padding:0;">
+                    <div class="olama-reg-grid" style="grid-template-columns: 1fr; gap:16px;">
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label><?php esc_html_e( 'العائلة', 'olama-registration' ); ?></label>
+                            <select name="family_id" class="olama-reg-family-search" style="width:100%;" required>
+                                <option value="">-- ابحث بالاسم أو رقم العائلة --</option>
+                            </select>
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label><?php esc_html_e( 'قائمة الخدمات', 'olama-registration' ); ?></label>
+                            <select name="payment_category" required style="width:100%;">
+                                <option value=""><?php esc_html_e( '-- اختر --', 'olama-registration' ); ?></option>
+                                <?php
+                                $custom_services = get_option('olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي']);
+                                foreach ($custom_services as $srv) {
+                                    echo '<option value="' . esc_attr($srv) . '">' . esc_html($srv) . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></label>
+                            <input type="number" name="original_amount" step="0.01" min="0.01" required style="width:100%;">
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></label>
+                            <select name="payment_method" style="width:100%;">
+                                <option value="cash">نقدي (Cash)</option>
+                                <option value="card">بطاقة (Card)</option>
+                                <option value="transfer">تحويل بنكي (Transfer)</option>
+                            </select>
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e( 'ملاحظات', 'olama-registration' ); ?></label>
+                            <textarea name="notes" rows="3" style="width:100%;"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="olama-reg-form-actions">
                 <button type="submit" class="olama-reg-btn olama-reg-btn--primary"><?php esc_html_e( 'حفظ وإصدار الإيصال', 'olama-registration' ); ?></button>
-                <button type="button" class="olama-reg-btn btn-close-modal"><?php esc_html_e( 'إغلاق', 'olama-registration' ); ?></button>
-            </p>
+                <button type="button" class="button button-large btn-close-modal"><?php esc_html_e( 'إغلاق', 'olama-registration' ); ?></button>
+            </div>
         </form>
     </div>
 </div>
 
 <!-- Modal: Settle Receipt -->
-<div id="modal-settle-receipt" class="olama-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;" dir="rtl">
-    <div class="olama-modal-content" style="background:#fff; width:500px; padding:25px; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.3);">
-        <h2 style="margin-top:0; border-bottom:1px solid #eee; padding-bottom:15px; color:#1a1a2e;"><?php esc_html_e( 'تسوية الإيصال في النظام', 'olama-registration' ); ?></h2>
+<div id="modal-settle-receipt" class="olama-reg-modal olama-reg-wrap" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);" dir="rtl">
+    <div class="olama-reg-modal-dialog" style="max-width:550px; width:90%;">
+        <div class="olama-reg-modal-header">
+            <h2 class="olama-reg-modal-title">
+                <span class="dashicons dashicons-clipboard"></span>
+                <?php esc_html_e( 'تسوية الإيصال في النظام', 'olama-registration' ); ?>
+            </h2>
+            <button type="button" class="olama-reg-modal-close btn-close-modal">&times;</button>
+        </div>
         <form id="form-settle-receipt">
-            <input type="hidden" name="id" id="settle-receipt-id">
-            <table class="form-table">
-                <tr>
-                    <th><label><?php esc_html_e( 'مبلغ التسوية', 'olama-registration' ); ?></label></th>
-                    <td><input type="text" id="settle-amount-display" readonly class="regular-text" style="background:#f1f1f1; width:100%;"></td>
-                </tr>
-                <tr>
-                    <th><label><?php esc_html_e( 'رقم الإيصال (أوراكل)', 'olama-registration' ); ?></label></th>
-                    <td><input type="text" name="oracle_receipt_number" required class="regular-text" style="width:100%;"></td>
-                </tr>
-                <tr>
-                    <th><label><?php esc_html_e( 'ملاحظات المحاسب', 'olama-registration' ); ?></label></th>
-                    <td><textarea name="notes" rows="3" class="regular-text" style="width:100%;"></textarea></td>
-                </tr>
-            </table>
-            <p class="submit" style="margin-bottom:0; text-align:left; border-top:1px solid #eee; padding-top:15px; margin-top:15px;">
+            <div class="olama-reg-modal-body">
+                <input type="hidden" name="id" id="settle-receipt-id">
+                <div class="olama-reg-section" style="border:none; box-shadow:none; margin:0; padding:0;">
+                    <div class="olama-reg-grid" style="grid-template-columns: 1fr; gap:16px;">
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e( 'مبلغ التسوية', 'olama-registration' ); ?></label>
+                            <input type="text" id="settle-amount-display" readonly style="background:#f1f1f1; width:100%;">
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label><?php esc_html_e( 'رقم الإيصال (أوراكل)', 'olama-registration' ); ?></label>
+                            <input type="text" name="oracle_receipt_number" required style="width:100%;">
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e( 'ملاحظات المحاسب', 'olama-registration' ); ?></label>
+                            <textarea name="notes" rows="3" style="width:100%;"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="olama-reg-form-actions">
                 <button type="submit" class="olama-reg-btn olama-reg-btn--primary"><?php esc_html_e( 'تأكيد التسوية', 'olama-registration' ); ?></button>
-                <button type="button" class="olama-reg-btn btn-close-modal"><?php esc_html_e( 'إغلاق', 'olama-registration' ); ?></button>
-            </p>
+                <button type="button" class="button button-large btn-close-modal"><?php esc_html_e( 'إغلاق', 'olama-registration' ); ?></button>
+            </div>
         </form>
     </div>
 </div>
@@ -206,7 +222,7 @@ $receipts = Olama_Reg_Settlement::get_receipts( $args );
 <script>
 jQuery(document).ready(function($) {
     // Hide modals initially (prevent flash on some browsers if CSS takes time)
-    $('.olama-modal').hide();
+    $('.olama-reg-modal').hide();
 
     // Open New Receipt Modal
     $('#btn-new-settlement').on('click', function(e) {
@@ -260,7 +276,7 @@ jQuery(document).ready(function($) {
 
     // Close Modals
     $('.btn-close-modal').on('click', function() {
-        $(this).closest('.olama-modal').fadeOut();
+        $(this).closest('.olama-reg-modal').fadeOut();
     });
 
     // Submit New Receipt

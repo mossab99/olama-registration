@@ -24,6 +24,7 @@
     var HUB_DATA  = JSON.parse(hubDataEl.textContent);
     var AJAX_URL  = HUB_DATA.ajaxUrl;
     var NONCE     = HUB_DATA.nonce;
+    var REG_NONCE = HUB_DATA.regNonce;
     var USER_ID   = HUB_DATA.currentUserId;
     var I18N      = HUB_DATA.i18n;
 
@@ -191,6 +192,14 @@
             try {
                 localStorage.setItem(RECENT_KEY, JSON.stringify(filtered.slice(0, 10)));
             } catch (e) { /* storage full — ignore */ }
+        },
+
+        remove: function (uid) {
+            var recent   = this.get();
+            var filtered = recent.filter(function (r) { return r.uid !== uid; });
+            try {
+                localStorage.setItem(RECENT_KEY, JSON.stringify(filtered));
+            } catch (e) { }
         },
 
         render: function (filterType) {
@@ -549,7 +558,16 @@
                     year:   state.currentYearId,
                 },
                 success: function (response) {
-                    if (!response.success) return;
+                    if (!response.success) {
+                        if (response.data && response.data.code === 'not_found') {
+                            alert(response.data.message || 'العميل المحدّد لم يعد موجوداً في النظام.');
+                            // Remove from recent lookups list
+                            RecentLookups.remove(uid);
+                            // Navigate back to search/lookup stage
+                            $('#os-hub-back-to-search').trigger('click');
+                        }
+                        return;
+                    }
 
                     var counts = response.data.counts || {};
                     var fin    = response.data.financial_mini || null;
@@ -611,6 +629,13 @@
             // Phase 4: show quick actions + year selector
             QuickActions.show(customer);
             YearSelector.showForCustomer();
+
+            // Update URL dynamically to persist active customer state
+            if (history.replaceState) {
+                var param = (customer.type === 'family') ? 'family_uid' : 'customer_uid';
+                var newUrl = window.location.pathname + '?page=olama-registration&' + param + '=' + customer.uid;
+                history.replaceState(null, '', newUrl);
+            }
         },
     };
 
@@ -680,6 +705,12 @@
                 state.currentCustomer = null;
                 $('#cust_btn_add_new').hide();
                 PanelManager.show('type');
+
+                // Clear URL dynamically to reset active customer state
+                if (history.replaceState) {
+                    var cleanUrl = window.location.pathname + '?page=olama-registration';
+                    history.replaceState(null, '', cleanUrl);
+                }
             });
 
             // Back to search
@@ -693,6 +724,12 @@
                 PanelManager.show('lookup');
                 // Re-render recent for current type
                 RecentLookups.render(state.currentType);
+
+                // Clear URL dynamically to reset active customer state
+                if (history.replaceState) {
+                    var cleanUrl = window.location.pathname + '?page=olama-registration';
+                    history.replaceState(null, '', cleanUrl);
+                }
             });
 
             // Tile retry button
@@ -1294,18 +1331,16 @@
 
                 // Fetch participants to populate window.payerChildren
                 window.payerChildren = [];
-                if (typeof olamaReg !== 'undefined' && olamaReg.ajaxurl) {
-                    $.post(olamaReg.ajaxurl, {
-                        action: 'olama_reg_agr_get_participants',
-                        nonce: olamaReg.nonce,
-                        payer_type: payerType,
-                        payer_id: payerId
-                    }).done(function (res) {
-                        if (res.success && res.data.results) {
-                            window.payerChildren = res.data.results;
-                        }
-                    });
-                }
+                $.post(AJAX_URL, {
+                    action: 'olama_reg_agr_get_participants',
+                    nonce: REG_NONCE,
+                    payer_type: payerType,
+                    payer_id: payerId
+                }).done(function (res) {
+                    if (res.success && res.data.results) {
+                        window.payerChildren = res.data.results;
+                    }
+                });
 
                 // Initialize datepickers
                 if (typeof $.fn.datepicker !== 'undefined') {
@@ -1331,11 +1366,163 @@
             }
         });
 
+        // Intercept Edit Agreement action click in dashboard table
+        $(document).on('click', '.os-hub-edit-agreement', function (e) {
+            e.preventDefault();
+            var agreementId = $(this).data('id');
+            var customer = state.currentCustomer;
+            if (!customer || !agreementId) return;
+
+            var $payerSelect = $('#os-agr-payer-modal');
+            var payerType = (customer.type === 'family') ? 'family' : 'customer';
+            var payerId = (customer.type === 'family') ? customer.uid : (customer.internal_id || customer.id || '');
+
+            $.post(AJAX_URL, {
+                action: 'olama_reg_agr_get_details',
+                nonce: REG_NONCE,
+                id: agreementId
+            }).done(function (res) {
+                if (!res.success) {
+                    alert(res.data?.message || 'Error loading agreement details');
+                    return;
+                }
+
+                var data = res.data;
+                var agreement = data.agreement;
+
+                // Reset modal to Header tab
+                $('#modal-tab-link-header').trigger('click');
+                $('#modal-tab-link-fees, #modal-tab-link-clauses').removeClass('os-disabled');
+
+                // Prefill dummy radio buttons
+                $('input[name="payer_type_dummy"][value="' + payerType + '"]').prop('checked', true);
+
+                // Pre-select the customer name in select
+                $payerSelect.empty().append(new Option(customer.name + ' (' + customer.uid + ')', payerId, true, true));
+                $payerSelect.prop('disabled', true);
+
+                var $form = $('#os-form-agreement-header');
+                
+                // Set IDs
+                $form.find('input[name="id"]').val(agreement.id);
+                $('#os-agr-fees-table').data('agr-id', agreement.id).attr('data-agr-id', agreement.id);
+                $('#os-agr-add-clause').data('agr-id', agreement.id).attr('data-agr-id', agreement.id);
+                $form.find('input[name="template_id"]').val(agreement.template_id || 0);
+
+                // Set header values
+                $form.find('input[name="payer_type"]').val(agreement.payer_type);
+                $form.find('input[name="payer_id"]').val(agreement.payer_id);
+                $form.find('#os-agr-customer-uid-hidden').val(customer.uid);
+                $form.find('[name="activity_type"]').val(agreement.activity_type).trigger('change');
+                $form.find('[name="start_date"]').val(agreement.start_date);
+                $form.find('[name="end_date"]').val(agreement.end_date || '');
+                $form.find('[name="status"]').val(agreement.status);
+                $form.find('[name="notes"]').val(agreement.notes || '');
+
+                $('#os-btn-save-header').html('<span class="dashicons dashicons-saved"></span> ' + 'تحديث البيانات');
+                $('#olama-reg-agreement-modal .olama-reg-modal-title').html(
+                    '<span class="dashicons dashicons-media-text"></span> ' + 
+                    'تعديل العقد #' + agreement.agreement_number
+                );
+
+                // Populate participants for dropdowns inside fees tab
+                window.payerChildren = [];
+                $.post(AJAX_URL, {
+                    action: 'olama_reg_agr_get_participants',
+                    nonce: REG_NONCE,
+                    payer_type: payerType,
+                    payer_id: payerId
+                }).done(function (pRes) {
+                    if (pRes.success && pRes.data.results) {
+                        window.payerChildren = pRes.data.results;
+                    }
+
+                    // Clear and render fees
+                    var $tbody = $('#os-agr-fees-table tbody').empty();
+                    if (data.fees && data.fees.length) {
+                        data.fees.forEach(function (fee) {
+                            var $row = $('#os-agr-fee-row-template tr').clone();
+                            $row.attr('data-fee-id', fee.id);
+                            
+                            $row.find('[name="fee_category"]').val(fee.fee_category);
+                            
+                            // Fill child_id dropdown options dynamically
+                            var $childSelect = $row.find('[name="child_id"]');
+                            $childSelect.empty().append(new Option('اختر المشترك', ''));
+                            window.payerChildren.forEach(function (child) {
+                                var selected = (child.id == fee.child_id);
+                                $childSelect.append(new Option(child.text, child.id, selected, selected));
+                            });
+
+                            $row.find('[name="label"]').val(fee.label);
+                            $row.find('[name="amount"]').val(fee.amount);
+                            $row.find('[name="discount"]').val(fee.discount);
+                            $row.find('.os-agr-fee-net').text(parseFloat(fee.net_amount).toFixed(3));
+                            $row.find('[name="due_date"]').val(fee.due_date || '');
+                            $row.find('td').eq(7).text(fee.paid_status); // Update status column cell (unpaid/paid)
+
+                            $tbody.append($row);
+                        });
+                        // Initialize datepickers on new rows
+                        if (typeof $.fn.datepicker !== 'undefined') {
+                            $tbody.find('.os-datepicker').each(function () {
+                                if (!$(this).hasClass('hasDatepicker')) {
+                                    $(this).datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
+                                }
+                            });
+                        }
+                    }
+                    $('#os-agr-total-label').text(parseFloat(agreement.total_amount).toFixed(3));
+                });
+
+                // Clear and render clauses
+                var $clausesList = $('#os-agr-clauses-list').empty();
+                if (data.clauses && data.clauses.length) {
+                    data.clauses.forEach(function (clause) {
+                        var $li = $('<li>')
+                            .attr('data-clause-id', clause.id)
+                            .css({ 'margin-bottom': '12px', 'padding': '10px', 'background': '#fff', 'border': '1px solid #ddd', 'border-radius': '4px', 'display': 'flex', 'justify-content': 'space-between', 'align-items': 'center' });
+                        
+                        $li.append($('<span>').text(clause.clause_text));
+                        
+                        var $delBtn = $('<button>')
+                            .attr('type', 'button')
+                            .addClass('button button-small os-agr-delete-clause')
+                            .css('color', 'red')
+                            .text('X');
+                        $li.append($delBtn);
+                        
+                        $clausesList.append($li);
+                    });
+                }
+
+                // Initialize datepickers
+                if (typeof $.fn.datepicker !== 'undefined') {
+                    $('#olama-reg-agreement-modal').find('.olama-reg-datepicker').each(function () {
+                        if (!$(this).hasClass('hasDatepicker')) {
+                            $(this).datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
+                        }
+                    });
+                }
+
+                // Open the modal
+                $('#olama-reg-agreement-modal').fadeIn(200);
+            });
+        });
+
+        // Auto-reload the dashboard when the agreement modal is closed to refresh listings & totals
+        $(document).on('click', '#olama-reg-agreement-modal .olama-reg-modal-close', function () {
+            var customer = state.currentCustomer;
+            if (customer) {
+                window.location.reload();
+            }
+        });
+
         // Intercept Payment Quick Action click to open modal inline on customer hub page
         $(document).on('click', '#os-hub-qaction-payment', function (e) {
             e.preventDefault();
             var customer = state.currentCustomer;
-            if (!customer || customer.type !== 'family') return;
+            if (!customer) return;
 
             var $searchFamily = $('#pay_search_family');
             if ($searchFamily.length) {
@@ -1401,6 +1588,100 @@
                 // Open the modal
                 $('#olama-reg-settlement-modal').fadeIn(200);
             }
+        });
+
+        // Handle Settlement Form Submit
+        $(document).on('submit', '#olama-reg-settlement-form', function (e) {
+            e.preventDefault();
+            var data = $(this).serialize() + '&action=olama_reg_create_settlement&nonce=' + REG_NONCE;
+            var btn = $('#olama-reg-save-settlement-btn');
+            btn.prop('disabled', true).text('جاري الحفظ...');
+
+            $.post(AJAX_URL, data, function (res) {
+                if (res.success) {
+                    alert(res.data.message);
+                    $('#olama-reg-settlement-modal').fadeOut(200);
+                    // Reload settlements tile if it's open
+                    var $panel = $('#os-hub-tile-panel-settlements');
+                    var $btnTile = $('#os-hub-tile-btn-settlements');
+                    $panel.find('.os-hub-tile-panel__content').removeData('loaded').empty();
+                    TileManager.open('settlements', $btnTile, $panel);
+                    // Reload badge count
+                    CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+                } else {
+                    alert(res.data.message || 'حدث خطأ');
+                }
+            }).always(function () {
+                btn.prop('disabled', false).text('حفظ وإصدار الإيصال');
+            });
+        });
+
+        // Handle Settle Button Click in Hub table
+        $(document).on('click', '.btn-settle-receipt', function (e) {
+            e.preventDefault();
+            var id = $(this).data('id');
+            var amount = $(this).data('amount');
+            $('#settle-receipt-id').val(id);
+            $('#settle-amount-display').val(amount);
+            $('#modal-settle-receipt').fadeIn(200);
+        });
+
+        // Handle Close Settle Modal Click
+        $(document).on('click', '#modal-settle-receipt .btn-close-modal, #modal-settle-receipt .olama-reg-modal-close', function (e) {
+            e.preventDefault();
+            $('#modal-settle-receipt').fadeOut(200);
+        });
+
+        // Handle Settle Form Submit
+        $(document).on('submit', '#form-settle-receipt', function (e) {
+            e.preventDefault();
+            var data = $(this).serialize() + '&action=olama_reg_settle_receipt&nonce=' + REG_NONCE;
+            var btn = $(this).find('button[type="submit"]');
+            btn.prop('disabled', true).text('جاري الحفظ...');
+
+            $.post(AJAX_URL, data, function (res) {
+                if (res.success) {
+                    alert(res.data.message);
+                    $('#modal-settle-receipt').fadeOut(200);
+                    // Reload settlements tile
+                    var $panel = $('#os-hub-tile-panel-settlements');
+                    var $btnTile = $('#os-hub-tile-btn-settlements');
+                    $panel.find('.os-hub-tile-panel__content').removeData('loaded').empty();
+                    TileManager.open('settlements', $btnTile, $panel);
+                    // Reload badge count
+                    CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+                } else {
+                    alert(res.data.message || 'حدث خطأ');
+                }
+            }).always(function () {
+                btn.prop('disabled', false).text('تأكيد التسوية');
+            });
+        });
+
+        // Handle Cancel Settlement Button Click
+        $(document).on('click', '.btn-cancel-receipt', function (e) {
+            e.preventDefault();
+            if (!confirm('هل أنت متأكد من إلغاء هذا الإيصال؟')) return;
+
+            var id = $(this).data('id');
+            $.post(AJAX_URL, {
+                action: 'olama_reg_cancel_settlement',
+                nonce: REG_NONCE,
+                id: id
+            }, function (res) {
+                if (res.success) {
+                    alert(res.data.message);
+                    // Reload settlements tile
+                    var $panel = $('#os-hub-tile-panel-settlements');
+                    var $btnTile = $('#os-hub-tile-btn-settlements');
+                    $panel.find('.os-hub-tile-panel__content').removeData('loaded').empty();
+                    TileManager.open('settlements', $btnTile, $panel);
+                    // Reload badge count
+                    CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+                } else {
+                    alert(res.data.message || 'حدث خطأ');
+                }
+            });
         });
 
         // Intercept Custom Payment Quick Action click to open modal inline on customer hub page
@@ -1492,7 +1773,7 @@
                 }
             }
 
-            $.post(olamaReg.ajaxurl, 'action=olama_reg_save_custom_payment&nonce=' + olamaReg.nonce + '&' + formData)
+            $.post(AJAX_URL, 'action=olama_reg_save_custom_payment&nonce=' + REG_NONCE + '&' + formData)
                 .done(res => {
                     if (res.success) {
                         $msg.html('<div class="notice notice-success inline" style="padding:10px;"><p>' + res.data.message + '</p></div>').fadeIn();

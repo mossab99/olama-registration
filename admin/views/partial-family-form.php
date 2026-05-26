@@ -200,10 +200,15 @@ $mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mothe
                 <span class="dashicons dashicons-money-alt"></span>
                 <p><?php esc_html_e( 'يرجى حفظ بيانات العائلة أولاً.', 'olama-registration' ); ?></p>
             </div>
-        <?php else: 
             $summary  = Olama_Reg_Billing_Invoice::get_invoice_summary( $family_uid, $active_year_id );
             $invoices = Olama_Reg_Billing_Invoice::get_family_invoices( $family_uid, $active_year_id );
             $payments = Olama_Reg_Billing_Payment::get_family_payments( $family_uid, $active_year_id );
+            $reversed_ids = [];
+            foreach ( $payments as $p ) {
+                if ( strpos( $p->reference ?? '', 'REVERSAL-' ) === 0 ) {
+                    $reversed_ids[] = (int) str_replace( 'REVERSAL-', '', $p->reference );
+                }
+            }
         ?>
 
         <div class="olama-reg-fin-toolbar">
@@ -335,14 +340,23 @@ $mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mothe
                                         </td>
                                         <td style="padding:8px; text-align:left; font-weight:700; color:#10b981;">
                                             <?php echo number_format((float)$pay->amount, 2); ?>
-                                            <?php if ( (float)$pay->amount > 0 && $pay->method !== 'reversal' ): ?>
-                                                <button class="button button-small olama-reg-reverse-payment-btn"
-                                                        data-id="<?php echo esc_attr( $pay->id ); ?>"
-                                                        title="<?php esc_attr_e( 'عكس السند', 'olama-registration' ); ?>"
-                                                        style="color:#c62828; border:none; background:none; padding:0; vertical-align:middle; margin-right:5px;">
-                                                    <span class="dashicons dashicons-undo" style="font-size:16px; width:16px; height:16px;"></span>
-                                                </button>
-                                            <?php endif; ?>
+                                             <?php if ( (float)$pay->amount > 0 && $pay->method !== 'reversal' ): 
+                                                 $is_already_reversed = in_array((int)$pay->id, $reversed_ids, true);
+                                                 if ($is_already_reversed):
+                                             ?>
+                                                 <button class="button button-small" disabled
+                                                         title="<?php esc_attr_e( 'هذا السند معكوس مسبقاً', 'olama-registration' ); ?>"
+                                                         style="opacity:0.5; cursor:not-allowed; border:none; background:none; padding:0; vertical-align:middle; margin-right:5px;">
+                                                     <span class="dashicons dashicons-undo" style="font-size:16px; width:16px; height:16px;"></span>
+                                                 </button>
+                                             <?php else: ?>
+                                                 <button class="button button-small olama-reg-reverse-payment-btn"
+                                                         data-id="<?php echo esc_attr( $pay->id ); ?>"
+                                                         title="<?php esc_attr_e( 'عكس السند', 'olama-registration' ); ?>"
+                                                         style="color:#c62828; border:none; background:none; padding:0; vertical-align:middle; margin-right:5px;">
+                                                     <span class="dashicons dashicons-undo" style="font-size:16px; width:16px; height:16px;"></span>
+                                                 </button>
+                                             <?php endif; endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>

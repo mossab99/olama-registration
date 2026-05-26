@@ -27,10 +27,15 @@ if ( isset( $_GET['academic_year_id'] ) ) {
     if ( $ay ) $active_year_id = (int) $ay->id;
 }
 
-// Get customer data
 $children = Olama_Reg_Child::get_by_customer( $customer_id );
 $invoices = Olama_Reg_Billing_Invoice::get_customer_invoices( $customer_id, $active_year_id );
 $payments = Olama_Reg_Billing_Payment::get_family_payments( $customer_uid, $active_year_id );
+$reversed_ids = [];
+foreach ( $payments as $p ) {
+    if ( strpos( $p->reference ?? '', 'REVERSAL-' ) === 0 ) {
+        $reversed_ids[] = (int) str_replace( 'REVERSAL-', '', $p->reference );
+    }
+}
 $summary  = Olama_Reg_Billing_Invoice::get_customer_invoice_summary( $customer_id, $active_year_id );
 ?>
 
@@ -199,14 +204,23 @@ $summary  = Olama_Reg_Billing_Invoice::get_customer_invoice_summary( $customer_i
                                     </td>
                                     <td style="padding:10px 8px; text-align:left; font-weight:700; color:#10b981; display:flex; justify-content:space-between; align-items:center;">
                                         <span><?php echo number_format((float)$pay->amount, 2); ?> د.أ</span>
-                                        <?php if ( (float)$pay->amount > 0 && $pay->method !== 'reversal' ): ?>
+                                        <?php if ( (float)$pay->amount > 0 && $pay->method !== 'reversal' ): 
+                                            $is_already_reversed = in_array((int)$pay->id, $reversed_ids, true);
+                                            if ($is_already_reversed):
+                                        ?>
+                                            <button class="button button-small" disabled
+                                                    title="<?php esc_attr_e( 'هذا السند معكوس مسبقاً', 'olama-registration' ); ?>"
+                                                    style="opacity:0.5; cursor:not-allowed; border:none; background:none; padding:0; margin-right:8px;">
+                                                <span class="dashicons dashicons-undo" style="font-size:16px; width:16px; height:16px;"></span>
+                                            </button>
+                                        <?php else: ?>
                                             <button class="button button-small olama-reg-reverse-payment-btn"
                                                     data-id="<?php echo esc_attr( $pay->id ); ?>"
                                                     title="<?php esc_attr_e( 'عكس السند', 'olama-registration' ); ?>"
                                                     style="color:#c62828; border:none; background:none; padding:0; cursor:pointer; margin-right:8px;">
                                                 <span class="dashicons dashicons-undo" style="font-size:16px; width:16px; height:16px;"></span>
                                             </button>
-                                        <?php endif; ?>
+                                        <?php endif; endif; ?>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>

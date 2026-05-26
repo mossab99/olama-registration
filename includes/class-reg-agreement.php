@@ -90,21 +90,19 @@ class Olama_Reg_Agreement {
         $row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", $id ) );
         
         if ( $row ) {
-            if ( ! empty( $row->participant_ids ) ) {
+            $fees_table = $wpdb->prefix . 'olama_agreement_fees';
+            $pids = $wpdb->get_col( $wpdb->prepare(
+                "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
+                $id
+            ) );
+            if ( ! empty( $pids ) ) {
+                $row->participant_ids_array = array_map( function( $val ) {
+                    return is_numeric( $val ) ? (int) $val : $val;
+                }, $pids );
+            } elseif ( ! empty( $row->participant_ids ) ) {
                 $row->participant_ids_array = json_decode( $row->participant_ids, true ) ?: [];
             } else {
-                $fees_table = $wpdb->prefix . 'olama_agreement_fees';
-                $pids = $wpdb->get_col( $wpdb->prepare(
-                    "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
-                    $id
-                ) );
-                if ( ! empty( $pids ) ) {
-                    $row->participant_ids_array = array_map( function( $val ) {
-                        return is_numeric( $val ) ? (int) $val : $val;
-                    }, $pids );
-                } else {
-                    $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
-                }
+                $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
             }
         }
         
@@ -169,21 +167,19 @@ class Olama_Reg_Agreement {
         foreach ( $results as $row ) {
             $row->payer_name = self::resolve_payer_name( $row->payer_type, $row->payer_id );
             
-            if ( ! empty( $row->participant_ids ) ) {
+            $fees_table = $wpdb->prefix . 'olama_agreement_fees';
+            $pids = $wpdb->get_col( $wpdb->prepare(
+                "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
+                $row->id
+            ) );
+            if ( ! empty( $pids ) ) {
+                $row->participant_ids_array = array_map( function( $val ) {
+                    return is_numeric( $val ) ? (int) $val : $val;
+                }, $pids );
+            } elseif ( ! empty( $row->participant_ids ) ) {
                 $row->participant_ids_array = json_decode( $row->participant_ids, true ) ?: [];
             } else {
-                $fees_table = $wpdb->prefix . 'olama_agreement_fees';
-                $pids = $wpdb->get_col( $wpdb->prepare(
-                    "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
-                    $row->id
-                ) );
-                if ( ! empty( $pids ) ) {
-                    $row->participant_ids_array = array_map( function( $val ) {
-                        return is_numeric( $val ) ? (int) $val : $val;
-                    }, $pids );
-                } else {
-                    $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
-                }
+                $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
             }
 
             if ( empty( $row->participant_type ) ) {

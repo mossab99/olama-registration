@@ -2612,7 +2612,41 @@
             .done(res => {
                 if (res.success) {
                     showNotice(res.data.message);
-                    if (formData.id == 0 && res.data.id) {
+                    
+                    if (res.data.agreement_number) {
+                        // 1. Update main page heading if editing
+                        jQuery('.wp-heading-inline').each(function() {
+                            let text = jQuery(this).text();
+                            if (text.indexOf('إضافة عقد جديد') !== -1 || text.indexOf('تعديل العقد') !== -1) {
+                                jQuery(this).text('تعديل العقد #' + res.data.agreement_number);
+                            }
+                        });
+                        
+                        // 2. Update modal title inside customer hub
+                        jQuery('#olama-reg-agreement-modal .olama-reg-modal-title').html(
+                            '<span class="dashicons dashicons-media-text"></span> ' + 
+                            'تعديل العقد #' + res.data.agreement_number
+                        );
+                    }
+
+                    if (formData.status) {
+                        const statusClass = formData.status === 'active' ? 'olama-reg-badge--active' : (formData.status === 'draft' ? 'olama-reg-badge--warning' : 'olama-reg-badge--inactive');
+                        jQuery('#os-agr-status-badge').removeClass('olama-reg-badge--active olama-reg-badge--warning olama-reg-badge--inactive').addClass(statusClass).text(formData.status);
+                    }
+
+                    const isModal = jQuery('#olama-reg-agreement-modal').is(':visible');
+                    if (isModal) {
+                        // We are inside the Customer Hub modal
+                        jQuery('#os-form-agreement-header input[name="id"]').val(res.data.id);
+                        jQuery('#os-agr-fees-table').data('agr-id', res.data.id).attr('data-agr-id', res.data.id);
+                        jQuery('#os-agr-add-clause').data('agr-id', res.data.id).attr('data-agr-id', res.data.id);
+                        
+                        // Enable tabs in modal
+                        jQuery('#modal-tab-link-fees, #modal-tab-link-clauses').removeClass('os-disabled');
+                        
+                        // Go to Fees tab
+                        jQuery('#modal-tab-link-fees').trigger('click');
+                    } else if (formData.id == 0 && res.data.id) {
                         setTimeout(() => {
                             window.location.href = R.ajaxurl.replace('admin-ajax.php', 'admin.php') + '?page=olama-registration-agreements&action=edit&id=' + res.data.id;
                         }, 1000);
@@ -2628,6 +2662,16 @@
 
     $(document).on('click', '#os-agr-add-fee-row', function () {
         const $template = $('#os-agr-fee-row-template').find('tr').clone();
+        
+        // Dynamically populate child_id options from window.payerChildren if available
+        const $childSelect = $template.find('[name="child_id"]');
+        if ($childSelect.length && window.payerChildren && Array.isArray(window.payerChildren)) {
+            $childSelect.empty().append(new Option('اختر المشترك', ''));
+            window.payerChildren.forEach(function (child) {
+                $childSelect.append(new Option(child.text, child.id));
+            });
+        }
+
         $('#os-agr-fees-table tbody').append($template);
         initDatepickers($('#os-agr-fees-table tbody tr').last());
     });
@@ -2664,6 +2708,7 @@
             id: $tr.attr('data-fee-id'),
             agreement_id: agrId,
             fee_category: $tr.find('[name="fee_category"]').val(),
+            child_id: $tr.find('[name="child_id"]').val(),
             label: $tr.find('[name="label"]').val(),
             amount: $tr.find('[name="amount"]').val(),
             discount: $tr.find('[name="discount"]').val(),

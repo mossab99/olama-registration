@@ -10,6 +10,7 @@ class Olama_Reg_Admin {
     public function __construct() {
         add_action( 'admin_menu',             [ $this, 'register_menu' ] );
         add_action( 'admin_enqueue_scripts',  [ $this, 'enqueue_assets' ] );
+        add_action( 'admin_init',             [ $this, 'handle_print_actions' ] );
     }
 
     // ── Menu ──────────────────────────────────────────────────────────────────
@@ -326,5 +327,100 @@ class Olama_Reg_Admin {
                 'familyCreated'   => __( 'تم إنشاء العائلة برقم: ', 'olama-registration' ),
             ],
         ] );
+    }
+
+    /**
+     * Intercept print actions early in admin_init to output pure HTML/CSS without WP Admin wrappers.
+     */
+    public function handle_print_actions(): void {
+        if ( ! isset( $_GET['page'] ) || ! isset( $_GET['action'] ) ) {
+            return;
+        }
+
+        $page   = sanitize_text_field( $_GET['page'] );
+        $action = sanitize_text_field( $_GET['action'] );
+
+        if ( $page === 'olama-registration-agreements' && $action === 'cancel' ) {
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            $id = (int) ( $_GET['id'] ?? 0 );
+            if ($id) {
+                global $wpdb;
+                $has_invoices = (int) $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+                    $id
+                )) > 0;
+
+                if (!$has_invoices) {
+                    Olama_Reg_Agreement::change_status($id, 'cancelled');
+                }
+            }
+
+            $redirect_to = sanitize_text_field($_GET['redirect_to'] ?? '');
+            if ($redirect_to === 'hub') {
+                $agreement = Olama_Reg_Agreement::get($id);
+                if ($agreement) {
+                    $param = ($agreement->payer_type === 'family') ? 'family_uid' : 'customer_uid';
+                    $uid = $agreement->payer_id;
+                    if ($agreement->payer_type === 'customer') {
+                        $cust_uid = $wpdb->get_var($wpdb->prepare("SELECT customer_uid FROM {$wpdb->prefix}olama_customers WHERE id = %d LIMIT 1", $agreement->payer_id));
+                        if ($cust_uid) {
+                            $uid = $cust_uid;
+                        }
+                    }
+                    wp_redirect(admin_url('admin.php?page=olama-registration&' . $param . '=' . $uid));
+                } else {
+                    wp_redirect(admin_url('admin.php?page=olama-registration'));
+                }
+            } else {
+                wp_redirect(admin_url('admin.php?page=olama-registration-agreements'));
+            }
+            exit;
+        }
+
+        if ( $action !== 'print' && $action !== 'print_receipt' ) {
+            return;
+        }
+
+        if ( $page === 'olama-registration-invoices' && $action === 'print' ) {
+            if ( ! current_user_can( 'olama_manage_registration_invoices' ) && ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            include OLAMA_REG_PATH . 'admin/views/page-invoices.php';
+            exit;
+        }
+
+        if ( $page === 'olama-registration-payments' && $action === 'print_receipt' ) {
+            if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            include OLAMA_REG_PATH . 'admin/views/page-payments.php';
+            exit;
+        }
+
+        if ( $page === 'olama-registration-agreements' && $action === 'print' ) {
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            include OLAMA_REG_PATH . 'admin/views/html-agreements-print.php';
+            exit;
+        }
+
+        if ( $page === 'olama-registration-settlements' && $action === 'print' ) {
+            if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            include OLAMA_REG_PATH . 'admin/views/partial-print-settlement.php';
+            exit;
+        }
+
+        if ( $page === 'olama-registration-contacts' && $action === 'print' ) {
+            if ( ! current_user_can( 'olama_manage_registration_families' ) && ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            include OLAMA_REG_PATH . 'admin/views/partial-print-card.php';
+            exit;
+        }
     }
 }

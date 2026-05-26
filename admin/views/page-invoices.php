@@ -127,8 +127,8 @@ if ( $action === 'print' && $id ) {
 
             <table class="meta-table">
                 <tr>
-                    <td class="label">اسم ولي الأمر:</td>
-                    <td><?php echo esc_html( $family ? $family->father_first_name . ' ' . $family->father_family_name : $invoice->family_uid ); ?></td>
+                    <td class="label"><?php echo ($invoice->ext_customer_id || strpos($invoice->family_uid, 'CUST-') === 0) ? '' : esc_html__('اسم ولي الأمر:', 'olama-registration'); ?></td>
+                    <td><?php echo ($invoice->ext_customer_id || strpos($invoice->family_uid, 'CUST-') === 0) ? '' : esc_html( $family ? $family->father_first_name . ' ' . $family->father_family_name : $invoice->family_uid ); ?></td>
                     <td class="label">تاريخ الإصدار:</td>
                     <td><?php echo esc_html( $invoice->issue_date ); ?></td>
                 </tr>
@@ -350,7 +350,7 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
 }
 
 $fee_templates = Olama_Reg_Billing_Fees::get_templates();
-$agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
+$custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 ?>
 <?php
 // Quick stats for the banner
@@ -530,11 +530,13 @@ $_inv_stats = $wpdb->get_row(
                                     </span>
                                 </td>
                                 <td style="text-align:center; white-space:nowrap;">
+                                    <?php if (!(!empty($inv->ext_customer_id) && $inv->status === 'partial')): ?>
                                     <button class="button button-small olama-reg-view-invoice-btn"
                                             data-id="<?php echo esc_attr( $inv->id ); ?>"
                                             title="<?php esc_attr_e( 'عرض التفاصيل', 'olama-registration' ); ?>">
                                         <span class="dashicons dashicons-visibility"></span>
                                     </button>
+                                    <?php endif; ?>
                                     <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'print', 'id' => $inv->id ], admin_url( 'admin.php?page=olama-registration-invoices' ) ) ); ?>"
                                        target="_blank" class="button button-small"
                                        title="<?php esc_attr_e( 'طباعة الفاتورة', 'olama-registration' ); ?>">
@@ -611,9 +613,9 @@ $_inv_stats = $wpdb->get_row(
                                 <label for="inv_service_type"><?php esc_html_e( 'طبيعة الخدمة', 'olama-registration' ); ?></label>
                                 <select id="inv_service_type" name="service_type" required>
                                     <option value=""><?php esc_html_e( '— اختر طبيعة الخدمة —', 'olama-registration' ); ?></option>
-                                    <?php foreach ( $agreement_natures as $nature ): ?>
-                                        <option value="<?php echo esc_attr( $nature ); ?>">
-                                            <?php echo esc_html( $nature ); ?>
+                                    <?php foreach ( $custom_services as $service ): ?>
+                                        <option value="<?php echo esc_attr( $service ); ?>">
+                                            <?php echo esc_html( $service ); ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>

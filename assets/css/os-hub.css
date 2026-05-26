@@ -751,9 +751,7 @@
     font-weight: 600;
     color: var(--os-hub-text-primary);
     display: block;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
 }
 
 .os-hub-tile__desc {

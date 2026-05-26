@@ -11,6 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── JSON Hydration Block (replaces wp_localize_script) ────────────────────
 $hub_nonce = wp_create_nonce( 'os_hub_nonce' );
+$reg_nonce = wp_create_nonce( 'olama_reg_nonce' );
 
 // Gather current academic year
 $current_year_id = 0;
@@ -84,6 +85,7 @@ if ( isset( $_GET['family_uid'] ) ) {
 <script id="os-hub-data" type="application/json">
 <?php echo wp_json_encode( [
     'nonce'          => $hub_nonce,
+    'regNonce'       => $reg_nonce,
     'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
     'adminUrl'       => admin_url(),
     'currentUserId'  => get_current_user_id(),
@@ -149,6 +151,7 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
 }
 $fee_templates = Olama_Reg_Billing_Fees::get_templates();
 $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
+$custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 ?>
 <!-- ── INVOICE GENERATOR MODAL ─────────────────────────────────── -->
 <div id="olama-reg-invoice-modal" class="olama-reg-modal olama-reg-wrap" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);">
@@ -195,9 +198,9 @@ $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدر�
                             <label for="inv_service_type"><?php esc_html_e( 'طبيعة الخدمة', 'olama-registration' ); ?></label>
                             <select id="inv_service_type" name="service_type" required>
                                 <option value=""><?php esc_html_e( '— اختر طبيعة الخدمة —', 'olama-registration' ); ?></option>
-                                <?php foreach ( $agreement_natures as $nature ): ?>
-                                    <option value="<?php echo esc_attr( $nature ); ?>">
-                                        <?php echo esc_html( $nature ); ?>
+                                <?php foreach ( $custom_services as $service ): ?>
+                                    <option value="<?php echo esc_attr( $service ); ?>">
+                                        <?php echo esc_html( $service ); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -291,7 +294,7 @@ $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدر�
 
 <!-- ── AGREEMENT GENERATOR MODAL ─────────────────────────────────── -->
 <div id="olama-reg-agreement-modal" class="olama-reg-modal olama-reg-wrap" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);">
-    <div class="olama-reg-modal-dialog" style="max-width:900px; width:90%;">
+    <div class="olama-reg-modal-dialog" style="max-width:1250px; width:95%;">
         <div class="olama-reg-modal-header">
             <h2 class="olama-reg-modal-title">
                 <span class="dashicons dashicons-media-text"></span>
@@ -537,13 +540,15 @@ $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدر�
                         </div>
                         
                         <div class="olama-reg-field olama-reg-field--required">
-                            <label for="settlement_category"><?php esc_html_e( 'الفئة / التصنيف', 'olama-registration' ); ?></label>
+                            <label for="settlement_category"><?php esc_html_e( 'قائمة الخدمات', 'olama-registration' ); ?></label>
                             <select id="settlement_category" name="payment_category" required style="width:100%;">
-                                <option value=""><?php esc_html_e( '-- اختر الفئة --', 'olama-registration' ); ?></option>
-                                <option value="Tuition Fees"><?php esc_html_e( 'رسوم دراسية', 'olama-registration' ); ?></option>
-                                <option value="Transportation"><?php esc_html_e( 'مواصلات', 'olama-registration' ); ?></option>
-                                <option value="Activities"><?php esc_html_e( 'أنشطة', 'olama-registration' ); ?></option>
-                                <option value="Miscellaneous"><?php esc_html_e( 'متفرقات', 'olama-registration' ); ?></option>
+                                <option value=""><?php esc_html_e( '-- اختر --', 'olama-registration' ); ?></option>
+                                <?php
+                                $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
+                                foreach ($custom_services as $srv) {
+                                    echo '<option value="' . esc_attr($srv) . '">' . esc_html($srv) . '</option>';
+                                }
+                                ?>
                             </select>
                         </div>
                         
@@ -599,32 +604,35 @@ $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدر�
                     <h3 class="olama-reg-section-title"><?php esc_html_e( '1. اختيار العميل والمستفيدين', 'olama-registration' ); ?></h3>
                     
                     <div style="padding:16px;">
-                        <!-- Customer Type Toggle -->
-                        <div style="margin-bottom:15px; padding:12px; background:#f8fafc; border-radius:8px; border:1.5px solid #cbd5e1; display:flex; gap:24px; align-items:center;">
-                            <label style="font-weight:700; color:var(--reg-primary); margin:0;"><?php esc_html_e( 'نوع العميل:', 'olama-registration' ); ?></label>
-                            <label style="cursor:pointer; display:flex; align-items:center; gap:6px; margin:0;">
-                                <input type="radio" name="customer_type" value="internal" id="cp_type_internal" checked disabled>
-                                <span><?php esc_html_e( 'عائلة مسجلة (Internal)', 'olama-registration' ); ?></span>
-                            </label>
-                            <label style="cursor:pointer; display:flex; align-items:center; gap:6px; margin:0;">
-                                <input type="radio" name="customer_type" value="external" id="cp_type_external" disabled>
-                                <span><?php esc_html_e( 'عميل خارجي (Walk-in)', 'olama-registration' ); ?></span>
-                            </label>
-                        </div>
-                        
-                        <!-- Internal Family Selection -->
-                        <div id="cp_internal_customer_wrap" style="margin-bottom:15px;">
-                            <label for="cp_family_search" style="font-weight:700; display:block; margin-bottom:6px; color:var(--reg-primary);"><?php esc_html_e( 'العائلة المستهدفة:', 'olama-registration' ); ?></label>
-                            <select id="cp_family_search" class="olama-reg-family-search" style="width:100%;" required></select>
-                            <input type="hidden" id="cp_family_uid" name="family_uid">
-                            <input type="hidden" id="cp_customer_uid" name="customer_uid">
-                        </div>
-                        
-                        <!-- External Customer Selection -->
-                        <div id="cp_external_customer_wrap" style="display:none; margin-bottom:15px;">
-                            <label for="cp_ext_customer_search" style="font-weight:700; display:block; margin-bottom:6px; color:var(--reg-primary);"><?php esc_html_e( 'العميل الخارجي المستهدف:', 'olama-registration' ); ?></label>
-                            <select id="cp_ext_customer_search" style="width:100%;" required></select>
-                            <input type="hidden" id="cp_ext_customer_id" name="ext_customer_id">
+                        <!-- Hide customer selection controls when in dashboard since customer is active -->
+                        <div style="display:none;">
+                            <!-- Customer Type Toggle -->
+                            <div style="margin-bottom:15px; padding:12px; background:#f8fafc; border-radius:8px; border:1.5px solid #cbd5e1; display:flex; gap:24px; align-items:center;">
+                                <label style="font-weight:700; color:var(--reg-primary); margin:0;"><?php esc_html_e( 'نوع العميل:', 'olama-registration' ); ?></label>
+                                <label style="cursor:pointer; display:flex; align-items:center; gap:6px; margin:0;">
+                                    <input type="radio" name="customer_type" value="internal" id="cp_type_internal" checked disabled>
+                                    <span><?php esc_html_e( 'عائلة مسجلة (Internal)', 'olama-registration' ); ?></span>
+                                </label>
+                                <label style="cursor:pointer; display:flex; align-items:center; gap:6px; margin:0;">
+                                    <input type="radio" name="customer_type" value="external" id="cp_type_external" disabled>
+                                    <span><?php esc_html_e( 'عميل خارجي (Walk-in)', 'olama-registration' ); ?></span>
+                                </label>
+                            </div>
+                            
+                            <!-- Internal Family Selection -->
+                            <div id="cp_internal_customer_wrap" style="margin-bottom:15px;">
+                                <label for="cp_family_search" style="font-weight:700; display:block; margin-bottom:6px; color:var(--reg-primary);"><?php esc_html_e( 'العائلة المستهدفة:', 'olama-registration' ); ?></label>
+                                <select id="cp_family_search" class="olama-reg-family-search" style="width:100%;"></select>
+                                <input type="hidden" id="cp_family_uid" name="family_uid">
+                                <input type="hidden" id="cp_customer_uid" name="customer_uid">
+                            </div>
+                            
+                            <!-- External Customer Selection -->
+                            <div id="cp_external_customer_wrap" style="display:none; margin-bottom:15px;">
+                                <label for="cp_ext_customer_search" style="font-weight:700; display:block; margin-bottom:6px; color:var(--reg-primary);"><?php esc_html_e( 'العميل الخارجي المستهدف:', 'olama-registration' ); ?></label>
+                                <select id="cp_ext_customer_search" style="width:100%;"></select>
+                                <input type="hidden" id="cp_ext_customer_id" name="ext_customer_id">
+                            </div>
                         </div>
                         
                         <!-- Internal Students Checklist -->
@@ -765,5 +773,134 @@ $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدر�
 <?php
 $cust_modal_rendered = true;
 include OLAMA_REG_PATH . 'admin/views/partial-customer-modal.php';
-// End of file
+
+// ── INVOICE DETAILS DRAWER / OVERLAY FOR INLINE PREVIEWS ──────────────────
+?>
+<div id="olama-reg-invoice-drawer" class="olama-reg-modal olama-reg-wrap" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);">
+    <div class="olama-reg-modal-dialog olama-reg-drawer-dialog">
+        <div class="olama-reg-modal-header">
+            <h2 class="olama-reg-modal-title">
+                <span class="dashicons dashicons-visibility"></span>
+                <?php esc_html_e( 'تفاصيل الفاتورة', 'olama-registration' ); ?>
+                <span id="drawer-invoice-number" style="font-weight:900; color:#ffffff; margin-right:8px;"></span>
+            </h2>
+            <button type="button" class="olama-reg-drawer-close">&times;</button>
+        </div>
+        
+        <div class="olama-reg-modal-body">
+            <!-- Header metrics -->
+            <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 20px;">
+                <div class="olama-reg-metric-card olama-reg-metric-card--primary" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                    <div class="olama-reg-metric-title"><?php esc_html_e( 'قيمة الفاتورة', 'olama-registration' ); ?></div>
+                    <div id="drawer-total-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                </div>
+                <div class="olama-reg-metric-card" style="background:#fff3f3; border-left:4px solid #ef4444; padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                    <div class="olama-reg-metric-title"><?php esc_html_e( 'الخصم الممنوح', 'olama-registration' ); ?></div>
+                    <div id="drawer-discount-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0; color:#ef4444;">0.00</div>
+                </div>
+                <div class="olama-reg-metric-card olama-reg-metric-card--success" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                    <div class="olama-reg-metric-title"><?php esc_html_e( 'المجموع المدفوع', 'olama-registration' ); ?></div>
+                    <div id="drawer-paid-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                </div>
+                <div class="olama-reg-metric-card olama-reg-metric-card--warning" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                    <div class="olama-reg-metric-title"><?php esc_html_e( 'المتبقي المستحق', 'olama-registration' ); ?></div>
+                    <div id="drawer-balance-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                </div>
+            </div>
+
+            <!-- Info grid -->
+            <div class="olama-reg-section">
+                <h3 class="olama-reg-section-title"><?php esc_html_e( 'الارتباط والتواريخ', 'olama-registration' ); ?></h3>
+                <div class="olama-reg-section-body" style="font-size:14px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <div><strong><?php esc_html_e( 'رقم العائلة المربوطة:', 'olama-registration' ); ?></strong> <span id="drawer-family-uid" class="olama-reg-uid-badge"></span></div>
+                    <div><strong><?php esc_html_e( 'حالة الفاتورة:', 'olama-registration' ); ?></strong> <span id="drawer-status-badge"></span></div>
+                    <div><strong><?php esc_html_e( 'تاريخ الإصدار:', 'olama-registration' ); ?></strong> <span id="drawer-issue-date" style="font-weight:700;"></span></div>
+                    <div><strong><?php esc_html_e( 'تاريخ الاستحقاق:', 'olama-registration' ); ?></strong> <span id="drawer-due-date" style="font-weight:700;"></span></div>
+                </div>
+            </div>
+
+            <!-- Line items -->
+            <div class="olama-reg-section">
+                <h3 class="olama-reg-section-title"><?php esc_html_e( 'البنود والرسوم المفوترة', 'olama-registration' ); ?></h3>
+                <div class="olama-reg-table-wrap">
+                    <table class="olama-reg-fin-table" id="drawer-items-table">
+                        <thead>
+                            <tr>
+                                <th><?php esc_html_e( 'البند / الرسوم', 'olama-registration' ); ?></th>
+                                <th style="width:70px; text-align:center;"><?php esc_html_e( 'الكمية', 'olama-registration' ); ?></th>
+                                <th style="width:110px;"><?php esc_html_e( 'سعر الوحدة', 'olama-registration' ); ?></th>
+                                <th style="width:110px;"><?php esc_html_e( 'الإجمالي', 'olama-registration' ); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Installments Timeline -->
+            <div class="olama-reg-section">
+                <h3 class="olama-reg-section-title"><?php esc_html_e( 'جدول الأقساط وجدول السداد', 'olama-registration' ); ?></h3>
+                <div class="olama-reg-table-wrap">
+                    <table class="olama-reg-fin-table" id="drawer-installments-table">
+                        <thead>
+                            <tr>
+                                <th style="width:70px;"><?php esc_html_e( 'القسط', 'olama-registration' ); ?></th>
+                                <th><?php esc_html_e( 'تاريخ الاستحقاق', 'olama-registration' ); ?></th>
+                                <th><?php esc_html_e( 'القيمة المطلوبة', 'olama-registration' ); ?></th>
+                                <th><?php esc_html_e( 'القيمة المدفوعة', 'olama-registration' ); ?></th>
+                                <th><?php esc_html_e( 'الحالة', 'olama-registration' ); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="olama-reg-form-actions" style="justify-content:flex-end;">
+            <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-drawer-close"><?php esc_html_e( 'إغلاق النافذة', 'olama-registration' ); ?></button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Settle Receipt -->
+<div id="modal-settle-receipt" class="olama-reg-modal olama-reg-wrap" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(26,26,46,0.4); backdrop-filter:blur(4px);" dir="rtl">
+    <div class="olama-reg-modal-dialog" style="max-width:550px; width:90%;">
+        <div class="olama-reg-modal-header">
+            <h2 class="olama-reg-modal-title">
+                <span class="dashicons dashicons-clipboard"></span>
+                <?php esc_html_e( 'تسوية الإيصال في النظام', 'olama-registration' ); ?>
+            </h2>
+            <button type="button" class="olama-reg-modal-close btn-close-modal">&times;</button>
+        </div>
+        <form id="form-settle-receipt">
+            <div class="olama-reg-modal-body">
+                <input type="hidden" name="id" id="settle-receipt-id">
+                <div class="olama-reg-section" style="border:none; box-shadow:none; margin:0; padding:0;">
+                    <div class="olama-reg-grid" style="grid-template-columns: 1fr; gap:16px;">
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e( 'مبلغ التسوية', 'olama-registration' ); ?></label>
+                            <input type="text" id="settle-amount-display" readonly style="background:#f1f1f1; width:100%;">
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label><?php esc_html_e( 'رقم الإيصال (أوراكل)', 'olama-registration' ); ?></label>
+                            <input type="text" name="oracle_receipt_number" required style="width:100%;">
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e( 'ملاحظات المحاسب', 'olama-registration' ); ?></label>
+                            <textarea name="notes" rows="3" style="width:100%;"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="olama-reg-form-actions">
+                <button type="submit" class="olama-reg-btn olama-reg-btn--primary"><?php esc_html_e( 'تأكيد التسوية', 'olama-registration' ); ?></button>
+                <button type="button" class="button button-large btn-close-modal"><?php esc_html_e( 'إغلاق', 'olama-registration' ); ?></button>
+            </div>
+        </form>
+    </div>
+</div>
+
+
 

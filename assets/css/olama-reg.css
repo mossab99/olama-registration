@@ -901,8 +901,8 @@
 .olama-reg-modal-dialog {
     background: #ffffff !important;
     margin: 50px auto !important;
-    width: 95% !important;
-    max-width: 820px !important;
+    width: 95%;
+    max-width: 820px;
     border-radius: var(--reg-radius) !important;
     overflow: hidden !important;
     box-shadow: var(--reg-shadow-xl) !important;
