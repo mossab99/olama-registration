@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-define( 'OLAMA_REG_VERSION',             '1.2.2' );
+define( 'OLAMA_REG_VERSION',             '1.2.3' );
 define( 'OLAMA_REG_MIN_SCHOOL_VERSION',  '2.3.9' );
 define( 'OLAMA_REG_PATH',               plugin_dir_path( __FILE__ ) );
 define( 'OLAMA_REG_URL',                plugin_dir_url( __FILE__ ) );

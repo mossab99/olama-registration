@@ -93,7 +93,18 @@ class Olama_Reg_Agreement {
             if ( ! empty( $row->participant_ids ) ) {
                 $row->participant_ids_array = json_decode( $row->participant_ids, true ) ?: [];
             } else {
-                $row->participant_ids_array = [ (int) $row->participant_id ];
+                $fees_table = $wpdb->prefix . 'olama_agreement_fees';
+                $pids = $wpdb->get_col( $wpdb->prepare(
+                    "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
+                    $id
+                ) );
+                if ( ! empty( $pids ) ) {
+                    $row->participant_ids_array = array_map( function( $val ) {
+                        return is_numeric( $val ) ? (int) $val : $val;
+                    }, $pids );
+                } else {
+                    $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
+                }
             }
         }
         
@@ -157,7 +168,35 @@ class Olama_Reg_Agreement {
         // Add names
         foreach ( $results as $row ) {
             $row->payer_name = self::resolve_payer_name( $row->payer_type, $row->payer_id );
-            $row->participant_name = self::resolve_participant_name( $row->participant_type, $row->participant_id );
+            
+            if ( ! empty( $row->participant_ids ) ) {
+                $row->participant_ids_array = json_decode( $row->participant_ids, true ) ?: [];
+            } else {
+                $fees_table = $wpdb->prefix . 'olama_agreement_fees';
+                $pids = $wpdb->get_col( $wpdb->prepare(
+                    "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
+                    $row->id
+                ) );
+                if ( ! empty( $pids ) ) {
+                    $row->participant_ids_array = array_map( function( $val ) {
+                        return is_numeric( $val ) ? (int) $val : $val;
+                    }, $pids );
+                } else {
+                    $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
+                }
+            }
+
+            if ( empty( $row->participant_type ) ) {
+                $row->participant_type = ( $row->payer_type === 'family' ) ? 'student' : 'child';
+            }
+
+            $names = [];
+            foreach ( $row->participant_ids_array as $pid ) {
+                if ( ! empty( $pid ) ) {
+                    $names[] = self::resolve_participant_name( $row->participant_type, (string)$pid );
+                }
+            }
+            $row->participant_name = !empty($names) ? implode( ' ، ', $names ) : self::resolve_participant_name( $row->participant_type, (string)$row->participant_id );
         }
 
         return $results;
@@ -198,15 +237,6 @@ class Olama_Reg_Agreement {
             $id
         ) );
 
-        $participant_ids = $wpdb->get_var( $wpdb->prepare( "SELECT participant_ids FROM {$agr_table} WHERE id = %d", $id ) );
-        $participant_ids_array = json_decode( $participant_ids, true );
-        $multiplier = 1;
-        if (is_array($participant_ids_array) && count($participant_ids_array) > 0) {
-            $multiplier = count($participant_ids_array);
-        }
-
-        $total = $total * $multiplier;
-
         $wpdb->update(
             $agr_table,
             [ 'total_amount' => $total, 'updated_at' => current_time( 'mysql' ) ],
@@ -232,7 +262,7 @@ class Olama_Reg_Agreement {
         return '';
     }
 
-    private static function resolve_participant_name( string $type, string $id ): string {
+    public static function resolve_participant_name( string $type, string $id ): string {
         global $wpdb;
         if ( $type === 'child' ) {
             $table = $wpdb->prefix . 'olama_customer_children';

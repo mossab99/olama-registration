@@ -18,13 +18,18 @@ if ( isset($_GET['from_agreement']) && !empty($_GET['fee_ids']) ) {
         
         $total_amount = 0;
         $total_discount = 0;
+        $selected_fee_children = [];
         
         foreach ( $fees as $f ) {
             if ( in_array( $f->id, $fee_ids ) ) {
                 $total_amount += (float) $f->amount;
                 $total_discount += (float) $f->discount;
+                if ( !empty($f->child_id) ) {
+                    $selected_fee_children[] = is_numeric($f->child_id) ? (int)$f->child_id : $f->child_id;
+                }
             }
         }
+        $selected_fee_children = array_unique($selected_fee_children);
         
         $linked_agreement = [
             'id' => $agreement->id,
@@ -32,7 +37,7 @@ if ( isset($_GET['from_agreement']) && !empty($_GET['fee_ids']) ) {
             'payer_type' => $agreement->payer_type, // 'customer' or 'family'
             'payer_id' => $agreement->payer_id,
             'payer_name' => $agreement->payer_name,
-            'participants' => $agreement->participant_ids_array, // array of child IDs or UIDs
+            'participants' => !empty($selected_fee_children) ? $selected_fee_children : $agreement->participant_ids_array, // array of child IDs or UIDs
             'activity_type' => $agreement->activity_type,
             'amount' => $total_amount,
             'discount' => $total_discount,

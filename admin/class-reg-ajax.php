@@ -67,6 +67,14 @@ class Olama_Reg_Ajax
             $method = 'ajax_' . str_replace('olama_reg_', '', $action);
             add_action('wp_ajax_' . $action, [$this, $method]);
         }
+
+        // ── Customer Hub handlers (Phase 2 + 3 + 4) ─────────────────────────────
+        add_action('wp_ajax_os_hub_search',       [$this, 'hub_search']);
+        add_action('wp_ajax_os_hub_counts',       [$this, 'hub_counts']);
+        add_action('wp_ajax_os_hub_tile',         [$this, 'hub_tile']);
+        add_action('wp_ajax_os_hub_save_profile', [$this, 'hub_save_profile']);
+        add_action('wp_ajax_os_hub_toggle_active',[$this, 'hub_toggle_active']);
+        add_action('wp_ajax_os_hub_add_child',    [$this, 'hub_add_child']);
     }
 
     // ── Guard ─────────────────────────────────────────────────────────────────
@@ -1015,8 +1023,8 @@ class Olama_Reg_Ajax
 
             $result = Olama_Reg_Agreement::update($id, $data);
             if ($result) {
-                $new_participant_count = count($participant_ids);
-                if ($data['template_id'] && ($data['template_id'] != $old_template_id || $new_participant_count != $old_participant_count)) {
+                $existing_fees = Olama_Reg_Agreement_Fees::get_by_agreement($id);
+                if ($data['template_id'] && ($data['template_id'] != $old_template_id || empty($existing_fees))) {
                     Olama_Reg_Agreement_Fees::apply_template_fees($id, $data['template_id']);
                 }
                 wp_send_json_success(['message' => __('تم تحديث العقد.', 'olama-registration'), 'id' => $id]);
@@ -1096,6 +1104,7 @@ class Olama_Reg_Ajax
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
 
         $data = [
+            'child_id' => (isset($_POST['child_id']) && $_POST['child_id'] !== '') ? sanitize_text_field($_POST['child_id']) : null,
             'fee_category' => sanitize_text_field($_POST['fee_category'] ?? ''),
             'label' => sanitize_text_field($_POST['label'] ?? ''),
             'amount' => (float) ($_POST['amount'] ?? 0),
@@ -1220,6 +1229,1323 @@ class Olama_Reg_Ajax
         }
 
         wp_send_json_success(['fees' => $unpaid_fees]);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // CUSTOMER HUB — Phase 2 Handlers
+    // Nonce: 'os_hub_nonce'  (separate from main plugin nonce)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Separate guard for hub endpoints (uses os_hub_nonce).
+     */
+    private function hub_guard(): void
+    {
+        check_ajax_referer('os_hub_nonce', 'nonce');
+        if (
+            ! current_user_can('olama_manage_registration_families') &&
+            ! current_user_can('manage_options')
+        ) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+    }
+
+    // ── os_hub_search ─────────────────────────────────────────────────────────
+
+    /**
+     * Unified search across families and external customers.
+     *
+     * POST: q (string, min 2), type ('family'|'external')
+     * Returns: { results: [ { uid, name, phone, is_active, student_count|child_count } ] }
+     */
+    public function hub_search(): void
+    {
+        $this->hub_guard();
+
+        $query = sanitize_text_field($_POST['q'] ?? '');
+        $type  = sanitize_key($_POST['type'] ?? 'family');
+
+        if (strlen($query) < 2) {
+            wp_send_json_success(['results' => []]);
+        }
+
+        $results = ($type === 'family')
+            ? $this->hub_search_families($query)
+            : $this->hub_search_customers($query);
+
+        wp_send_json_success(['results' => $results]);
+    }
+
+    private function hub_search_families(string $query): array
+    {
+        global $wpdb;
+        $like = '%' . $wpdb->esc_like($query) . '%';
+
+        $sql = "SELECT
+                    f.family_uid  AS uid,
+                    f.family_name AS name,
+                    COALESCE(f.father_mobile, f.mother_mobile, '') AS phone,
+                    f.is_active,
+                    COUNT(s.id)   AS student_count
+                FROM {$wpdb->prefix}olama_families f
+                LEFT JOIN {$wpdb->prefix}olama_students s
+                    ON s.family_id = f.family_uid AND s.is_active = 1
+                WHERE f.family_name   LIKE %s
+                   OR f.family_uid    LIKE %s
+                   OR f.father_mobile LIKE %s
+                   OR f.mother_mobile LIKE %s
+                GROUP BY f.id
+                ORDER BY f.family_name
+                LIMIT 20";
+
+        return $wpdb->get_results(
+            $wpdb->prepare($sql, $like, $like, $like, $like)
+        ) ?: [];
+    }
+
+    private function hub_search_customers(string $query): array
+    {
+        global $wpdb;
+        $like = '%' . $wpdb->esc_like($query) . '%';
+
+        $sql = "SELECT
+                    c.customer_uid AS uid,
+                    c.customer_name AS name,
+                    COALESCE(c.phone, '') AS phone,
+                    c.is_active,
+                    COUNT(ch.id) AS child_count,
+                    c.id AS internal_id
+                FROM {$wpdb->prefix}olama_customers c
+                LEFT JOIN {$wpdb->prefix}olama_customer_children ch
+                    ON ch.customer_id = c.id AND ch.is_active = 1
+                WHERE c.customer_name LIKE %s
+                   OR c.customer_uid  LIKE %s
+                   OR c.phone         LIKE %s
+                GROUP BY c.id
+                ORDER BY c.customer_name
+                LIMIT 20";
+
+        return $wpdb->get_results(
+            $wpdb->prepare($sql, $like, $like, $like)
+        ) ?: [];
+    }
+
+    // ── os_hub_counts ─────────────────────────────────────────────────────────
+
+    /**
+     * Batch-load badge counts for all 8 tiles in one round-trip.
+     *
+     * POST: uid (string), type ('family'|'external'), year (int, optional)
+     * Returns: { counts: { profile, agreements, invoices, payments,
+     *                      children, financial, history, settlements } }
+     */
+    public function hub_counts(): void
+    {
+        $this->hub_guard();
+
+        $uid  = sanitize_text_field($_POST['uid']  ?? '');
+        $type = sanitize_key($_POST['type'] ?? 'family');
+        $year = (int) ($_POST['year'] ?? 0);
+
+        if (! $year && class_exists('Olama_School_Academic')) {
+            $active = Olama_School_Academic::get_active_year();
+            $year   = $active ? (int) $active->id : 0;
+        }
+
+        global $wpdb;
+
+        if ($type === 'family') {
+            // Agreements
+            $agreements = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_agreements
+                  WHERE payer_type = 'family' AND payer_id = %s",
+                $uid
+            ));
+
+            // Invoices (current year or all)
+            $inv_sql = "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices
+                         WHERE family_uid = %s AND status != 'cancelled'";
+            $inv_args = [$uid];
+            if ($year) {
+                $inv_sql .= ' AND academic_year_id = %d';
+                $inv_args[] = $year;
+            }
+            $invoices = (int) $wpdb->get_var($wpdb->prepare($inv_sql, $inv_args));
+
+            // Payments
+            $pay_sql = "SELECT COUNT(*) FROM {$wpdb->prefix}olama_payments p
+                         INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
+                         WHERE p.family_uid = %s";
+            $pay_args = [$uid];
+            if ($year) {
+                $pay_sql .= ' AND i.academic_year_id = %d';
+                $pay_args[] = $year;
+            }
+            $payments = (int) $wpdb->get_var($wpdb->prepare($pay_sql, $pay_args));
+
+            // Children (students)
+            $children = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_students
+                  WHERE family_id = %s AND is_active = 1",
+                $uid
+            ));
+
+            // History / audit
+            $history = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_billing_audit
+                  WHERE entity_type = 'family' AND entity_id = %s",
+                $uid
+            ));
+
+            // Settlements (families only)
+            $settle_sql = "SELECT COUNT(*) FROM {$wpdb->prefix}olama_settlement_receipts
+                            WHERE family_id = %s";
+            $settle_args = [$uid];
+            if ($year) {
+                // The table may store year via dates; check if academic_year_id column exists
+                $cols = $wpdb->get_col("DESCRIBE {$wpdb->prefix}olama_settlement_receipts", 0);
+                if (in_array('academic_year_id', $cols)) {
+                    $settle_sql .= ' AND academic_year_id = %d';
+                    $settle_args[] = $year;
+                }
+            }
+            $settlements = (int) $wpdb->get_var($wpdb->prepare($settle_sql, $settle_args));
+
+            // Financial summary (just 1 record flag — shown as null badge)
+            $financial = null;
+
+        } else {
+            // External customer — resolve internal id from UID
+            $customer = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            $cid = $customer ? (int) $customer->id : 0;
+
+            $agreements = $cid ? (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_agreements
+                  WHERE payer_type = 'customer' AND payer_id = %d",
+                $cid
+            )) : 0;
+
+            $invoices = $cid ? (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices
+                  WHERE ext_customer_id = %d AND status != 'cancelled'",
+                $cid
+            )) : 0;
+
+            $payments = $cid ? (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_payments p
+                  INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
+                  WHERE i.ext_customer_id = %d",
+                $cid
+            )) : 0;
+
+            $children = $cid ? (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_customer_children
+                  WHERE customer_id = %d AND is_active = 1",
+                $cid
+            )) : 0;
+
+            $history      = 0; // Phase 5 will query audit for external
+            $financial    = null;
+            $settlements  = null; // Not applicable for external customers
+        }
+
+        wp_send_json_success([
+            'counts' => [
+                'profile'     => 1, // Always has a profile
+                'agreements'  => $agreements,
+                'invoices'    => $invoices,
+                'payments'    => $payments,
+                'children'    => $children,
+                'financial'   => $financial,
+                'history'     => $history,
+                'settlements' => $settlements,
+            ],
+            // Also return mini financial summary for identity header
+            'financial_mini' => ($type === 'family')
+                ? $this->hub_financial_mini($uid, $year)
+                : null,
+        ]);
+    }
+
+    /**
+     * Returns minimal financial data for the identity header.
+     */
+    private function hub_financial_mini(string $family_uid, int $year): array
+    {
+        global $wpdb;
+        $args = [$family_uid];
+        $year_clause = '';
+        if ($year) {
+            $year_clause = ' AND academic_year_id = %d';
+            $args[] = $year;
+        }
+
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT
+                COALESCE(SUM(total),       0) AS total_billed,
+                COALESCE(SUM(amount_paid), 0) AS total_paid,
+                COALESCE(SUM(balance),     0) AS total_balance
+             FROM {$wpdb->prefix}olama_invoices
+             WHERE family_uid = %s
+               AND status != 'cancelled'
+               {$year_clause}",
+            $args
+        ));
+
+        return [
+            'total_billed'  => $row ? (float) $row->total_billed  : 0,
+            'total_paid'    => $row ? (float) $row->total_paid    : 0,
+            'total_balance' => $row ? (float) $row->total_balance : 0,
+        ];
+    }
+
+    // ── os_hub_tile ───────────────────────────────────────────────────────────
+
+    /**
+     * Unified tile content loader — single endpoint.
+     *
+     * POST: tile (string), uid (string), type ('family'|'external'), year (int)
+     * Returns: { html: '<string>', meta: {...} }
+     */
+    public function hub_tile(): void
+    {
+        $this->hub_guard();
+
+        $tile = sanitize_key($_POST['tile'] ?? '');
+        $uid  = sanitize_text_field($_POST['uid']  ?? '');
+        $type = sanitize_key($_POST['type'] ?? 'family');
+        $year = (int) ($_POST['year'] ?? 0);
+
+        if (! $year && class_exists('Olama_School_Academic')) {
+            $active = Olama_School_Academic::get_active_year();
+            $year   = $active ? (int) $active->id : 0;
+        }
+
+        // Settlement tile only for families
+        if ($tile === 'settlements' && $type !== 'family') {
+            wp_send_json_error(['message' => __('هذا القسم للعائلات فقط.', 'olama-registration')]);
+        }
+
+        $handlers = [
+            'profile'     => [$this, 'hub_tile_profile'],
+            'agreements'  => [$this, 'hub_tile_agreements'],
+            'invoices'    => [$this, 'hub_tile_invoices'],
+            'payments'    => [$this, 'hub_tile_payments'],
+            'children'    => [$this, 'hub_tile_children'],
+            'financial'   => [$this, 'hub_tile_financial'],
+            'history'     => [$this, 'hub_tile_history'],
+            'settlements' => [$this, 'hub_tile_settlements'],
+        ];
+
+        if (! isset($handlers[$tile]) || ! is_callable($handlers[$tile])) {
+            wp_send_json_error(['message' => __('Unknown tile.', 'olama-registration')]);
+        }
+
+        $data = call_user_func($handlers[$tile], $uid, $type, $year);
+        wp_send_json_success([
+            'html' => $data['html'] ?? '',
+            'meta' => $data['meta'] ?? [],
+        ]);
+    }
+
+    // ── Tile: Profile ─────────────────────────────────────────────────────────
+
+    private function hub_tile_profile(string $uid, string $type, int $year): array
+    {
+        if ($type === 'family') {
+            $row = Olama_Reg_Family::get_family($uid);
+            if (! $row) {
+                return ['html' => $this->hub_empty_state(__('العائلة غير موجودة.', 'olama-registration'))];
+            }
+
+            $is_active    = (bool) $row->is_active;
+            $status_badge = $is_active
+                ? '<span class="os-hub-badge os-hub-badge--green">' . __('نشط', 'olama-registration') . '</span>'
+                : '<span class="os-hub-badge os-hub-badge--gray">'  . __('غير نشط', 'olama-registration') . '</span>';
+
+            // ── Data view ──────────────────────────────────────────────────
+            $html  = '<div class="os-hub-profile-wrap" data-uid="' . esc_attr($uid) . '" data-type="family">';
+
+            // Action bar
+            $html .= '<div class="os-hub-profile-actions">';
+            $html .= '<button type="button" class="button os-hub-edit-btn" id="os-hub-profile-edit-btn">';
+            $html .= '<span class="dashicons dashicons-edit" aria-hidden="true"></span> ' . __('تعديل', 'olama-registration');
+            $html .= '</button>';
+            $html .= ' <button type="button" class="button os-hub-toggle-active-btn" data-active="' . ($is_active ? '1' : '0') . '">';
+            $html .= '<span class="dashicons ' . ($is_active ? 'dashicons-lock' : 'dashicons-unlock') . '" aria-hidden="true"></span> ';
+            $html .= $is_active ? __('تعطيل', 'olama-registration') : __('تفعيل', 'olama-registration');
+            $html .= '</button>';
+            $html .= '</div>'; // .os-hub-profile-actions
+
+            // Read-only view
+            $html .= '<table class="os-hub-data-table widefat fixed striped os-hub-profile-view">';
+            $html .= '<tbody>';
+            $html .= $this->hub_tr(__('رقم الملف', 'olama-registration'),  esc_html($row->family_uid));
+            $html .= $this->hub_tr(__('اسم العائلة', 'olama-registration'), esc_html($row->family_name));
+            $html .= $this->hub_tr(__('هاتف الأب', 'olama-registration'),  esc_html($row->father_mobile ?? '—'));
+            $html .= $this->hub_tr(__('هاتف الأم', 'olama-registration'),  esc_html($row->mother_mobile ?? '—'));
+            $html .= $this->hub_tr(__('العنوان', 'olama-registration'),    esc_html($row->address ?? '—'));
+            $html .= $this->hub_tr(__('الحالة', 'olama-registration'),     $status_badge);
+            $html .= '</tbody></table>';
+
+            // Inline edit form (hidden by default)
+            $html .= '<form class="os-hub-profile-form" id="os-hub-profile-form" style="display:none;" novalidate>';
+            $html .= '<input type="hidden" name="uid"  value="' . esc_attr($uid) . '">';
+            $html .= '<input type="hidden" name="type" value="family">';
+            $html .= '<table class="os-hub-data-table widefat fixed">';
+            $html .= '<tbody>';
+            $html .= '<tr><th>' . __('اسم العائلة', 'olama-registration') . '</th><td>';
+            $html .= '<input type="text" name="family_name" class="widefat" required value="' . esc_attr($row->family_name) . '">';
+            $html .= '</td></tr>';
+            $html .= '<tr><th>' . __('هاتف الأب', 'olama-registration') . '</th><td>';
+            $html .= '<input type="text" name="father_mobile" class="widefat" value="' . esc_attr($row->father_mobile ?? '') . '">';
+            $html .= '</td></tr>';
+            $html .= '<tr><th>' . __('هاتف الأم', 'olama-registration') . '</th><td>';
+            $html .= '<input type="text" name="mother_mobile" class="widefat" value="' . esc_attr($row->mother_mobile ?? '') . '">';
+            $html .= '</td></tr>';
+            $html .= '<tr><th>' . __('العنوان', 'olama-registration') . '</th><td>';
+            $html .= '<input type="text" name="address" class="widefat" value="' . esc_attr($row->address ?? '') . '">';
+            $html .= '</td></tr>';
+            $html .= '</tbody></table>';
+            $html .= '<div class="os-hub-form-actions">';
+            $html .= '<button type="submit" class="button button-primary os-hub-form-save">';
+            $html .= '<span class="dashicons dashicons-saved" aria-hidden="true"></span> ' . __('حفظ التغييرات', 'olama-registration');
+            $html .= '</button>';
+            $html .= ' <button type="button" class="button os-hub-form-cancel">' . __('إلغاء', 'olama-registration') . '</button>';
+            $html .= '</div>';
+            $html .= '</form>';
+
+            // Toast placeholder
+            $html .= '<div class="os-hub-profile-toast" aria-live="polite"></div>';
+            $html .= '</div>'; // .os-hub-profile-wrap
+
+        } else {
+            global $wpdb;
+            $row = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            if (! $row) {
+                return ['html' => $this->hub_empty_state(__('العميل غير موجود.', 'olama-registration'))];
+            }
+
+            $is_active    = (bool) $row->is_active;
+            $status_badge = $is_active
+                ? '<span class="os-hub-badge os-hub-badge--green">' . __('نشط', 'olama-registration') . '</span>'
+                : '<span class="os-hub-badge os-hub-badge--gray">'  . __('غير نشط', 'olama-registration') . '</span>';
+
+            $html  = '<div class="os-hub-profile-wrap" data-uid="' . esc_attr($uid) . '" data-type="external">';
+
+            // Action bar
+            $html .= '<div class="os-hub-profile-actions">';
+            $html .= '<button type="button" class="button os-hub-edit-btn" id="os-hub-profile-edit-btn">';
+            $html .= '<span class="dashicons dashicons-edit" aria-hidden="true"></span> ' . __('تعديل', 'olama-registration');
+            $html .= '</button>';
+            $html .= ' <button type="button" class="button os-hub-toggle-active-btn" data-active="' . ($is_active ? '1' : '0') . '">';
+            $html .= '<span class="dashicons ' . ($is_active ? 'dashicons-lock' : 'dashicons-unlock') . '" aria-hidden="true"></span> ';
+            $html .= $is_active ? __('تعطيل', 'olama-registration') : __('تفعيل', 'olama-registration');
+            $html .= '</button>';
+            $html .= '</div>';
+
+            // Read-only view
+            $html .= '<table class="os-hub-data-table widefat fixed striped os-hub-profile-view">';
+            $html .= '<tbody>';
+            $html .= $this->hub_tr(__('رقم العميل', 'olama-registration'), esc_html($row->customer_uid));
+            $html .= $this->hub_tr(__('الاسم', 'olama-registration'),      esc_html($row->customer_name));
+            $html .= $this->hub_tr(__('الهاتف', 'olama-registration'),     esc_html($row->phone ?? '—'));
+            $html .= $this->hub_tr(__('الملاحظات', 'olama-registration'),  esc_html($row->notes ?? '—'));
+            $html .= $this->hub_tr(__('الحالة', 'olama-registration'),     $status_badge);
+            $html .= '</tbody></table>';
+
+            // Inline edit form
+            $html .= '<form class="os-hub-profile-form" id="os-hub-profile-form" style="display:none;" novalidate>';
+            $html .= '<input type="hidden" name="uid"  value="' . esc_attr($uid) . '">';
+            $html .= '<input type="hidden" name="type" value="external">';
+            $html .= '<table class="os-hub-data-table widefat fixed">';
+            $html .= '<tbody>';
+            $html .= '<tr><th>' . __('الاسم', 'olama-registration') . '</th><td>';
+            $html .= '<input type="text" name="customer_name" class="widefat" required value="' . esc_attr($row->customer_name) . '">';
+            $html .= '</td></tr>';
+            $html .= '<tr><th>' . __('الهاتف', 'olama-registration') . '</th><td>';
+            $html .= '<input type="text" name="phone" class="widefat" value="' . esc_attr($row->phone ?? '') . '">';
+            $html .= '</td></tr>';
+            $html .= '<tr><th>' . __('الملاحظات', 'olama-registration') . '</th><td>';
+            $html .= '<textarea name="notes" class="widefat" rows="3">' . esc_textarea($row->notes ?? '') . '</textarea>';
+            $html .= '</td></tr>';
+            $html .= '</tbody></table>';
+            $html .= '<div class="os-hub-form-actions">';
+            $html .= '<button type="submit" class="button button-primary os-hub-form-save">';
+            $html .= '<span class="dashicons dashicons-saved" aria-hidden="true"></span> ' . __('حفظ التغييرات', 'olama-registration');
+            $html .= '</button>';
+            $html .= ' <button type="button" class="button os-hub-form-cancel">' . __('إلغاء', 'olama-registration') . '</button>';
+            $html .= '</div>';
+            $html .= '</form>';
+
+            $html .= '<div class="os-hub-profile-toast" aria-live="polite"></div>';
+            $html .= '</div>';
+        }
+
+        return ['html' => $html];
+    }
+
+    // ── Tile: Agreements ──────────────────────────────────────────────────────
+
+    private function hub_tile_agreements(string $uid, string $type, int $year): array
+    {
+        global $wpdb;
+        $payer_type = ($type === 'family') ? 'family' : 'customer';
+        $payer_id   = $uid;
+
+        // For external customers, resolve internal id
+        if ($type === 'external') {
+            $c = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            $payer_id = $c ? (string) $c->id : $uid;
+        }
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT a.id, a.agreement_number, a.activity_type, a.status,
+                    a.start_date, a.end_date, a.total_amount,
+                    COUNT(af.id) AS fee_count,
+                    SUM(CASE WHEN af.paid_status='paid' THEN 1 ELSE 0 END) AS paid_count
+             FROM {$wpdb->prefix}olama_agreements a
+             LEFT JOIN {$wpdb->prefix}olama_agreement_fees af ON af.agreement_id = a.id
+             WHERE a.payer_type = %s AND a.payer_id = %s
+             GROUP BY a.id
+             ORDER BY a.id DESC",
+            $payer_type, $payer_id
+        ));
+
+        if (! $rows) {
+            $html = $this->hub_empty_state(
+                __('لا توجد عقود مسجلة', 'olama-registration'),
+                'dashicons-media-document'
+            );
+            return ['html' => $html];
+        }
+
+        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        $html .= '<thead><tr>';
+        $html .= '<th>' . __('رقم العقد', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('نوع النشاط', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الإجمالي', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الرسوم', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الإجراءات', 'olama-registration') . '</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $status_map = [
+                'draft'     => ['label' => __('مسودة', 'olama-registration'),    'cls' => 'os-hub-badge--gray'],
+                'active'    => ['label' => __('نشط', 'olama-registration'),      'cls' => 'os-hub-badge--green'],
+                'completed' => ['label' => __('مكتمل', 'olama-registration'),    'cls' => 'os-hub-badge--blue'],
+                'cancelled' => ['label' => __('ملغى', 'olama-registration'),     'cls' => 'os-hub-badge--red'],
+            ];
+            $s = $status_map[$r->status] ?? ['label' => esc_html($r->status), 'cls' => 'os-hub-badge--gray'];
+
+            $fee_progress = $r->fee_count > 0
+                ? "{$r->paid_count}/{$r->fee_count}"
+                : '—';
+
+            $print_url = admin_url('admin.php?page=olama-registration-agreements&action=print&id=' . $r->id);
+
+            $html .= '<tr>';
+            $html .= '<td><code>' . esc_html($r->agreement_number) . '</code></td>';
+            $html .= '<td>' . esc_html($r->activity_type) . '</td>';
+            $html .= '<td><span class="os-hub-badge ' . $s['cls'] . '">' . $s['label'] . '</span></td>';
+            $html .= '<td dir="ltr">' . number_format((float)$r->total_amount, 2) . ' <small>د.أ</small></td>';
+            $html .= '<td>' . esc_html($fee_progress) . '</td>';
+            $html .= '<td><a href="' . esc_url($print_url) . '" target="_blank" class="button button-small">'
+                     . __('طباعة', 'olama-registration') . '</a></td>';
+            $html .= '</tr>';
+        }
+
+        $html .= '</tbody></table>';
+
+        return [
+            'html' => $html,
+            'meta' => ['count' => count($rows)],
+        ];
+    }
+
+    // ── Tile: Invoices ────────────────────────────────────────────────────────
+
+    private function hub_tile_invoices(string $uid, string $type, int $year): array
+    {
+        global $wpdb;
+
+        if ($type === 'family') {
+            $where  = 'family_uid = %s AND (ext_customer_id IS NULL OR ext_customer_id = 0)';
+            $args   = [$uid];
+        } else {
+            $c = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            $cid    = $c ? (int) $c->id : 0;
+            $where  = 'ext_customer_id = %d';
+            $args   = [$cid];
+        }
+
+        if ($year) {
+            $where .= ' AND academic_year_id = %d';
+            $args[] = $year;
+        }
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, invoice_number, issue_date, due_date, status,
+                        total, amount_paid, balance
+                 FROM {$wpdb->prefix}olama_invoices
+                 WHERE {$where}
+                 ORDER BY id DESC
+                 LIMIT 50",
+                $args
+            )
+        );
+
+        $new_invoice_url = admin_url('admin.php?page=olama-registration-invoices&action=new&type=' . $type . '&uid=' . $uid);
+
+        if (! $rows) {
+            $html = $this->hub_empty_state(
+                __('لا توجد فواتير مسجلة', 'olama-registration'),
+                'dashicons-media-text'
+            );
+            $html .= '<div class="os-hub-tile-footer"><a href="' . esc_url($new_invoice_url) . '" class="button button-primary">' . __('إصدار فاتورة جديدة', 'olama-registration') . '</a></div>';
+            return ['html' => $html];
+        }
+
+        $status_map = [
+            'issued'    => ['label' => __('صادرة', 'olama-registration'),   'cls' => 'os-hub-badge--blue'],
+            'partially_paid' => ['label' => __('مدفوعة جزئياً', 'olama-registration'), 'cls' => 'os-hub-badge--orange'],
+            'paid'      => ['label' => __('مدفوعة', 'olama-registration'),  'cls' => 'os-hub-badge--green'],
+            'overdue'   => ['label' => __('متأخرة', 'olama-registration'),   'cls' => 'os-hub-badge--red'],
+            'cancelled' => ['label' => __('ملغاة', 'olama-registration'),   'cls' => 'os-hub-badge--gray'],
+        ];
+
+        $total_balance = 0;
+        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        $html .= '<thead><tr>';
+        $html .= '<th>' . __('رقم الفاتورة', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('تاريخ الإصدار', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الإجمالي', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('المدفوع', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الرصيد', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الإجراءات', 'olama-registration') . '</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $s  = $status_map[$r->status] ?? ['label' => esc_html($r->status), 'cls' => 'os-hub-badge--gray'];
+            $total_balance += (float) $r->balance;
+
+            $view_url = admin_url('admin.php?page=olama-registration-invoices&action=view&id=' . $r->id);
+            $pay_url  = admin_url('admin.php?page=olama-registration-payments&action=new&invoice_id=' . $r->id);
+
+            $html .= '<tr>';
+            $html .= '<td><code>' . esc_html($r->invoice_number) . '</code></td>';
+            $html .= '<td>' . esc_html($r->issue_date) . '</td>';
+            $html .= '<td dir="ltr">' . number_format((float)$r->total, 2) . '</td>';
+            $html .= '<td dir="ltr">' . number_format((float)$r->amount_paid, 2) . '</td>';
+            $html .= '<td dir="ltr"><strong>' . number_format((float)$r->balance, 2) . '</strong></td>';
+            $html .= '<td><span class="os-hub-badge ' . $s['cls'] . '">' . $s['label'] . '</span></td>';
+            $html .= '<td>';
+            $html .= '<a href="' . esc_url($view_url) . '" class="button button-small">' . __('عرض', 'olama-registration') . '</a> ';
+            if ($r->status !== 'paid' && $r->status !== 'cancelled') {
+                $html .= '<a href="' . esc_url($pay_url) . '" class="button button-primary button-small">' . __('دفعة', 'olama-registration') . '</a>';
+            }
+            $html .= '</td>';
+            $html .= '</tr>';
+        }
+
+        $html .= '</tbody></table>';
+        $html .= '<div class="os-hub-tile-footer">';
+        $html .= '<strong>' . __('إجمالي الرصيد المستحق: ', 'olama-registration') . '</strong>';
+        $html .= '<span dir="ltr">' . number_format($total_balance, 2) . ' <small>د.أ</small></span>';
+        $html .= '</div>';
+
+        return [
+            'html' => $html,
+            'meta' => ['count' => count($rows), 'balance' => $total_balance],
+        ];
+    }
+
+    // ── Tile: Payments ────────────────────────────────────────────────────────
+
+    private function hub_tile_payments(string $uid, string $type, int $year): array
+    {
+        global $wpdb;
+
+        if ($type === 'family') {
+            $join_where = 'p.family_uid = %s';
+            $args       = [$uid];
+        } else {
+            $c = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            $cid        = $c ? (int) $c->id : 0;
+            $join_where = 'i.ext_customer_id = %d';
+            $args       = [$cid];
+        }
+
+        if ($year) {
+            $join_where .= ' AND i.academic_year_id = %d';
+            $args[] = $year;
+        }
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT p.id, p.invoice_id, p.payment_date, p.amount, p.method, p.reference,
+                        p.received_by, p.notes,
+                        i.invoice_number, p.amount AS payment_amount
+                 FROM {$wpdb->prefix}olama_payments p
+                 INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
+                 WHERE {$join_where}
+                 ORDER BY p.id DESC
+                 LIMIT 50",
+                $args
+            )
+        );
+
+        if (! $rows) {
+            return ['html' => $this->hub_empty_state(
+                __('لا توجد سندات قبض مسجلة', 'olama-registration'),
+                'dashicons-money-alt'
+            )];
+        }
+
+        $method_labels = [
+            'cash'         => __('نقدي', 'olama-registration'),
+            'bank_transfer'=> __('تحويل بنكي', 'olama-registration'),
+            'cheque'       => __('شيك', 'olama-registration'),
+            'online'       => __('دفع إلكتروني', 'olama-registration'),
+        ];
+
+        $total_paid = 0;
+        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        $html .= '<thead><tr>';
+        $html .= '<th>#</th>';
+        $html .= '<th>' . __('الفاتورة', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('التاريخ', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('المبلغ', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('طريقة الدفع', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('المرجع', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الفاتورة', 'olama-registration') . '</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $total_paid += (float) $r->amount;
+            $method = $method_labels[$r->method] ?? esc_html($r->method);
+            $is_reversal = (float) $r->amount < 0;
+
+            $inv_url = admin_url('admin.php?page=olama-registration-invoices&action=view&id=' . (int) $r->invoice_id);
+
+            $html .= '<tr' . ($is_reversal ? ' class="os-hub-row--reversal"' : '') . '>';
+            $html .= '<td>' . (int) $r->id . '</td>';
+            $html .= '<td><code>' . esc_html($r->invoice_number) . '</code></td>';
+            $html .= '<td>' . esc_html($r->payment_date) . '</td>';
+            $html .= '<td dir="ltr"' . ($is_reversal ? ' style="color:#d63638;"' : '') . '>'
+                     . number_format((float)$r->amount, 2) . '</td>';
+            $html .= '<td>' . esc_html($method) . '</td>';
+            $html .= '<td>' . esc_html($r->reference ?: '—') . '</td>';
+            $html .= '<td><a href="' . esc_url($inv_url) . '" class="button button-small">' . __('عرض', 'olama-registration') . '</a></td>';
+            $html .= '</tr>';
+        }
+
+        $html .= '</tbody></table>';
+        $html .= '<div class="os-hub-tile-footer">';
+        $html .= '<strong>' . __('إجمالي المدفوعات: ', 'olama-registration') . '</strong>';
+        $html .= '<span dir="ltr">' . number_format($total_paid, 2) . ' <small>د.أ</small></span>';
+        $html .= '</div>';
+
+        return [
+            'html' => $html,
+            'meta' => ['count' => count($rows), 'total' => $total_paid],
+        ];
+    }
+
+    // ── Tile: Children / Students ─────────────────────────────────────────────
+
+    private function hub_tile_children(string $uid, string $type, int $year): array
+    {
+        global $wpdb;
+
+        if ($type === 'family') {
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT student_uid AS uid, student_name AS name,
+                        '' AS grade, '' AS section, is_active
+                 FROM {$wpdb->prefix}olama_students
+                 WHERE family_id = %s
+                 ORDER BY sequence_in_family, student_name",
+                $uid
+            ));
+            $label_uid  = __('رقم الطالب', 'olama-registration');
+            $label_name = __('اسم الطالب', 'olama-registration');
+        } else {
+            $c = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            $cid  = $c ? (int) $c->id : 0;
+            $rows = $cid ? $wpdb->get_results($wpdb->prepare(
+                "SELECT child_uid AS uid, child_name AS name, grade, '' AS section, is_active
+                 FROM {$wpdb->prefix}olama_customer_children
+                 WHERE customer_id = %d
+                 ORDER BY child_name",
+                $cid
+            )) : [];
+            $label_uid  = __('رقم الابن', 'olama-registration');
+            $label_name = __('اسم الابن', 'olama-registration');
+        }
+
+        if (! $rows) {
+            $empty = $this->hub_empty_state(
+                __('لا يوجد طلاب / أبناء مسجلون', 'olama-registration'),
+                'dashicons-groups'
+            );
+            if ($type === 'external') {
+                $empty .= $this->hub_add_child_form($uid);
+            }
+            return ['html' => $empty];
+        }
+
+        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        $html .= '<thead><tr>';
+        $html .= "<th>{$label_uid}</th><th>{$label_name}</th>";
+        $html .= '<th>' . __('الصف', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $html .= '<tr>';
+            $html .= '<td><code>' . esc_html($r->uid) . '</code></td>';
+            $html .= '<td>' . esc_html($r->name) . '</td>';
+            $html .= '<td>' . esc_html($r->grade ?: '—') . '</td>';
+            $html .= '<td>' . ($r->is_active
+                ? '<span class="os-hub-badge os-hub-badge--green">' . __('نشط', 'olama-registration') . '</span>'
+                : '<span class="os-hub-badge os-hub-badge--gray">'  . __('غير نشط', 'olama-registration') . '</span>') . '</td>';
+            $html .= '</tr>';
+        }
+        $html .= '</tbody></table>';
+
+        // For external customers: show Add Child form below the table
+        if ($type === 'external') {
+            $html .= $this->hub_add_child_form($uid);
+        }
+
+        return ['html' => $html, 'meta' => ['count' => count($rows)]];
+    }
+
+    /**
+     * Renders the inline "Add Child" form HTML for external customers.
+     */
+    private function hub_add_child_form(string $uid): string
+    {
+        $html  = '<div class="os-hub-add-child-wrap" data-uid="' . esc_attr($uid) . '">';
+        $html .= '<div class="os-hub-tile-footer">';
+        $html .= '<button type="button" class="button" id="os-hub-add-child-btn">';
+        $html .= '<span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span> ';
+        $html .= __('إضافة ابن', 'olama-registration');
+        $html .= '</button>';
+        $html .= '</div>';
+        $html .= '<form class="os-hub-add-child-form" id="os-hub-add-child-form" style="display:none;" novalidate>';
+        $html .= '<input type="hidden" name="uid" value="' . esc_attr($uid) . '">';
+        $html .= '<table class="os-hub-data-table widefat fixed"><tbody>';
+        $html .= '<tr><th>' . __('اسم الابن', 'olama-registration') . ' <span style="color:#d63638;">*</span></th><td>';
+        $html .= '<input type="text" name="child_name" id="os-hub-child-name-input" class="widefat" required placeholder="' . esc_attr__('أدخل اسم الابن...', 'olama-registration') . '">';
+        $html .= '</td></tr>';
+        $html .= '<tr><th>' . __('الصف / المرحلة', 'olama-registration') . '</th><td>';
+        $html .= '<input type="text" name="grade" class="widefat" placeholder="' . esc_attr__('اختياري...', 'olama-registration') . '">';
+        $html .= '</td></tr>';
+        $html .= '</tbody></table>';
+        $html .= '<div class="os-hub-form-actions">';
+        $html .= '<button type="submit" class="button button-primary os-hub-add-child-submit">';
+        $html .= '<span class="dashicons dashicons-saved" aria-hidden="true"></span> ' . __('حفظ', 'olama-registration');
+        $html .= '</button>';
+        $html .= ' <button type="button" class="button os-hub-add-child-cancel">' . __('إلغاء', 'olama-registration') . '</button>';
+        $html .= '</div>';
+        $html .= '</form>';
+        $html .= '<div class="os-hub-add-child-toast" aria-live="polite"></div>';
+        $html .= '</div>';
+        return $html;
+    }
+
+    // ── Tile: Financial Summary ────────────────────────────────────────────────
+
+    private function hub_tile_financial(string $uid, string $type, int $year): array
+    {
+        global $wpdb;
+
+        if ($type !== 'family') {
+            // External customers: simple invoice summary
+            $c   = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+            $cid = $c ? (int) $c->id : 0;
+
+            $summary = $cid ? $wpdb->get_row($wpdb->prepare(
+                "SELECT
+                     COALESCE(SUM(total), 0) AS billed,
+                     COALESCE(SUM(amount_paid), 0) AS paid,
+                     COALESCE(SUM(balance), 0) AS balance
+                 FROM {$wpdb->prefix}olama_invoices
+                 WHERE ext_customer_id = %d AND status != 'cancelled'",
+                $cid
+            )) : null;
+
+            $billed  = $summary ? (float) $summary->billed  : 0;
+            $paid    = $summary ? (float) $summary->paid    : 0;
+            $balance = $summary ? (float) $summary->balance : 0;
+        } else {
+            // Family: year-scoped
+            $args = [$uid];
+            $yc   = '';
+            if ($year) { $yc = 'AND academic_year_id = %d'; $args[] = $year; }
+
+            $summary = $wpdb->get_row($wpdb->prepare(
+                "SELECT
+                     COALESCE(SUM(total), 0)       AS billed,
+                     COALESCE(SUM(amount_paid), 0) AS paid,
+                     COALESCE(SUM(balance), 0)     AS balance
+                 FROM {$wpdb->prefix}olama_invoices
+                 WHERE family_uid = %s
+                   AND (ext_customer_id IS NULL OR ext_customer_id = 0)
+                   AND status != 'cancelled' {$yc}",
+                $args
+            ));
+
+            $billed  = $summary ? (float) $summary->billed  : 0;
+            $paid    = $summary ? (float) $summary->paid    : 0;
+            $balance = $summary ? (float) $summary->balance : 0;
+        }
+
+        $paid_pct    = $billed > 0 ? round($paid / $billed * 100, 1) : 0;
+        $balance_pct = $billed > 0 ? round($balance / $billed * 100, 1) : 0;
+
+        $html  = '<div class="os-hub-financial-summary">';
+
+        // Stat cards
+        $html .= '<div class="os-hub-fin-cards">';
+        $html .= $this->hub_fin_card(__('إجمالي المفوتر', 'olama-registration'), $billed, 'os-hub-badge--blue');
+        $html .= $this->hub_fin_card(__('إجمالي المدفوع', 'olama-registration'), $paid,    'os-hub-badge--green');
+        $html .= $this->hub_fin_card(__('الرصيد المستحق', 'olama-registration'), $balance, $balance > 0 ? 'os-hub-badge--red' : 'os-hub-badge--green');
+        $html .= '</div>';
+
+        // Progress bar
+        if ($billed > 0) {
+            $html .= '<div class="os-hub-progress-wrap">';
+            $html .= '<div class="os-hub-progress-label">';
+            $html .= '<span>' . __('نسبة السداد', 'olama-registration') . '</span>';
+            $html .= '<span dir="ltr">' . $paid_pct . '%</span>';
+            $html .= '</div>';
+            $html .= '<div class="os-hub-progress">';
+            $html .= '<div class="os-hub-progress__bar" style="width:' . $paid_pct . '%;"></div>';
+            $html .= '</div>';
+            $html .= '</div>';
+        }
+
+        // Footer CTA: New Invoice
+        $new_invoice_url = admin_url('admin.php?page=olama-registration-invoices&action=new');
+        if ($type === 'family') {
+            $new_invoice_url .= '&family_uid=' . urlencode($uid);
+        } else {
+            $new_invoice_url .= '&ext_customer_uid=' . urlencode($uid);
+        }
+
+        $html .= '<div class="os-hub-tile-footer">';
+        $html .= '<a href="' . esc_url($new_invoice_url) . '" class="button button-primary button-small">';
+        $html .= '<span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span> ';
+        $html .= __('إنشاء فاتورة جديدة', 'olama-registration');
+        $html .= '</a>';
+        $html .= '</div>';
+
+        $html .= '</div>';
+
+        return [
+            'html' => $html,
+            'meta' => ['billed' => $billed, 'paid' => $paid, 'balance' => $balance],
+        ];
+    }
+
+    private function hub_fin_card(string $label, float $amount, string $cls): string
+    {
+        return '<div class="os-hub-fin-card">'
+             . '<div class="os-hub-fin-card__label">' . esc_html($label) . '</div>'
+             . '<div class="os-hub-fin-card__amount ' . $cls . '" dir="ltr">'
+             . number_format($amount, 2) . ' <small>د.أ</small>'
+             . '</div>'
+             . '</div>';
+    }
+
+    // ── Tile: History & Audit ─────────────────────────────────────────────────
+
+    private function hub_tile_history(string $uid, string $type, int $year): array
+    {
+        global $wpdb;
+
+        // Action label map (Arabic)
+        $action_labels = [
+            'invoice_created'   => __('إنشاء فاتورة',      'olama-registration'),
+            'invoice_updated'   => __('تعديل فاتورة',      'olama-registration'),
+            'invoice_cancelled' => __('إلغاء فاتورة',      'olama-registration'),
+            'payment_received'  => __('تسجيل دفعة',        'olama-registration'),
+            'payment_reversed'  => __('عكس دفعة',          'olama-registration'),
+            'agreement_created' => __('إنشاء عقد',           'olama-registration'),
+            'agreement_updated' => __('تعديل عقد',           'olama-registration'),
+            'profile_updated'   => __('تعديل بيانات',       'olama-registration'),
+            'status_changed'    => __('تغيير الحالة',       'olama-registration'),
+            'child_added'       => __('إضافة ابن',           'olama-registration'),
+        ];
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, action, entity_type, entity_id, actor_id, created_at, notes
+             FROM {$wpdb->prefix}olama_billing_audit
+             WHERE entity_id = %s
+             ORDER BY id DESC
+             LIMIT 100",
+            $uid
+        ));
+
+        if (! $rows) {
+            return ['html' => $this->hub_empty_state(
+                __('لا توجد سجلات تدقيق', 'olama-registration'),
+                'dashicons-backup'
+            )];
+        }
+
+        // Pre-fetch user display names (batch, avoid N+1)
+        $actor_ids = array_unique(array_filter(array_column($rows, 'actor_id')));
+        $user_names = [];
+        foreach ($actor_ids as $actor_id) {
+            $u = get_userdata((int) $actor_id);
+            $user_names[$actor_id] = $u ? $u->display_name : __('مجهول', 'olama-registration');
+        }
+
+        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        $html .= '<thead><tr>';
+        $html .= '<th>' . __('الإجراء', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('المستخدم', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('التاريخ', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('ملاحظات', 'olama-registration') . '</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $action_label = $action_labels[$r->action] ?? esc_html($r->action);
+            $actor_name   = $user_names[$r->actor_id] ?? __('نظام', 'olama-registration');
+            $date         = $r->created_at
+                ? wp_date('Y/m/d H:i', strtotime($r->created_at))
+                : '—';
+
+            $html .= '<tr>';
+            $html .= '<td><span class="os-hub-badge os-hub-badge--blue">' . esc_html($action_label) . '</span></td>';
+            $html .= '<td>' . esc_html($actor_name) . '</td>';
+            $html .= '<td dir="ltr" style="white-space:nowrap;">' . esc_html($date) . '</td>';
+            $html .= '<td>' . esc_html($r->notes ?? '—') . '</td>';
+            $html .= '</tr>';
+        }
+
+        $html .= '</tbody></table>';
+
+        return ['html' => $html, 'meta' => ['count' => count($rows)]];
+    }
+
+    // ── Tile: Settlement Receipts (families only) ─────────────────────────────
+
+    private function hub_tile_settlements(string $uid, string $type, int $year): array
+    {
+        if ($type !== 'family') {
+            return ['html' => $this->hub_empty_state(
+                __('إيصالات التسوية للعائلات المسجلة فقط', 'olama-registration'),
+                'dashicons-bank'
+            )];
+        }
+
+        global $wpdb;
+        $args  = [$uid];
+        $yc    = '';
+
+        if ($year) {
+            $cols = $wpdb->get_col("DESCRIBE {$wpdb->prefix}olama_settlement_receipts", 0);
+            if (in_array('academic_year_id', $cols)) {
+                $yc    = ' AND academic_year_id = %d';
+                $args[] = $year;
+            }
+        }
+
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, receipt_number, payment_category, original_amount,
+                    settled_amount, remaining_balance, payment_method,
+                    oracle_receipt_number, settlement_date, status
+             FROM {$wpdb->prefix}olama_settlement_receipts
+             WHERE family_id = %s {$yc}
+             ORDER BY id DESC
+             LIMIT 50",
+            $args
+        ));
+
+        if (! $rows) {
+            return ['html' => $this->hub_empty_state(
+                __('لا توجد إيصالات تسوية لهذه العائلة', 'olama-registration'),
+                'dashicons-bank'
+            )];
+        }
+
+        $status_map = [
+            'pending'   => ['label' => __('معلق', 'olama-registration'),    'cls' => 'os-hub-badge--orange'],
+            'settled'   => ['label' => __('مُسوَّى', 'olama-registration'), 'cls' => 'os-hub-badge--green'],
+            'cancelled' => ['label' => __('ملغى', 'olama-registration'),    'cls' => 'os-hub-badge--gray'],
+        ];
+
+        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        $html .= '<thead><tr>';
+        $html .= '<th>' . __('رقم الإيصال', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الفئة', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('المبلغ الأصلي', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('المُسوَّى', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('رقم Oracle', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
+        $html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $r) {
+            $s = $status_map[$r->status] ?? ['label' => esc_html($r->status), 'cls' => 'os-hub-badge--gray'];
+            $html .= '<tr>';
+            $html .= '<td><code>' . esc_html($r->receipt_number) . '</code></td>';
+            $html .= '<td>' . esc_html($r->payment_category) . '</td>';
+            $html .= '<td dir="ltr">' . number_format((float)$r->original_amount, 2) . '</td>';
+            $html .= '<td dir="ltr">' . number_format((float)$r->settled_amount, 2) . '</td>';
+            $html .= '<td>' . esc_html($r->oracle_receipt_number ?: '—') . '</td>';
+            $html .= '<td><span class="os-hub-badge ' . $s['cls'] . '">' . $s['label'] . '</span></td>';
+            $html .= '</tr>';
+        }
+
+        $html .= '</tbody></table>';
+
+        return ['html' => $html, 'meta' => ['count' => count($rows)]];
+    }
+
+    // ── HTML Helpers ──────────────────────────────────────────────────────────
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PHASE 4: Add Child (External Customers)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Add a child record to an external customer.
+     *
+     * POST: uid (customer_uid), child_name, grade
+     */
+    public function hub_add_child(): void
+    {
+        $this->hub_guard();
+
+        $uid        = sanitize_text_field($_POST['uid']        ?? '');
+        $child_name = sanitize_text_field($_POST['child_name'] ?? '');
+        $grade      = sanitize_text_field($_POST['grade']      ?? '');
+
+        if (! $uid) {
+            wp_send_json_error(['message' => __('معرف العميل غير صالح.', 'olama-registration')]);
+        }
+
+        if (! $child_name) {
+            wp_send_json_error(['message' => __('اسم الابن مطلوب.', 'olama-registration')]);
+        }
+
+        global $wpdb;
+
+        $customer = $wpdb->get_row($wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+            $uid
+        ));
+
+        if (! $customer) {
+            wp_send_json_error(['message' => __('العميل غير موجود.', 'olama-registration')]);
+        }
+
+        // Generate a simple child UID
+        $child_uid = 'C-' . strtoupper(substr(md5($uid . $child_name . time()), 0, 8));
+
+        $inserted = $wpdb->insert(
+            $wpdb->prefix . 'olama_customer_children',
+            [
+                'customer_id' => (int) $customer->id,
+                'child_uid'   => $child_uid,
+                'child_name'  => $child_name,
+                'grade'       => $grade,
+                'is_active'   => 1,
+            ]
+        );
+
+        if (! $inserted) {
+            wp_send_json_error(['message' => __('حدث خطأ أثناء الحفظ.', 'olama-registration')]);
+        }
+
+        wp_send_json_success([
+            'message'    => __('تمت إضافة الابن بنجاح.', 'olama-registration'),
+            'child_name' => $child_name,
+            'child_uid'  => $child_uid,
+            'grade'      => $grade,
+        ]);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PHASE 3: Interactive Profile Actions
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Save profile edits for family or external customer.
+     *
+     * POST: uid, type ('family'|'external'), + field values
+     */
+    public function hub_save_profile(): void
+    {
+        $this->hub_guard();
+
+        $uid  = sanitize_text_field($_POST['uid']  ?? '');
+        $type = sanitize_key($_POST['type'] ?? 'family');
+
+        if (! $uid) {
+            wp_send_json_error(['message' => __('معرف غير صالح.', 'olama-registration')]);
+        }
+
+        global $wpdb;
+
+        if ($type === 'family') {
+            $data = [
+                'family_name'   => sanitize_text_field($_POST['family_name']   ?? ''),
+                'father_mobile' => sanitize_text_field($_POST['father_mobile'] ?? ''),
+                'mother_mobile' => sanitize_text_field($_POST['mother_mobile'] ?? ''),
+                'address'       => sanitize_text_field($_POST['address']       ?? ''),
+            ];
+
+            if (empty($data['family_name'])) {
+                wp_send_json_error(['message' => __('اسم العائلة مطلوب.', 'olama-registration')]);
+            }
+
+            $updated = $wpdb->update(
+                $wpdb->prefix . 'olama_families',
+                $data,
+                ['family_uid' => $uid]
+            );
+
+            if ($updated === false) {
+                wp_send_json_error(['message' => __('حدث خطأ أثناء الحفظ.', 'olama-registration')]);
+            }
+
+            $row = Olama_Reg_Family::get_family($uid);
+            wp_send_json_success([
+                'message' => __('تم تحديث بيانات العائلة.', 'olama-registration'),
+                'name'    => $row ? $row->family_name : $data['family_name'],
+            ]);
+
+        } else {
+            // External customer — resolve by UID
+            $customer = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+
+            if (! $customer) {
+                wp_send_json_error(['message' => __('العميل غير موجود.', 'olama-registration')]);
+            }
+
+            $data = [
+                'customer_name' => sanitize_text_field($_POST['customer_name'] ?? ''),
+                'phone'         => sanitize_text_field($_POST['phone']         ?? ''),
+                'notes'         => sanitize_textarea_field($_POST['notes']     ?? ''),
+            ];
+
+            if (empty($data['customer_name'])) {
+                wp_send_json_error(['message' => __('اسم العميل مطلوب.', 'olama-registration')]);
+            }
+
+            $updated = $wpdb->update(
+                $wpdb->prefix . 'olama_customers',
+                $data,
+                ['id' => $customer->id]
+            );
+
+            if ($updated === false) {
+                wp_send_json_error(['message' => __('حدث خطأ أثناء الحفظ.', 'olama-registration')]);
+            }
+
+            wp_send_json_success([
+                'message' => __('تم تحديث بيانات العميل.', 'olama-registration'),
+                'name'    => $data['customer_name'],
+            ]);
+        }
+    }
+
+    /**
+     * Toggle active/inactive status for family or customer.
+     *
+     * POST: uid, type ('family'|'external'), active (0|1)
+     */
+    public function hub_toggle_active(): void
+    {
+        $this->hub_guard();
+
+        $uid    = sanitize_text_field($_POST['uid']  ?? '');
+        $type   = sanitize_key($_POST['type']   ?? 'family');
+        $active = (int) ($_POST['active'] ?? 1) ? 0 : 1; // toggle: flip the incoming value
+
+        if (! $uid) {
+            wp_send_json_error(['message' => __('معرف غير صالح.', 'olama-registration')]);
+        }
+
+        global $wpdb;
+
+        if ($type === 'family') {
+            $updated = $wpdb->update(
+                $wpdb->prefix . 'olama_families',
+                ['is_active' => $active],
+                ['family_uid' => $uid]
+            );
+        } else {
+            $customer = $wpdb->get_row($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+
+            $updated = $customer ? $wpdb->update(
+                $wpdb->prefix . 'olama_customers',
+                ['is_active' => $active],
+                ['id' => $customer->id]
+            ) : false;
+        }
+
+        if ($updated === false) {
+            wp_send_json_error(['message' => __('حدث خطأ أثناء تغيير الحالة.', 'olama-registration')]);
+        }
+
+        wp_send_json_success([
+            'message' => $active
+                ? __('تم تفعيل الملف.', 'olama-registration')
+                : __('تم تعطيل الملف.', 'olama-registration'),
+            'is_active' => $active,
+        ]);
+    }
+
+    // ── HTML Helpers ──────────────────────────────────────────────────────────
+
+    private function hub_empty_state(string $message, string $icon = 'dashicons-info-outline'): string
+    {
+        return '<div class="os-hub-notice">'
+             . '<span class="dashicons ' . esc_attr($icon) . '" aria-hidden="true"></span>'
+             . '<p class="os-hub-notice__title">' . esc_html($message) . '</p>'
+             . '</div>';
+    }
+
+    private function hub_tr(string $label, string $value): string
+    {
+        return '<tr><th scope="row" style="width:160px;">' . esc_html($label) . '</th>'
+             . '<td>' . $value . '</td></tr>';
     }
 
 }

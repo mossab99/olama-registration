@@ -26,7 +26,7 @@ $table->prepare_items();
 
 <!-- Search Form -->
 <form method="get" class="olama-reg-search-form">
-    <input type="hidden" name="page" value="olama-registration">
+    <input type="hidden" name="page" value="olama-registration-contacts">
     <input type="hidden" name="view" value="families">
     <?php $table->search_box( __( 'بحث', 'olama-registration' ), 'olama-reg-search' ); ?>
 </form>
@@ -41,7 +41,7 @@ $table->prepare_items();
 <!-- ── EDIT / CREATE VIEW ────────────────────────────────────── -->
 
 <div class="olama-reg-page-header">
-    <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration&view=families' ) ); ?>"
+    <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-contacts&view=families' ) ); ?>"
        class="olama-reg-back-btn">← <?php esc_html_e( 'العودة للقائمة', 'olama-registration' ); ?></a>
     <h1>
         <?php if ( $family ): ?>

@@ -79,13 +79,12 @@ class Olama_Reg_Family_Table extends WP_List_Table {
     protected function column_family_uid( $item ): string {
         $edit_url = add_query_arg( [
             'page'       => 'olama-registration',
-            'action'     => 'edit',
             'family_uid' => $item->family_uid,
         ], admin_url( 'admin.php' ) );
 
         return '<span class="olama-reg-uid-badge">' . esc_html( $item->family_uid ) . '</span>'
              . '<div class="row-actions">'
-             . '<span class="edit"><a href="' . esc_url( $edit_url ) . '">' . __( 'تعديل', 'olama-registration' ) . '</a></span>'
+             . '<span class="edit"><a href="' . esc_url( $edit_url ) . '">' . __( 'فتح', 'olama-registration' ) . '</a></span>'
              . '</div>';
     }
 
@@ -108,8 +107,8 @@ class Olama_Reg_Family_Table extends WP_List_Table {
     }
 
     protected function column_actions_col( $item ): string {
-        $edit_url  = add_query_arg( [ 'page' => 'olama-registration', 'action' => 'edit',  'family_uid' => $item->family_uid ], admin_url( 'admin.php' ) );
-        $print_url = add_query_arg( [ 'page' => 'olama-registration', 'action' => 'print', 'family_uid' => $item->family_uid ], admin_url( 'admin.php' ) );
+        $edit_url  = add_query_arg( [ 'page' => 'olama-registration', 'family_uid' => $item->family_uid ], admin_url( 'admin.php' ) );
+        $print_url = add_query_arg( [ 'page' => 'olama-registration-contacts', 'action' => 'print', 'family_uid' => $item->family_uid ], admin_url( 'admin.php' ) );
 
         return '<a href="' . esc_url( $edit_url ) . '" class="button button-small">' . __( 'فتح', 'olama-registration' ) . '</a> '
              . '<a href="' . esc_url( $print_url ) . '" class="button button-small" target="_blank">' . '🖨️' . '</a> '

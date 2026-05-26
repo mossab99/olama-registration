@@ -35,7 +35,7 @@ $summary  = Olama_Reg_Billing_Invoice::get_customer_invoice_summary( $customer_i
 ?>
 
 <div class="olama-reg-page-header">
-    <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration&view=customers' ) ); ?>"
+    <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-contacts&view=customers' ) ); ?>"
        class="olama-reg-back-btn">← <?php esc_html_e( 'العودة للقائمة', 'olama-registration' ); ?></a>
     <h1>
         <?php esc_html_e( 'ملف العميل المالي', 'olama-registration' ); ?>

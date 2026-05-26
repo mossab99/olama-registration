@@ -118,7 +118,7 @@ $total = Olama_Reg_Customer::count( [ 'search' => $search ] );
                         <?php endif; ?>
                     </td>
                     <td style="text-align:center; white-space:nowrap;">
-                        <a href="<?php echo esc_url( add_query_arg( [ 'action' => 'financial', 'customer_id' => $cust->id ] ) ); ?>"
+                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration&customer_id=' . $cust->id ) ); ?>"
                            class="button button-small"
                            title="<?php esc_attr_e( 'الاستحقاق المالي', 'olama-registration' ); ?>"
                            style="margin-left:3px; background:#fffdf5; border-color:#fef08a; color:#a16207; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0;">

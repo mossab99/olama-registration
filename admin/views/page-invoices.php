@@ -9,6 +9,21 @@ global $wpdb;
 $action = sanitize_text_field( $_GET['action'] ?? '' );
 $id     = absint( $_GET['id'] ?? 0 );
 
+$prefilled_family_uid = sanitize_text_field( $_GET['family_uid'] ?? '' );
+$prefilled_family_name = '';
+$is_family_locked = false;
+
+if ( $prefilled_family_uid ) {
+    $family_row = $wpdb->get_row( $wpdb->prepare(
+        "SELECT family_uid, family_name FROM {$wpdb->prefix}olama_families WHERE family_uid = %s LIMIT 1",
+        $prefilled_family_uid
+    ) );
+    if ( $family_row ) {
+        $prefilled_family_name = $family_row->family_name;
+        $is_family_locked = true;
+    }
+}
+
 // ── PRINT INVOICE MODE ────────────────────────────────────────────────────────
 if ( $action === 'print' && $id ) {
     $invoice = Olama_Reg_Billing_Invoice::get_invoice( $id );
@@ -561,7 +576,16 @@ $_inv_stats = $wpdb->get_row(
                         <div class="olama-reg-grid">
                             <div class="olama-reg-field olama-reg-field--required">
                                 <label for="inv_family_uid"><?php esc_html_e( 'رقم ملف العائلة', 'olama-registration' ); ?></label>
-                                <select id="inv_family_uid" name="family_uid" style="width:100%;" required></select>
+                                <select id="inv_family_uid" name="family_uid" style="width:100%;" required <?php disabled($is_family_locked); ?>>
+                                    <?php if ( $is_family_locked ): ?>
+                                        <option value="<?php echo esc_attr( $prefilled_family_uid ); ?>" selected="selected">
+                                            <?php echo esc_html( $prefilled_family_name . ' (' . $prefilled_family_uid . ')' ); ?>
+                                        </option>
+                                    <?php endif; ?>
+                                </select>
+                                <?php if ($is_family_locked): ?>
+                                    <input type="hidden" name="family_uid" value="<?php echo esc_attr( $prefilled_family_uid ); ?>">
+                                <?php endif; ?>
                             </div>
                             <div class="olama-reg-field">
                                 <label for="inv_student_uid"><?php esc_html_e( 'الطالب المستهدف (اختياري)', 'olama-registration' ); ?></label>

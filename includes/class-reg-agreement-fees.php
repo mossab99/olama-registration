@@ -18,6 +18,7 @@ class Olama_Reg_Agreement_Fees {
 
         $defaults = [
             'agreement_id' => $agreement_id,
+            'child_id'     => null,
             'fee_category' => 'general',
             'label'        => '',
             'amount'       => 0,
@@ -165,19 +166,13 @@ class Olama_Reg_Agreement_Fees {
             'paid_status'  => 'unpaid'
         ] );
 
-        $agreement = Olama_Reg_Agreement::get( $agreement_id );
-        $count = 1;
-        if ( $agreement && ! empty( $agreement->participant_ids_array ) ) {
-            $count = max( 1, count( $agreement->participant_ids_array ) );
-        }
-
         $sort_order = 0;
         foreach ( $template->items as $item ) {
             $base_amount = (float) ( $item['amount'] ?? 0 );
             self::add( $agreement_id, [
                 'fee_category' => 'general',
                 'label'        => $item['description'] ?? '',
-                'amount'       => $base_amount * $count,
+                'amount'       => $base_amount,
                 'discount'     => 0,
                 'due_date'     => null,
                 'sort_order'   => $sort_order++,

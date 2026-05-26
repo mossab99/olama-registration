@@ -120,134 +120,148 @@ if ($agreement->payer_type === 'customer') {
 
         <div class="os-print-section">
             <div class="section-title"><?php esc_html_e('الرسوم المستحقة', 'olama-registration'); ?></div>
-            <?php if ($fees): ?>
-                <table class="items-table">
-                    <thead>
-                        <tr>
-                            <th><?php esc_html_e('الرقم', 'olama-registration'); ?></th>
-                            <th><?php esc_html_e('البيان', 'olama-registration'); ?></th>
-                            <th><?php esc_html_e('تاريخ الاستحقاق', 'olama-registration'); ?></th>
-                            <th><?php esc_html_e('المبلغ (الأساسي)', 'olama-registration'); ?></th>
-                            <th><?php esc_html_e('الخصم', 'olama-registration'); ?></th>
-                            <th><?php esc_html_e('المبلغ (الصافي)', 'olama-registration'); ?></th>
-                            <th><?php esc_html_e('رقم الفاتورة', 'olama-registration'); ?></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php
-                        $i = 1;
-                        foreach ($fees as $fee):
+            <?php 
+            if ($fees): 
+                $grouped_fees = [];
+                foreach ($fees as $fee) {
+                    $child_id = $fee->child_id ?: 0;
+                    if (!isset($grouped_fees[$child_id])) {
+                        $grouped_fees[$child_id] = [
+                            'child_name' => $child_id ? Olama_Reg_Agreement::resolve_participant_name($agreement->participant_type, (string)$child_id) : esc_html__('رسوم عامة / بدون تحديد مشترك', 'olama-registration'),
+                            'items' => []
+                        ];
+                    }
+                    $grouped_fees[$child_id]['items'][] = $fee;
+                }
+
+                foreach ($grouped_fees as $child_id => $group):
+                    ?>
+                    <h4 class="child-fees-title" style="margin-top: 20px; font-size:16px; color:#1a1a2e; border-right: 3px solid #E8920A; padding-right: 8px;">
+                        <?php echo esc_html($group['child_name']); ?>
+                    </h4>
+                    <table class="items-table">
+                        <thead>
+                            <tr>
+                                <th><?php esc_html_e('الرقم', 'olama-registration'); ?></th>
+                                <th><?php esc_html_e('البيان', 'olama-registration'); ?></th>
+                                <th><?php esc_html_e('تاريخ الاستحقاق', 'olama-registration'); ?></th>
+                                <th><?php esc_html_e('المبلغ (الأساسي)', 'olama-registration'); ?></th>
+                                <th><?php esc_html_e('الخصم', 'olama-registration'); ?></th>
+                                <th><?php esc_html_e('المبلغ (الصافي)', 'olama-registration'); ?></th>
+                                <th><?php esc_html_e('رقم الفاتورة', 'olama-registration'); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $i = 1;
+                            $child_net_total = 0;
+                            foreach ($group['items'] as $fee):
+                                $child_net_total += (float)$fee->net_amount;
+                                ?>
+                                <tr>
+                                    <td style="text-align:center;"><?php echo $i++; ?></td>
+                                    <td><?php echo esc_html($fee->label ?: $fee->fee_category); ?></td>
+                                    <td><?php echo esc_html($fee->due_date ?: '-'); ?></td>
+                                    <td style="text-align:left; vertical-align:top;">
+                                        <?php 
+                                        $showed_breakdown = false;
+                                        if (is_numeric($fee->fee_category) && $fee->fee_category > 0) {
+                                            $row_template = Olama_Reg_Billing_Fees::get_template((int)$fee->fee_category);
+                                            if ($row_template && !empty($row_template->items)) {
+                                                $showed_breakdown = true;
+                                                echo '<div style="font-size:12px; margin-bottom:5px;">';
+                                                foreach ($row_template->items as $item) {
+                                                    $desc = esc_html($item['description'] ?? '');
+                                                    $amt = number_format((float)($item['amount'] ?? 0), 3);
+                                                    echo "<div style='display:flex; justify-content:space-between;'><span>{$desc}:</span> <span>{$amt}</span></div>";
+                                                }
+                                                echo '<div style="border-top:1px dashed #ccc; margin-top:4px; padding-top:4px; display:flex; justify-content:space-between;"><strong>' . esc_html__('الإجمالي:', 'olama-registration') . '</strong> <strong>' . number_format((float) $fee->amount, 3) . '</strong></div>';
+                                                echo '</div>';
+                                            }
+                                        }
+                                        if (!$showed_breakdown) {
+                                            echo number_format((float) $fee->amount, 3); 
+                                        }
+                                        ?>
+                                    </td>
+                                    <td style="text-align:left;"><?php echo number_format((float) $fee->discount, 3); ?></td>
+                                    <td style="text-align:left;"><?php echo number_format((float) $fee->net_amount, 3); ?></td>
+                                    <td style="text-align:center;">
+                                        <?php 
+                                        if ($fee->paid_status === 'paid' && $fee->invoice_id) {
+                                            global $wpdb;
+                                            $invoice_num = $wpdb->get_var($wpdb->prepare("SELECT invoice_number FROM {$wpdb->prefix}olama_invoices WHERE id = %d", $fee->invoice_id));
+                                            echo esc_html($invoice_num ?: '-');
+                                        } else {
+                                            echo '-';
+                                        }
+                                        ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th colspan="5" style="text-align:left;">
+                                    <?php esc_html_e('إجمالي رسوم المشترك:', 'olama-registration'); ?></th>
+                                <th style="text-align:left;">
+                                    <?php echo number_format($child_net_total, 3) . ' JD'; ?>
+                                </th>
+                                <th></th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                <?php endforeach; ?>
+
+                <!-- Final aggregated total amount due for the entire agreement -->
+                <table class="totals-table" style="margin-top: 20px;">
+                    <tr class="grand-total">
+                        <td style="font-weight:800;"><?php esc_html_e('الإجمالي الكلي للعقد:', 'olama-registration'); ?></td>
+                        <td style="text-align:left; font-weight:800;"><?php echo number_format((float) $agreement->total_amount, 3); ?> JD</td>
+                    </tr>
+                    <?php 
+                    $actual_template_id = $agreement->template_id;
+                    if (empty($actual_template_id) && !empty($fees)) {
+                        // Try to find template id from fees
+                        foreach ($fees as $fee) {
+                            if (is_numeric($fee->fee_category) && $fee->fee_category > 0) {
+                                $actual_template_id = (int)$fee->fee_category;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!empty($actual_template_id)) {
+                        $fee_template = Olama_Reg_Billing_Fees::get_template($actual_template_id);
+                        if ($fee_template) {
                             ?>
                             <tr>
-                                <td style="text-align:center;"><?php echo $i++; ?></td>
-                                <td><?php echo esc_html($fee->label ?: $fee->fee_category); ?></td>
-                                <td><?php echo esc_html($fee->due_date ?: '-'); ?></td>
-                                <td style="text-align:left; vertical-align:top;">
+                                <td colspan="2" style="text-align:center; font-weight:normal; background-color: #f9f9f9; border:none; padding:10px;">
                                     <?php 
-                                    $showed_breakdown = false;
-                                    if (is_numeric($fee->fee_category) && $fee->fee_category > 0) {
-                                        $row_template = Olama_Reg_Billing_Fees::get_template((int)$fee->fee_category);
-                                        if ($row_template && !empty($row_template->items)) {
-                                            $showed_breakdown = true;
-                                            echo '<div style="font-size:12px; margin-bottom:5px;">';
-                                            foreach ($row_template->items as $item) {
-                                                $desc = esc_html($item['description'] ?? '');
-                                                $amt = number_format((float)($item['amount'] ?? 0), 3);
-                                                echo "<div style='display:flex; justify-content:space-between;'><span>{$desc}:</span> <span>{$amt}</span></div>";
-                                            }
-                                            echo '<div style="border-top:1px dashed #ccc; margin-top:4px; padding-top:4px; display:flex; justify-content:space-between;"><strong>' . esc_html__('الإجمالي:', 'olama-registration') . '</strong> <strong>' . number_format((float) $fee->amount, 3) . '</strong></div>';
-                                            echo '</div>';
-                                        }
-                                    }
-                                    if (!$showed_breakdown) {
-                                        echo number_format((float) $fee->amount, 3); 
-                                    }
-                                    ?>
-                                </td>
-                                <td style="text-align:left;"><?php echo number_format((float) $fee->discount, 3); ?></td>
-                                <td style="text-align:left;"><?php echo number_format((float) $fee->net_amount, 3); ?></td>
-                                <td style="text-align:center;">
-                                    <?php 
-                                    if ($fee->paid_status === 'paid' && $fee->invoice_id) {
-                                        global $wpdb;
-                                        $invoice_num = $wpdb->get_var($wpdb->prepare("SELECT invoice_number FROM {$wpdb->prefix}olama_invoices WHERE id = %d", $fee->invoice_id));
-                                        echo esc_html($invoice_num ?: '-');
+                                    $template_name = esc_html($fee_template->template_name);
+                                    $installments = (int)$fee_template->installments;
+                                    $total_amount_formatted = number_format((float) $agreement->total_amount, 3);
+                                    
+                                    if ($installments > 1) {
+                                        echo sprintf(
+                                            esc_html__('بناءً على نموذج الرسوم (%s): مبلغ %s دينار مقسمة على %d دفعات.', 'olama-registration'),
+                                            $template_name,
+                                            $total_amount_formatted,
+                                            $installments
+                                        );
                                     } else {
-                                        echo '-';
+                                        echo sprintf(
+                                            esc_html__('بناءً على نموذج الرسوم (%s)', 'olama-registration'),
+                                            $template_name
+                                        );
                                     }
                                     ?>
                                 </td>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <th colspan="5" style="text-align:left;">
-                                <?php esc_html_e('الإجمالي للفرد الواحد:', 'olama-registration'); ?></th>
-                            <th style="text-align:left;">
-                                <?php 
-                                    $per_child_total = 0;
-                                    foreach($fees as $f) { $per_child_total += (float)$f->net_amount; }
-                                    echo number_format($per_child_total, 3) . ' JD';
-                                ?>
-                            </th>
-                            <th></th>
-                        </tr>
-                        <tr>
-                            <th colspan="5" style="text-align:left;">
-                                <?php 
-                                $num_participants = count($agreement->participant_ids_array ?: []);
-                                if ($num_participants === 0) $num_participants = 1;
-                                echo sprintf(esc_html__('الإجمالي الكلي لعدد (%d) مشترك:', 'olama-registration'), $num_participants); 
-                                ?>
-                            </th>
-                            <th style="text-align:left;"><?php echo number_format((float) $agreement->total_amount, 3); ?> JD</th>
-                            <th></th>
-                        </tr>
-                        <?php 
-                        $actual_template_id = $agreement->template_id;
-                        if (empty($actual_template_id) && !empty($fees)) {
-                            // Try to find template id from fees
-                            foreach ($fees as $fee) {
-                                if (is_numeric($fee->fee_category) && $fee->fee_category > 0) {
-                                    $actual_template_id = (int)$fee->fee_category;
-                                    break;
-                                }
-                            }
+                            <?php
                         }
-
-                        if (!empty($actual_template_id)) {
-                            $fee_template = Olama_Reg_Billing_Fees::get_template($actual_template_id);
-                            if ($fee_template) {
-                                ?>
-                                <tr>
-                                    <th colspan="7" style="text-align:center; font-weight:normal; background-color: #f9f9f9;">
-                                        <?php 
-                                        $template_name = esc_html($fee_template->template_name);
-                                        $installments = (int)$fee_template->installments;
-                                        $total_amount_formatted = number_format((float) $agreement->total_amount, 3);
-                                        
-                                        if ($installments > 1) {
-                                            echo sprintf(
-                                                esc_html__('بناءً على نموذج الرسوم (%s): مبلغ %s دينار مقسمة على %d دفعات.', 'olama-registration'),
-                                                $template_name,
-                                                $total_amount_formatted,
-                                                $installments
-                                            );
-                                        } else {
-                                            echo sprintf(
-                                                esc_html__('بناءً على نموذج الرسوم (%s)', 'olama-registration'),
-                                                $template_name
-                                            );
-                                        }
-                                        ?>
-                                    </th>
-                                </tr>
-                                <?php
-                            }
-                        }
-                        ?>
-                    </tfoot>
+                    }
+                    ?>
                 </table>
             <?php else: ?>
                 <p><?php esc_html_e('لا يوجد رسوم مسجلة لهذا العقد.', 'olama-registration'); ?></p>

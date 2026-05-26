@@ -370,6 +370,7 @@ class Olama_Reg_Activator {
         $sql_fees = "CREATE TABLE {$wpdb->prefix}olama_agreement_fees (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             agreement_id BIGINT UNSIGNED NOT NULL,
+            child_id VARCHAR(50) DEFAULT NULL,
             fee_category VARCHAR(60) NOT NULL,
             label VARCHAR(255) NOT NULL,
             amount DECIMAL(12,3) NOT NULL DEFAULT 0,
@@ -446,5 +447,13 @@ class Olama_Reg_Activator {
         dbDelta( $sql_tpl_fees );
         dbDelta( $sql_tpl_clauses );
         dbDelta( $sql_clause_bank );
+
+        // Safely add child_id column to existing table if not present
+        $existing_fees = $wpdb->get_col( "DESCRIBE {$wpdb->prefix}olama_agreement_fees", 0 );
+        if ( ! empty( $existing_fees ) && ! in_array( 'child_id', (array) $existing_fees, true ) ) {
+            $wpdb->query( "ALTER TABLE {$wpdb->prefix}olama_agreement_fees ADD COLUMN `child_id` VARCHAR(50) DEFAULT NULL AFTER `agreement_id`" );
+        } else {
+            $wpdb->query( "ALTER TABLE {$wpdb->prefix}olama_agreement_fees MODIFY COLUMN `child_id` VARCHAR(50) DEFAULT NULL" );
+        }
     }
 }

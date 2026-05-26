@@ -635,7 +635,7 @@
     });
 
     $(document).on('click', '.olama-reg-modal-close', function () {
-        $('#olama-reg-invoice-modal').fadeOut(200);
+        $(this).closest('.olama-reg-modal').fadeOut(200);
     });
 
     $(document).on('change', '#inv_family_uid', function () {
@@ -1691,8 +1691,14 @@
                     if (res.success) {
                         custNotice('تم إضافة العميل بنجاح.');
                         $('#cust-modal-overlay').hide();
-                        // Reload page to show new customer
-                        setTimeout(() => window.location.reload(), 800);
+                        // Reload page to show new customer contextually if on dashboard
+                        if ($('#os-hub-data').length) {
+                            setTimeout(() => {
+                                window.location.href = window.location.pathname + '?page=olama-registration&customer_uid=' + encodeURIComponent(res.data.customer_uid || '');
+                            }, 800);
+                        } else {
+                            setTimeout(() => window.location.reload(), 800);
+                        }
                     } else {
                         custNotice(res.data?.message || R.strings.error, true);
                     }

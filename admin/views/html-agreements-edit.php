@@ -10,6 +10,7 @@ if (!defined('ABSPATH')) {
 $id = (int) ($_GET['id'] ?? 0);
 $is_new = empty($id);
 $agreement = null;
+$is_context_locked = false;
 
 if (!$is_new) {
     $agreement = Olama_Reg_Agreement::get($id);
@@ -18,12 +19,43 @@ if (!$is_new) {
     }
 } else {
     // Defaults for new
+    $payer_type = sanitize_text_field($_GET['payer_type'] ?? 'customer');
+    $payer_uid = sanitize_text_field($_GET['payer_uid'] ?? '');
+    $payer_id = '';
+    $payer_name = '';
+
+    if (!empty($payer_uid)) {
+        global $wpdb;
+        if ($payer_type === 'customer') {
+            $payer_row = $wpdb->get_row($wpdb->prepare(
+                "SELECT id, customer_name FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s OR id = %d LIMIT 1",
+                $payer_uid,
+                is_numeric($payer_uid) ? intval($payer_uid) : 0
+            ));
+            if ($payer_row) {
+                $payer_id = $payer_row->id;
+                $payer_name = $payer_row->customer_name;
+                $is_context_locked = true;
+            }
+        } elseif ($payer_type === 'family') {
+            $payer_row = $wpdb->get_row($wpdb->prepare(
+                "SELECT family_uid, family_name FROM {$wpdb->prefix}olama_families WHERE family_uid = %s LIMIT 1",
+                $payer_uid
+            ));
+            if ($payer_row) {
+                $payer_id = $payer_row->family_uid;
+                $payer_name = $payer_row->family_name;
+                $is_context_locked = true;
+            }
+        }
+    }
+
     $agreement = (object) [
         'id' => 0,
         'agreement_number' => __('تلقائي', 'olama-registration'),
-        'payer_type' => 'customer',
-        'payer_id' => '',
-        'participant_type' => 'child',
+        'payer_type' => $payer_type,
+        'payer_id' => $payer_id,
+        'participant_type' => ($payer_type === 'family') ? 'student' : 'child',
         'participant_id' => '',
         'activity_type' => '',
         'academic_year_id' => 0,
@@ -32,13 +64,35 @@ if (!$is_new) {
         'status' => 'draft',
         'notes' => '',
         'total_amount' => 0,
-        'payer_name' => '',
+        'payer_name' => $payer_name,
         'participant_name' => '',
         'template_id' => 0,
     ];
 }
 
+$payer_children_json = '[]';
+$payer_children = [];
+if ($agreement && $agreement->payer_id) {
+    global $wpdb;
+    if ($agreement->payer_type === 'customer' && is_numeric($agreement->payer_id)) {
+        $table = $wpdb->prefix . 'olama_customer_children';
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT id, child_name AS text FROM {$table} WHERE customer_id = %d AND is_active = 1", (int) $agreement->payer_id));
+        foreach ($rows as $r) {
+            $payer_children[] = ['id' => (int) $r->id, 'text' => $r->text];
+        }
+    } elseif ($agreement->payer_type === 'family' && $agreement->payer_id) {
+        $table = $wpdb->prefix . 'olama_students';
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT student_uid AS id, student_name AS text FROM {$table} WHERE family_id = %s", $agreement->payer_id));
+        foreach ($rows as $r) {
+            $payer_children[] = ['id' => $r->id, 'text' => $r->text];
+        }
+    }
+    $payer_children_json = wp_json_encode($payer_children);
+}
 ?>
+<script>
+window.payerChildren = <?php echo $payer_children_json; ?>;
+</script>
 <div class="olama-reg-wrap os-wrap" id="os-agreement-app" data-id="<?php echo esc_attr($agreement->id); ?>">
     <div class="olama-reg-page-header">
         <div style="display:flex; align-items:center; gap:15px;">
@@ -77,41 +131,30 @@ if (!$is_new) {
                         <label><?php esc_html_e('نوع الجهة الدافعة', 'olama-registration'); ?></label>
                         <div style="margin-top:8px;">
                             <label style="margin-left: 20px;">
-                                <input type="radio" name="payer_type" value="customer" <?php checked($agreement->payer_type, 'customer'); ?>>
+                                <input type="radio" name="payer_type" value="customer" <?php checked($agreement->payer_type, 'customer'); ?> <?php disabled($is_context_locked); ?>>
                                 <?php esc_html_e('عميل (Walk-in)', 'olama-registration'); ?>
                             </label>
                             <label>
-                                <input type="radio" name="payer_type" value="family" <?php checked($agreement->payer_type, 'family'); ?>>
+                                <input type="radio" name="payer_type" value="family" <?php checked($agreement->payer_type, 'family'); ?> <?php disabled($is_context_locked); ?>>
                                 <?php esc_html_e('عائلة (مدرسة)', 'olama-registration'); ?>
                             </label>
+                            <?php if ($is_context_locked): ?>
+                                <input type="hidden" name="payer_type" value="<?php echo esc_attr($agreement->payer_type); ?>">
+                            <?php endif; ?>
                         </div>
                     </div>
                     
                     <div class="olama-reg-field olama-reg-field--required">
                         <label><?php esc_html_e('الجهة الدافعة', 'olama-registration'); ?></label>
-                        <select name="payer_id" id="os-agr-payer" style="width: 100%;" required>
+                        <select name="payer_id" id="os-agr-payer" style="width: 100%;" required <?php disabled($is_context_locked); ?>>
                             <?php if ($agreement->payer_id): ?>
                                 <option value="<?php echo esc_attr($agreement->payer_id); ?>" selected="selected">
                                     <?php echo esc_html($agreement->payer_name); ?></option>
                             <?php endif; ?>
                         </select>
-                    </div>
-
-                    <div class="olama-reg-field olama-reg-field--required">
-                        <label><?php esc_html_e('المشترك', 'olama-registration'); ?></label>
-                        <select name="participant_id[]" id="os-agr-participant" style="width: 100%;" required multiple="multiple">
-                            <?php
-                            if (!empty($agreement->participant_ids_array)) {
-                                foreach ($agreement->participant_ids_array as $pid) {
-                                    if ($pid > 0 && !empty($agreement->participant_names[$pid])) {
-                                        echo '<option value="' . esc_attr($pid) . '" selected>' . esc_html($agreement->participant_names[$pid]) . '</option>';
-                                    }
-                                }
-                            } elseif ($agreement->participant_id > 0 && !empty($agreement->participant_name)) {
-                                echo '<option value="' . esc_attr($agreement->participant_id) . '" selected>' . esc_html($agreement->participant_name) . '</option>';
-                            }
-                            ?>
-                        </select>
+                        <?php if ($is_context_locked): ?>
+                            <input type="hidden" name="payer_id" value="<?php echo esc_attr($agreement->payer_id); ?>">
+                        <?php endif; ?>
                     </div>
 
                     <div class="olama-reg-field olama-reg-field--required">
@@ -183,13 +226,14 @@ if (!$is_new) {
                         <thead>
                             <tr>
                                 <th style="width: 15%;"><?php esc_html_e('نوع الرسم', 'olama-registration'); ?></th>
-                                <th style="width: 25%;"><?php esc_html_e('البيان', 'olama-registration'); ?></th>
-                                <th style="width: 15%;"><?php esc_html_e('المبلغ', 'olama-registration'); ?></th>
+                                <th style="width: 15%;"><?php esc_html_e('المشترك', 'olama-registration'); ?></th>
+                                <th style="width: 20%;"><?php esc_html_e('البيان', 'olama-registration'); ?></th>
+                                <th style="width: 12%;"><?php esc_html_e('المبلغ', 'olama-registration'); ?></th>
                                 <th style="width: 10%;"><?php esc_html_e('الخصم', 'olama-registration'); ?></th>
                                 <th style="width: 10%;"><?php esc_html_e('الصافي', 'olama-registration'); ?></th>
-                                <th style="width: 15%;"><?php esc_html_e('تاريخ الاستحقاق', 'olama-registration'); ?></th>
-                                <th style="width: 10%;"><?php esc_html_e('الحالة', 'olama-registration'); ?></th>
-                                <th style="width: 10%;"></th>
+                                <th style="width: 12%;"><?php esc_html_e('تاريخ الاستحقاق', 'olama-registration'); ?></th>
+                                <th style="width: 8%;"><?php esc_html_e('الحالة', 'olama-registration'); ?></th>
+                                <th style="width: 8%;"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -222,6 +266,19 @@ if (!$is_new) {
                                             // Keep custom value if not found
                                             if ($fee->fee_category !== 'general' && !is_numeric($fee->fee_category)) {
                                                 echo '<option value="' . esc_attr($fee->fee_category) . '" selected>' . esc_html($fee->fee_category) . '</option>';
+                                            }
+                                            ?>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <select name="child_id" style="width:100%" class="os-agr-fee-child-select" <?php disabled($is_locked); ?>>
+                                            <option value=""><?php esc_html_e('اختر المشترك', 'olama-registration'); ?></option>
+                                            <?php
+                                            if (!empty($payer_children)) {
+                                                foreach ($payer_children as $child) {
+                                                    $selected = selected($fee->child_id, $child['id'], false);
+                                                    echo '<option value="' . esc_attr($child['id']) . '" ' . $selected . '>' . esc_html($child['text']) . '</option>';
+                                                }
                                             }
                                             ?>
                                         </select>
@@ -295,29 +352,8 @@ if (!$is_new) {
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="4" style="text-align:left;">
-                                <strong><?php esc_html_e('الإجمالي للفرد الواحد:', 'olama-registration'); ?></strong></td>
-                            <td colspan="4"><strong><span
-                                        id="os-agr-per-child-total">
-                                        <?php 
-                                            $per_child_total = 0;
-                                            if (!empty($fees)) {
-                                                foreach($fees as $f) { $per_child_total += (float)$f->net_amount; }
-                                            }
-                                            echo number_format($per_child_total, 3);
-                                        ?>
-                                        </span>
-                                    JD</strong></td>
-                        </tr>
-                        <tr>
-                            <td colspan="4" style="text-align:left;">
-                                <strong>
-                                <?php 
-                                $num_participants = count($agreement->participant_ids_array ?: []);
-                                if ($num_participants === 0) $num_participants = 1;
-                                echo sprintf(esc_html__('الإجمالي الكلي لعدد (%d) مشترك:', 'olama-registration'), $num_participants); 
-                                ?>
-                                </strong></td>
+                            <td colspan="5" style="text-align:left;">
+                                <strong><?php esc_html_e('الإجمالي الكلي للعقد:', 'olama-registration'); ?></strong></td>
                             <td colspan="4"><strong><span
                                         id="os-agr-total-label"><?php echo number_format((float) $agreement->total_amount, 3); ?></span>
                                     JD</strong></td>
@@ -338,7 +374,7 @@ if (!$is_new) {
                             if ($fee_template) {
                                 ?>
                                 <tr>
-                                    <td colspan="8" style="text-align:center; font-weight:normal; background-color: #f9f9f9;">
+                                    <td colspan="9" style="text-align:center; font-weight:normal; background-color: #f9f9f9;">
                                         <?php 
                                         $template_name = esc_html($fee_template->template_name);
                                         $installments = (int)$fee_template->installments;
@@ -366,24 +402,7 @@ if (!$is_new) {
                         ?>
                     </tfoot>
                 </table>
-                <div style="margin-top: 15px;">
-                    <button type="button" class="button"
-                        id="os-agr-add-fee-row"><?php esc_html_e('إضافة بند رسوم', 'olama-registration'); ?></button>
-                    <?php
-                    $has_unpaid = false;
-                    if (!empty($fees)) {
-                        foreach ($fees as $f) {
-                            if ($f->paid_status === 'unpaid') {
-                                $has_unpaid = true;
-                                break;
-                            }
-                        }
-                    }
-                    ?>
-                    <button type="button" class="button button-primary" id="os-agr-open-invoice-modal"
-                        data-status="<?php echo esc_attr($agreement->status); ?>"
-                        data-has-unpaid="<?php echo $has_unpaid ? '1' : '0'; ?>"
-                </table>
+
                 <div style="margin-top: 20px; display:flex; justify-content:space-between; align-items:center;">
                     <button type="button" class="olama-reg-btn olama-reg-btn--secondary"
                         id="os-agr-add-fee-row"><span class="dashicons dashicons-plus" style="margin-top:4px;"></span> <?php esc_html_e('إضافة بند رسوم', 'olama-registration'); ?></button>
@@ -419,6 +438,18 @@ if (!$is_new) {
                                             $total += (float) ($it['amount'] ?? 0);
                                         }
                                         echo '<option value="' . esc_attr($tpl->id) . '" data-name="' . esc_attr($tpl->template_name) . '" data-amount="' . esc_attr($total) . '">' . esc_html($tpl->template_name) . '</option>';
+                                    }
+                                    ?>
+                                </select>
+                            </td>
+                            <td>
+                                <select name="child_id" style="width:100%" class="os-agr-fee-child-select">
+                                    <option value=""><?php esc_html_e('اختر المشترك', 'olama-registration'); ?></option>
+                                    <?php
+                                    if (!empty($payer_children)) {
+                                        foreach ($payer_children as $child) {
+                                            echo '<option value="' . esc_attr($child['id']) . '">' . esc_html($child['text']) . '</option>';
+                                        }
                                     }
                                     ?>
                                 </select>

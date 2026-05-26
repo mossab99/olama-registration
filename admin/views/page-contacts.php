@@ -14,13 +14,13 @@ $active_view = sanitize_text_field( $_GET['view'] ?? 'families' );
     </h1>
 
     <h2 class="nav-tab-wrapper olama-reg-tabs" style="margin-bottom: 20px;">
-        <a href="?page=olama-registration&view=families" class="nav-tab <?php echo $active_view === 'families' ? 'nav-tab-active' : ''; ?>">
+        <a href="?page=olama-registration-contacts&view=families" class="nav-tab <?php echo $active_view === 'families' ? 'nav-tab-active' : ''; ?>">
             <span class="dashicons dashicons-groups" style="line-height:1.5;"></span> العائلات
         </a>
-        <a href="?page=olama-registration&view=students" class="nav-tab <?php echo $active_view === 'students' ? 'nav-tab-active' : ''; ?>">
+        <a href="?page=olama-registration-contacts&view=students" class="nav-tab <?php echo $active_view === 'students' ? 'nav-tab-active' : ''; ?>">
             <span class="dashicons dashicons-welcome-learn-more" style="line-height:1.5;"></span> الطلاب
         </a>
-        <a href="?page=olama-registration&view=customers" class="nav-tab <?php echo $active_view === 'customers' ? 'nav-tab-active' : ''; ?>">
+        <a href="?page=olama-registration-contacts&view=customers" class="nav-tab <?php echo $active_view === 'customers' ? 'nav-tab-active' : ''; ?>">
             <span class="dashicons dashicons-businessman" style="line-height:1.5;"></span> العملاء الخارجيين
         </a>
     </h2>

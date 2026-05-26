@@ -21,9 +21,18 @@ class Olama_Reg_Admin {
             __( 'المالية', 'olama-registration' ),
             'olama_access_registration',
             'olama-registration',
-            [ $this, 'render_families' ],
+            [ $this, 'render_hub' ],
             'dashicons-money-alt',
             26
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Customer Hub', 'olama-registration' ),
+            __( 'لوحة الخدمات', 'olama-registration' ),
+            'olama_manage_registration_families',
+            'olama-registration',
+            [ $this, 'render_hub' ]
         );
 
         add_submenu_page(
@@ -31,7 +40,7 @@ class Olama_Reg_Admin {
             __( 'Contacts', 'olama-registration' ),
             __( 'جهات الاتصال', 'olama-registration' ),
             'olama_manage_registration_families',
-            'olama-registration',
+            'olama-registration-contacts',
             [ $this, 'render_families' ]
         );
 
@@ -212,12 +221,36 @@ class Olama_Reg_Admin {
         include OLAMA_REG_PATH . 'admin/views/page-settings.php';
     }
 
+    public function render_hub(): void {
+        if ( ! current_user_can( 'olama_manage_registration_families' ) && ! current_user_can( 'manage_options' ) ) {
+            wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        }
+        include OLAMA_REG_PATH . 'admin/views/dashboard/customer-hub.php';
+    }
+
     // ── Assets ────────────────────────────────────────────────────────────────
 
     public function enqueue_assets( string $hook ): void {
 
         if ( strpos( $hook, 'olama-registration' ) === false ) {
             return;
+        }
+
+        // ── Hub-only assets ───────────────────────────────────────────────────
+        if ( isset( $_GET['page'] ) && $_GET['page'] === 'olama-registration' ) {
+            wp_enqueue_style(
+                'os-hub',
+                OLAMA_REG_URL . 'assets/css/os-hub.css',
+                [ 'olama-reg' ],
+                OLAMA_REG_VERSION
+            );
+            wp_enqueue_script(
+                'os-hub',
+                OLAMA_REG_URL . 'assets/js/os-hub.js',
+                [ 'jquery' ],
+                OLAMA_REG_VERSION,
+                true
+            );
         }
 
         // Select2
