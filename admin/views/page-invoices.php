@@ -788,6 +788,25 @@ $_inv_stats = $wpdb->get_row(
                     </div>
                 </div>
 
+                <!-- Payments History (سجل الدفعات السابقة) -->
+                <div class="olama-reg-section" id="drawer-payments-section" style="display:none;">
+                    <h3 class="olama-reg-section-title"><?php esc_html_e( 'سجل الدفعات السابقة (السندات المرتبطة)', 'olama-registration' ); ?></h3>
+                    <div class="olama-reg-table-wrap">
+                        <table class="olama-reg-fin-table" id="drawer-payments-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:90px;"><?php esc_html_e( 'رقم السند', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'تاريخ الدفع', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'المبلغ المدفوع', 'olama-registration' ); ?></th>
+                                    <th><?php esc_html_e( 'المرجع', 'olama-registration' ); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
             </div>
 
             <div class="olama-reg-form-actions" style="justify-content:flex-end;">

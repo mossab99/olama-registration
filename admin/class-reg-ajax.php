@@ -544,6 +544,12 @@ class Olama_Reg_Ajax
             wp_send_json_error(['message' => __('Invoice not found.', 'olama-registration')]);
         }
 
+        if (class_exists('Olama_Reg_Billing_Payment')) {
+            $invoice->payments = Olama_Reg_Billing_Payment::get_invoice_payments($id);
+        } else {
+            $invoice->payments = [];
+        }
+
         wp_send_json_success(['invoice' => $invoice]);
     }
 
@@ -1877,7 +1883,7 @@ class Olama_Reg_Ajax
 
             // Linked invoices
             $invoices = $wpdb->get_results($wpdb->prepare(
-                "SELECT id, invoice_number FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d",
+                "SELECT id, invoice_number, status, balance FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d",
                 $r->id
             ));
             $invoice_links = [];
@@ -1906,6 +1912,21 @@ class Olama_Reg_Ajax
             // Actions list
             $actions_html = '<a href="#" class="button button-small os-hub-edit-agreement" data-id="' . esc_attr($r->id) . '" style="margin-left: 4px;">' . __('تعديل', 'olama-registration') . '</a>';
             $actions_html .= '<a href="' . esc_url($print_url) . '" target="_blank" class="button button-small" style="margin-left: 4px;">' . __('طباعة', 'olama-registration') . '</a>';
+
+            // View / Pay Invoice buttons section on a new line (ALWAYS shown if linked invoices exist)
+            if (!empty($invoices)) {
+                $actions_html .= '<div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #cbd5e1; display: flex; flex-direction: column; gap: 4px;">';
+                foreach ($invoices as $inv) {
+                    // View Invoice button (always)
+                    $actions_html .= '<button type="button" class="button button-small olama-reg-view-invoice-btn" data-id="' . esc_attr($inv->id) . '" title="' . esc_attr__('عرض الفاتورة', 'olama-registration') . '" style="background:#0284c7; border-color:#0284c7; color:#fff; display: block; width: 100%; text-align: center; justify-content: center; font-size: 11px; margin-bottom: 2px;">' . sprintf(__('عرض %s', 'olama-registration'), $inv->invoice_number) . '</button>';
+                    
+                    // Pay button (only if unpaid/partially paid)
+                    if ((float)$inv->balance > 0 && $inv->status !== 'cancelled' && $inv->status !== 'draft') {
+                        $actions_html .= '<button type="button" class="button button-small os-hub-pay-invoice-btn" data-id="' . esc_attr($inv->id) . '" title="' . esc_attr__('دفع الفاتورة', 'olama-registration') . '" style="background:#16a34a; border-color:#16a34a; color:#fff; display: block; width: 100%; text-align: center; justify-content: center; font-size: 11px; margin-bottom: 4px;">' . sprintf(__('دفع %s', 'olama-registration'), $inv->invoice_number) . '</button>';
+                    }
+                }
+                $actions_html .= '</div>';
+            }
 
             $has_invoices = (int) $wpdb->get_var($wpdb->prepare(
                 "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",

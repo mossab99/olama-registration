@@ -899,6 +899,39 @@
                         });
                     }
 
+                    // Populate payments (سجل الدفعات السابقة)
+                    const $paySection = $('#drawer-payments-section');
+                    const $payBody = $('#drawer-payments-table tbody');
+                    $payBody.empty();
+                    
+                    if (inv.payments && inv.payments.length) {
+                        inv.payments.forEach(pay => {
+                            let methodLabel = 'أخرى';
+                            switch(pay.method) {
+                                case 'cash': methodLabel = 'نقدي'; break;
+                                case 'bank_transfer': methodLabel = 'حوالة بنكية'; break;
+                                case 'cheque': methodLabel = 'شيك'; break;
+                                case 'online': methodLabel = 'دفع إلكتروني'; break;
+                                case 'reversal': methodLabel = 'عكس سند'; break;
+                            }
+                            const isReversal = (pay.method === 'reversal');
+                            const color = isReversal ? '#dc2626' : '#16a34a';
+                            const formattedAmount = parseFloat(pay.amount).toFixed(2);
+                            
+                            $payBody.append(`
+                            <tr>
+                                <td><strong>#${pay.id}</strong></td>
+                                <td>${pay.payment_date}</td>
+                                <td>${methodLabel}</td>
+                                <td style="font-weight:800; color:${color};">${formattedAmount}</td>
+                                <td style="font-size:13px; color:#6B7280;">${pay.reference || '—'}</td>
+                            </tr>`);
+                        });
+                        $paySection.show();
+                    } else {
+                        $paySection.hide();
+                    }
+
                     // Payment record trigger
                     const $drawerActions = $('#olama-reg-invoice-drawer').find('.olama-reg-form-actions');
                     $drawerActions.find('.olama-reg-pay-invoice-trigger').remove();
