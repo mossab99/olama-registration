@@ -481,7 +481,36 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
     </div>
 </div>
 
-<!-- Hidden template for new fee row -->
+<!-- ── AGREEMENT FEES SELECTION MODAL (used by "معالجة الرسوم" button) ── -->
+<div id="os-agr-invoice-modal"
+    style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:999999; backdrop-filter:blur(3px);">
+    <div style="background:#fff; width:520px; margin:100px auto; padding:30px; border-radius:8px; box-shadow:0 10px 25px rgba(0,0,0,0.2); border-top:4px solid #E8920A;">
+        <h3 style="margin-top:0; color:#1a1a2e; font-family:'Tajawal', sans-serif;"><?php esc_html_e('اختر الرسوم للمعالجة', 'olama-registration'); ?></h3>
+        <p style="color:#666; margin-bottom:20px;"><?php esc_html_e('الرجاء تحديد الرسوم غير المدفوعة التي ترغب بمعالجتها:', 'olama-registration'); ?></p>
+
+        <form id="os-agr-invoice-form" style="margin:0;">
+            <input type="hidden" name="agreement_id" value="">
+            <table class="olama-reg-fin-table" style="margin-bottom:25px; width:100%;">
+                <thead>
+                    <tr>
+                        <th style="width:40px;"><input type="checkbox" id="os-agr-inv-check-all" checked></th>
+                        <th><?php esc_html_e('الرسم', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('المبلغ', 'olama-registration'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Rows will be injected via JS -->
+                </tbody>
+            </table>
+
+            <div style="text-align:left; display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="button" id="os-agr-close-invoice-modal"><?php esc_html_e('إلغاء', 'olama-registration'); ?></button>
+                <button type="submit" class="olama-reg-btn olama-reg-btn--primary"><?php esc_html_e('تأكيد وانتقال لمعالجة الدفعة', 'olama-registration'); ?></button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <table style="display:none;">
     <tbody id="os-agr-fee-row-template">
         <tr data-fee-id="0">

@@ -2851,9 +2851,14 @@
 
     $(document).on('click', '#os-agr-open-invoice-modal', function () {
         const $btn = $(this);
-        // In the standalone page: #os-agreement-app holds the ID.
-        // In the Hub modal: use the fees table's data-agr-id attribute instead.
-        const agrId = $('#os-agreement-app').data('id') || $('#os-agr-fees-table').data('agr-id');
+        // Priority order for finding the agreement ID:
+        // 1. Standalone page: #os-agreement-app[data-id]
+        // 2. Hub modal after loading: #os-agr-fees-table[data-agr-id]
+        // 3. Hub modal form hidden input: input[name="id"] inside #os-form-agreement-header
+        const agrId = parseInt($('#os-agreement-app').data('id'))
+                   || parseInt($('#os-agr-fees-table').data('agr-id'))
+                   || parseInt($('#os-form-agreement-header input[name="id"]').val())
+                   || 0;
         const status = $('select[name="status"]').val() || $(this).data('status');
 
         if (!agrId) {
@@ -2898,6 +2903,9 @@
                     `;
                     $tbody.append(tr);
                 });
+
+                // Inject the agreement ID into the hidden field so the submit handler has it
+                $('#os-agr-invoice-form input[name="agreement_id"]').val(agrId);
 
                 $('#os-agr-invoice-modal').fadeIn(200);
                 $('#os-agr-invoice-form button[type="submit"]').prop('disabled', false);
