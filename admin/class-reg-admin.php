@@ -249,7 +249,8 @@ class Olama_Reg_Admin {
                 'os-hub',
                 OLAMA_REG_URL . 'assets/js/os-hub.js',
                 [ 'jquery' ],
-                OLAMA_REG_VERSION,
+                // Use file modification time so browser always gets the latest version after edits
+                filemtime( OLAMA_REG_PATH . 'assets/js/os-hub.js' ),
                 true
             );
         }
@@ -294,7 +295,8 @@ class Olama_Reg_Admin {
             'olama-reg',
             OLAMA_REG_URL . 'assets/js/olama-reg.js',
             [ 'jquery', 'select2', 'jquery-ui-datepicker' ],
-            OLAMA_REG_VERSION,
+            // Use file modification time so browser always gets the latest version after edits
+            filemtime( OLAMA_REG_PATH . 'assets/js/olama-reg.js' ),
             true
         );
 

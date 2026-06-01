@@ -1437,8 +1437,13 @@
                         window.payerChildren = pRes.data.results;
                     }
 
+                    // Set data-agr-id on invoice open button too (gives another fallback for agrId detection)
+                    $('#os-agr-open-invoice-modal').attr('data-agr-id', agreement.id);
+
                     // Clear and render fees
+                    // Re-set agr-id after empty() to keep jQuery data cache fresh
                     var $tbody = $('#os-agr-fees-table tbody').empty();
+                    $('#os-agr-fees-table').data('agr-id', agreement.id).attr('data-agr-id', agreement.id);
                     if (data.fees && data.fees.length) {
                         data.fees.forEach(function (fee) {
                             var $row = $('#os-agr-fee-row-template tr').clone();

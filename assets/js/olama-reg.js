@@ -2874,11 +2874,15 @@
         const $btn = $(this);
         // Priority order for finding the agreement ID:
         // 1. Standalone page: #os-agreement-app[data-id]
-        // 2. Hub modal after loading: #os-agr-fees-table[data-agr-id]
-        // 3. Hub modal form hidden input: input[name="id"] inside #os-form-agreement-header
+        // 2. Hub modal — jQuery data cache (set by os-hub.js edit handler)
+        // 3. Hub modal — HTML attribute fallback (avoids jQuery cache staleness)
+        // 4. Hub modal — hidden form input
+        // 5. Button own data-agr-id
         const agrId = parseInt($('#os-agreement-app').data('id'))
                    || parseInt($('#os-agr-fees-table').data('agr-id'))
+                   || parseInt($('#os-agr-fees-table').attr('data-agr-id'))
                    || parseInt($('#os-form-agreement-header input[name="id"]').val())
+                   || parseInt($btn.attr('data-agr-id'))
                    || 0;
         const status = $('select[name="status"]').val() || $(this).data('status');
 
