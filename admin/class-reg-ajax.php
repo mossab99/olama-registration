@@ -2053,6 +2053,11 @@ class Olama_Reg_Ajax
                 $html .= '<button type="button" class="button button-small olama-reg-view-invoice-btn" data-id="' . esc_attr($r->id) . '" title="عرض تفاصيل الفاتورة">' . __('عرض', 'olama-registration') . '</button> ';
             }
             
+            // Pay (دفع)
+            if ((float)$r->balance > 0 && $r->status !== 'cancelled' && $r->status !== 'draft') {
+                $html .= '<button type="button" class="button button-small button-primary os-hub-pay-invoice-btn" data-id="' . esc_attr($r->id) . '" title="' . esc_attr__('دفع الفاتورة', 'olama-registration') . '" style="background:#16a34a; border-color:#16a34a; color:#fff; margin-left: 2px;">' . __('دفع', 'olama-registration') . '</button> ';
+            }
+            
             // Print (طباعة)
             $html .= '<a href="' . esc_url($print_url) . '" target="_blank" class="button button-small" title="طباعة الفاتورة">' . __('طباعة', 'olama-registration') . '</a> ';
             

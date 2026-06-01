@@ -1586,6 +1586,71 @@
             }
         });
 
+        // Intercept click on the "دفع" button inside the invoice table
+        $(document).on('click', '.os-hub-pay-invoice-btn', function (e) {
+            e.preventDefault();
+            var invoiceId = $(this).data('id');
+            var customer = state.currentCustomer;
+            if (!customer) return;
+
+            var $searchFamily = $('#pay_search_family');
+            if ($searchFamily.length) {
+                // Pre-populate Select2 with the active customer/family details
+                $searchFamily.empty().append(new Option(customer.name + ' (' + customer.uid + ')', customer.uid, true, true));
+                $searchFamily.prop('disabled', true);
+
+                // Set family UID in hidden input
+                $('#pay_family_uid').val(customer.uid);
+
+                // Show family search wrapper (contains family select and invoice select)
+                $('#pay_family_search_wrap').show();
+                $('#pay_invoice_select_wrap').show();
+                $('#pay_invoice_display_wrap').hide();
+
+                // Set date to today
+                var today = new Date().toISOString().split('T')[0];
+                $('#pay_date').val(today);
+
+                // Initialize invoice select with loading message
+                var $invSelect = $('#pay_select_invoice');
+                $invSelect.empty().append('<option value="">جاري تحميل الفواتير...</option>');
+                $('#pay_invoice_id').val('');
+                $('#pay_invoice_bal_lbl').text('0.00 د.أ');
+                $('#pay_amount').val('').removeAttr('max');
+
+                $.post(AJAX_URL, {
+                    action:           'olama_reg_get_family_billing',
+                    nonce:            REG_NONCE,
+                    family_uid:       customer.uid,
+                    academic_year_id: 0
+                }, function (res) {
+                    $invSelect.empty().append('<option value="">-- اختر الفاتورة --</option>');
+                    if (res.success && res.data.invoices) {
+                        res.data.invoices.forEach(function (inv) {
+                            if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                                var isSelected = (parseInt(inv.id) === parseInt(invoiceId)) ? 'selected' : '';
+                                $invSelect.append('<option value="' + inv.id + '" data-bal="' + inv.balance + '" ' + isSelected + '>' + inv.invoice_number + ' (المتبقي: ' + parseFloat(inv.balance).toFixed(2) + ')</option>');
+                            }
+                        });
+                    }
+                    // Trigger change so the amount fields and max limits are filled automatically
+                    $invSelect.trigger('change');
+                });
+
+                // Open the modal
+                $('#olama-reg-payment-modal').fadeIn(200);
+
+                // Initialize datepicker
+                if (typeof $.fn.datepicker !== 'undefined') {
+                    $('#olama-reg-payment-modal').find('.olama-reg-datepicker, .os-datepicker').each(function () {
+                        if (!$(this).hasClass('hasDatepicker')) {
+                            $(this).datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
+                        }
+                    });
+                }
+            }
+        });
+
         // Intercept Settlement Quick Action click to open modal inline on customer hub page
         $(document).on('click', '#os-hub-qaction-settlement', function (e) {
             e.preventDefault();
