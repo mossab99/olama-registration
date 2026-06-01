@@ -2851,7 +2851,9 @@
 
     $(document).on('click', '#os-agr-open-invoice-modal', function () {
         const $btn = $(this);
-        const agrId = $('#os-agreement-app').data('id');
+        // In the standalone page: #os-agreement-app holds the ID.
+        // In the Hub modal: use the fees table's data-agr-id attribute instead.
+        const agrId = $('#os-agreement-app').data('id') || $('#os-agr-fees-table').data('agr-id');
         const status = $('select[name="status"]').val() || $(this).data('status');
 
         if (!agrId) {

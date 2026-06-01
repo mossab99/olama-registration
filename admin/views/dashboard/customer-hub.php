@@ -421,9 +421,14 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
                             </tfoot>
                         </table>
 
-                        <div style="margin-top: 20px;">
+                        <div style="margin-top: 20px; display:flex; justify-content:space-between; align-items:center;">
                             <button type="button" class="olama-reg-btn olama-reg-btn--secondary" id="os-agr-add-fee-row">
                                 <span class="dashicons dashicons-plus" style="margin-top:4px;"></span> <?php esc_html_e('إضافة بند رسوم', 'olama-registration'); ?>
+                            </button>
+                            <button type="button" class="olama-reg-btn olama-reg-btn--primary" id="os-agr-open-invoice-modal"
+                                data-status=""
+                                data-has-unpaid="0">
+                                <span class="dashicons dashicons-media-document" style="margin-top:4px;"></span> <?php esc_html_e('معالجة الرسوم (دفعات مخصصة)', 'olama-registration'); ?>
                             </button>
                         </div>
                     </div>
