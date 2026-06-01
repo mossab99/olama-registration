@@ -1558,7 +1558,7 @@
 
                 $.post(AJAX_URL, {
                     action:           'olama_reg_get_family_billing',
-                    nonce:            NONCE,
+                    nonce:            REG_NONCE,
                     family_uid:       customer.uid,
                     academic_year_id: 0
                 }, function (res) {
