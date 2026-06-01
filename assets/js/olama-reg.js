@@ -2032,6 +2032,56 @@
     });
 
     // =========================================================================
+    // Custom Payments — shared helpers (available in both standalone page & Hub modal)
+    // =========================================================================
+
+    // Build a DB-backed child checkbox (data-child-id)
+    // Defined outside the if-guard so it's accessible from os-hub.js context too
+    function cpAddChildCheckbox(childId, name, grade, checked) {
+        const id = `cp_ext_ch_${childId}`;
+        const html = `
+            <label for="${id}" style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">
+                <input type="checkbox" id="${id}" class="cp-ext-student-check" name="child_ids[]" value="${childId}" ${checked ? 'checked' : ''} style="width:16px;height:16px;">
+                <span>
+                    <span style="display:block; font-weight:700;">${escHtml(name)}</span>
+                    <span style="display:block; font-size:11px; color:#64748b;">${escHtml(grade || 'بدون صف')}</span>
+                </span>
+            </label>`;
+        $('#cp_ext_students_list').append(html);
+        $('#cp_ext_no_children_msg').hide();
+    }
+
+    // cpCalcTotal — reads customer_type from checked radio OR from hidden input fallback (Hub context)
+    function cpCalcTotal() {
+        const radioVal = $('input[name="customer_type"]:checked').val();
+        // Hidden input is added by os-hub.js when opening modal on Hub page (disabled radios don't serialize)
+        const hiddenVal = $('input[name="customer_type"][type="hidden"]').val();
+        const isExternal = (radioVal || hiddenVal) === 'external';
+        const isDirect = $('#cp_ext_pay_customer_direct').is(':checked');
+        let count;
+        if (isExternal && isDirect) {
+            count = 1;
+        } else if (isExternal) {
+            count = $('.cp-ext-student-check:checked').length;
+        } else {
+            count = $('.cp-student-check:checked').length;
+        }
+        const amount = parseFloat($('#cp_amount').val()) || 0;
+        const discount = parseFloat($('#cp_discount').val()) || 0;
+
+        let hasTemplate = $('#cp_fee_template').val() ? true : false;
+        let total = 0;
+        if (hasTemplate || window.OS_LINKED_AGREEMENT) {
+            total = count * amount;
+        } else {
+            total = Math.max(0, (count * amount) - (count * discount));
+        }
+
+        $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
+        if (count > 0) $('#cp_students_error').hide();
+    }
+
+    // =========================================================================
     // Custom Payments — DB-backed child checkboxes
     // =========================================================================
     if ($('#cp_family_search').length || $('#cp_ext_customer_search').length) {
@@ -2071,53 +2121,42 @@
                 },
                 placeholder: '-- ابحث بالاسم أو الهاتف أو اسم الابن --',
                 minimumInputLength: 2
-            }).on('change', function () {
-                const customerId = parseInt($(this).val()) || 0;
-                $('#cp_ext_customer_id').val(customerId);
-
-                if (!customerId) {
-                    $('#cp_ext_children_section').hide();
-                    $('#cp_ext_no_customer_msg').show();
-                    $('#cp_ext_students_list').empty();
-                    cpCalcTotal();
-                    return;
-                }
-
-                // Load children from DB
-                $('#cp_ext_no_customer_msg').hide();
-                $('#cp_ext_children_section').show();
-                $('#cp_ext_students_list').html('<div style="grid-column:1/-1; text-align:center; color:var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري التحميل...</div>');
-                $('#cp_ext_no_children_msg').hide();
-
-                ajax('olama_reg_get_external_customer_children', { customer_id: customerId })
-                    .done(res => {
-                        $('#cp_ext_students_list').empty();
-                        const children = res.success ? (res.data.children || []) : [];
-                        if (children.length) {
-                            children.forEach(ch => cpAddChildCheckbox(ch.id, ch.child_name, ch.grade, true));
-                            $('#cp_ext_no_children_msg').hide();
-                        } else {
-                            $('#cp_ext_no_children_msg').show();
-                        }
-                        cpCalcTotal();
-                    });
             });
         }
 
-        // Build a DB-backed child checkbox (data-child-id)
-        function cpAddChildCheckbox(childId, name, grade, checked) {
-            const id = `cp_ext_ch_${childId}`;
-            const html = `
-                <label for="${id}" style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">
-                    <input type="checkbox" id="${id}" class="cp-ext-student-check" name="child_ids[]" value="${childId}" ${checked ? 'checked' : ''} style="width:16px;height:16px;">
-                    <span>
-                        <span style="display:block; font-weight:700;">${escHtml(name)}</span>
-                        <span style="display:block; font-size:11px; color:#64748b;">${escHtml(grade || 'بدون صف')}</span>
-                    </span>
-                </label>`;
-            $('#cp_ext_students_list').append(html);
+        // External customer change → load children from DB
+        // Delegated event so it works when select is re-populated in Hub modal
+        $(document).on('change', '#cp_ext_customer_search', function () {
+            const customerId = parseInt($(this).val()) || 0;
+            $('#cp_ext_customer_id').val(customerId);
+
+            if (!customerId) {
+                $('#cp_ext_children_section').hide();
+                $('#cp_ext_no_customer_msg').show();
+                $('#cp_ext_students_list').empty();
+                cpCalcTotal();
+                return;
+            }
+
+            // Load children from DB
+            $('#cp_ext_no_customer_msg').hide();
+            $('#cp_ext_children_section').show();
+            $('#cp_ext_students_list').html('<div style="grid-column:1/-1; text-align:center; color:var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري التحميل...</div>');
             $('#cp_ext_no_children_msg').hide();
-        }
+
+            ajax('olama_reg_get_external_customer_children', { customer_id: customerId })
+                .done(res => {
+                    $('#cp_ext_students_list').empty();
+                    const children = res.success ? (res.data.children || []) : [];
+                    if (children.length) {
+                        children.forEach(ch => cpAddChildCheckbox(ch.id, ch.child_name, ch.grade, true));
+                        $('#cp_ext_no_children_msg').hide();
+                    } else {
+                        $('#cp_ext_no_children_msg').show();
+                    }
+                    cpCalcTotal();
+                });
+        });
 
         // Toggle UI
         $('input[name="customer_type"]').on('change', function () {
@@ -2135,7 +2174,8 @@
         });
 
         // Family change → load students
-        $('#cp_family_search').on('change', function () {
+        // Delegated event so it works when the select is pre-filled in Hub modal context
+        $(document).on('change', '#cp_family_search', function () {
             const familyUid = $(this).val();
             $('#cp_family_uid').val(familyUid);
             const $list = $('#cp_students_list');
@@ -2219,37 +2259,18 @@
 
         $(document).on('change input', '.cp-student-check, .cp-ext-student-check, #cp_amount, #cp_discount', cpCalcTotal);
 
-        function cpCalcTotal() {
-            const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
-            const isDirect = $('#cp_ext_pay_customer_direct').is(':checked');
-            let count;
-            if (isExternal && isDirect) {
-                count = 1;
-            } else if (isExternal) {
-                count = $('.cp-ext-student-check:checked').length;
-            } else {
-                count = $('.cp-student-check:checked').length;
-            }
-            const amount = parseFloat($('#cp_amount').val()) || 0;
-            const discount = parseFloat($('#cp_discount').val()) || 0;
-            
-            let hasTemplate = $('#cp_fee_template').val() ? true : false;
-            let total = 0;
-            if (hasTemplate || window.OS_LINKED_AGREEMENT) {
-                total = count * amount;
-            } else {
-                total = Math.max(0, (count * amount) - (count * discount));
-            }
-            
-            $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
-            if (count > 0) $('#cp_students_error').hide();
-        }
-
-        // Submit
-        $('#olama-reg-custom-payment-form').on('submit', function (e) {
+        // Submit — standalone custom payments page only
+        // Guard: if os-hub-data exists we are on the Hub page, skip this handler.
+        // os-hub.js handles the Hub context with its own delegated submit handler.
+        $(document).on('submit', '#olama-reg-custom-payment-form', function (e) {
             e.preventDefault();
 
-            const isExternal = $('input[name="customer_type"]:checked').val() === 'external';
+            // Skip on Hub page
+            if (document.getElementById('os-hub-data')) return;
+
+            const radioVal = $('input[name="customer_type"]:checked').val();
+            const hiddenVal = $('input[name="customer_type"][type="hidden"]').val();
+            const isExternal = (radioVal || hiddenVal) === 'external';
             const isDirect = $('#cp_ext_pay_customer_direct').is(':checked');
             const internalCount = $('.cp-student-check:checked').length;
             const externalCount = isDirect ? 1 : $('.cp-ext-student-check:checked').length;

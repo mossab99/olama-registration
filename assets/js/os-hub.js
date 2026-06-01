@@ -1514,7 +1514,9 @@
         $(document).on('click', '#olama-reg-agreement-modal .olama-reg-modal-close', function () {
             var customer = state.currentCustomer;
             if (customer) {
-                window.location.reload();
+                // Use explicit redirect with uid to guarantee the panel reloads on the same customer
+                var param = (customer.type === 'family') ? 'family_uid' : 'customer_uid';
+                window.location.href = window.location.pathname + '?page=olama-registration&' + param + '=' + encodeURIComponent(customer.uid);
             }
         });
 
@@ -1533,17 +1535,37 @@
                 // Set family UID in hidden input
                 $('#pay_family_uid').val(customer.uid);
 
-                // Trigger change to load family invoices
-                $searchFamily.trigger('change');
+                // Show family search wrapper (which contains both family select and invoice select)
+                $('#pay_family_search_wrap').show();
+                $('#pay_invoice_select_wrap').show();
+                $('#pay_invoice_display_wrap').hide();
 
                 // Set date to today
                 var today = new Date().toISOString().split('T')[0];
                 $('#pay_date').val(today);
 
-                // Show family search wrapper (which contains both family select and invoice select)
-                $('#pay_family_search_wrap').show();
-                $('#pay_invoice_select_wrap').show();
-                $('#pay_invoice_display_wrap').hide();
+                // Load family invoices directly via AJAX (trigger('change') won't fire on disabled element)
+                var $invSelect = $('#pay_select_invoice');
+                $invSelect.empty().append('<option value="">جاري تحميل الفواتير...</option>');
+                $('#pay_invoice_id').val('');
+                $('#pay_invoice_bal_lbl').text('0.00 د.أ');
+                $('#pay_amount').val('').removeAttr('max');
+
+                $.post(AJAX_URL, {
+                    action:           'olama_reg_get_family_billing',
+                    nonce:            NONCE,
+                    family_uid:       customer.uid,
+                    academic_year_id: 0
+                }, function (res) {
+                    $invSelect.empty().append('<option value="">-- اختر الفاتورة --</option>');
+                    if (res.success && res.data.invoices) {
+                        res.data.invoices.forEach(function (inv) {
+                            if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                                $invSelect.append('<option value="' + inv.id + '" data-bal="' + inv.balance + '">' + inv.invoice_number + ' (المتبقي: ' + parseFloat(inv.balance).toFixed(2) + ')</option>');
+                            }
+                        });
+                    }
+                });
 
                 // Open the modal
                 $('#olama-reg-payment-modal').fadeIn(200);
@@ -1691,7 +1713,7 @@
             if (!customer) return;
 
             var isFamily = (customer.type === 'family');
-            
+
             // Clear lists, loading, and messages
             $('#cp_students_list').empty();
             $('#cp_ext_students_list').empty();
@@ -1702,6 +1724,12 @@
             $('#cp_fee_template').val('');
             $('#cp_response_msg').hide();
             $('#cp_loading').hide();
+
+            // Ensure there is always a hidden input carrying customer_type
+            // (disabled radio buttons are ignored by serialize())
+            var $cpForm = $('#olama-reg-custom-payment-form');
+            $cpForm.find('input[name="customer_type"][type="hidden"]').remove();
+            $cpForm.append('<input type="hidden" name="customer_type" value="' + (isFamily ? 'internal' : 'external') + '">');
 
             // Set inputs
             if (isFamily) {
@@ -1716,8 +1744,33 @@
                 $('#cp_family_uid').val(customer.uid);
                 $('#cp_customer_uid').val('');
 
-                // Trigger change to load internal students!
-                $familySelect.trigger('change');
+                // Load students directly via AJAX (trigger('change') won't fire on disabled element)
+                var $list = $('#cp_students_list');
+                $('#cp_students_container').show();
+                $list.html('<div style="grid-column:1/-1; text-align:center; color:var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري تحميل الطلاب...</div>');
+
+                $.post(AJAX_URL, {
+                    action:     'olama_reg_get_family_students',
+                    nonce:      NONCE,
+                    family_uid: customer.uid
+                }, function (res) {
+                    $list.empty();
+                    if (res.success && res.data.students && res.data.students.length) {
+                        res.data.students.forEach(function (st) {
+                            $list.append(
+                                '<label style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">'
+                                + '<input type="checkbox" name="student_uids[]" value="' + escHtml(st.student_uid) + '" class="cp-student-check" checked style="width:16px;height:16px;">'
+                                + '<span>'
+                                + '<span style="display:block; font-weight:700;">' + escHtml(st.student_name || 'بدون اسم') + '</span>'
+                                + '<span style="display:block; font-size:11px; color:#64748b;">' + escHtml(st.grade_name || '') + '</span>'
+                                + '</span></label>'
+                            );
+                        });
+                    } else {
+                        $list.html('<div style="grid-column:1/-1; color:#dc2626;">لا يوجد طلاب نشطين لهذه العائلة.</div>');
+                    }
+                });
+
             } else {
                 $('#cp_type_external').prop('checked', true);
                 $('#cp_internal_customer_wrap').hide();
@@ -1731,8 +1784,39 @@
                 $('#cp_ext_customer_id').val(payerId);
                 $('#cp_customer_uid').val(customer.uid);
 
-                // Trigger change to load external children!
-                $extSelect.trigger('change');
+                // Load children directly via AJAX (trigger('change') won't fire on disabled element)
+                if (payerId) {
+                    $('#cp_ext_no_customer_msg').hide();
+                    $('#cp_ext_children_section').show();
+                    var $extList = $('#cp_ext_students_list');
+                    $extList.html('<div style="grid-column:1/-1; text-align:center; color:var(--reg-primary);"><span class="spinner is-active" style="float:none;"></span> جاري التحميل...</div>');
+                    $('#cp_ext_no_children_msg').hide();
+
+                    $.post(AJAX_URL, {
+                        action:      'olama_reg_get_external_customer_children',
+                        nonce:       NONCE,
+                        customer_id: payerId
+                    }, function (res) {
+                        $extList.empty();
+                        var children = (res.success) ? (res.data.children || []) : [];
+                        if (children.length) {
+                            children.forEach(function (ch) {
+                                var chId = 'cp_ext_ch_' + ch.id;
+                                $extList.append(
+                                    '<label for="' + chId + '" style="display:flex; align-items:center; gap:8px; padding:10px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">'
+                                    + '<input type="checkbox" id="' + chId + '" class="cp-ext-student-check" name="child_ids[]" value="' + ch.id + '" checked style="width:16px;height:16px;">'
+                                    + '<span>'
+                                    + '<span style="display:block; font-weight:700;">' + escHtml(ch.child_name) + '</span>'
+                                    + '<span style="display:block; font-size:11px; color:#64748b;">' + escHtml(ch.grade || 'بدون صف') + '</span>'
+                                    + '</span></label>'
+                                );
+                            });
+                            $('#cp_ext_no_children_msg').hide();
+                        } else {
+                            $('#cp_ext_no_children_msg').show();
+                        }
+                    });
+                }
             }
 
             // Open the modal!
