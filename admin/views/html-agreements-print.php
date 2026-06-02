@@ -31,9 +31,9 @@ if ($agreement->payer_type === 'customer') {
         $payer_phone = $cust->phone;
 } else {
     global $wpdb;
-    $family = $wpdb->get_row($wpdb->prepare("SELECT father_phone, mother_phone FROM {$wpdb->prefix}olama_families WHERE family_uid = %s", $agreement->payer_id));
+    $family = $wpdb->get_row($wpdb->prepare("SELECT father_mobile, mother_mobile FROM {$wpdb->prefix}olama_families WHERE family_uid = %s", $agreement->payer_id));
     if ($family)
-        $payer_phone = $family->father_phone ?: $family->mother_phone;
+        $payer_phone = $family->father_mobile ?: $family->mother_mobile;
 }
 
 // Ensure JS/CSS only target this page for printing
