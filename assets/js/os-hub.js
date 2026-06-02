@@ -467,7 +467,7 @@
             });
         },
 
-        open: function (tileId, $btn, $panel) {
+        open: function (tileId, $btn, $panel, extraData) {
             $btn.attr('aria-expanded', 'true');
             $panel.attr('aria-hidden', 'false').show();
             state.openTile = tileId;
@@ -475,8 +475,8 @@
             var $content = $panel.find('.os-hub-tile-panel__content');
             var $loading = $panel.find('.os-hub-tile-panel__loading');
 
-            // Only load if not already loaded for this customer
-            if ($content.data('loaded')) {
+            // Only load if not already loaded for this customer (skip cache if extraData is passed)
+            if ($content.data('loaded') && !extraData) {
                 $loading.hide();
                 $content.show();
                 // Still fire the event so TileReloader can add its button
@@ -485,21 +485,23 @@
             }
 
             $loading.show();
-            $content.hide().empty();
+            $content.hide(); // Don't empty to prevent layout jumps if reloading with filters
 
             if (!state.currentCustomer) return;
+
+            var ajaxData = $.extend({
+                action: 'os_hub_tile',
+                nonce:  NONCE,
+                tile:   tileId,
+                uid:    state.currentCustomer.uid,
+                type:   state.currentCustomer.type,
+                year:   state.currentYearId,
+            }, extraData || {});
 
             $.ajax({
                 url:    AJAX_URL,
                 method: 'POST',
-                data: {
-                    action: 'os_hub_tile',
-                    nonce:  NONCE,
-                    tile:   tileId,
-                    uid:    state.currentCustomer.uid,
-                    type:   state.currentCustomer.type,
-                    year:   state.currentYearId,
-                },
+                data:   ajaxData,
                 success: function (response) {
                     $loading.hide();
                     $content.show();
@@ -515,7 +517,9 @@
                     }
 
                     $content.html(response.data.html);
-                    $content.data('loaded', true);
+                    if (!extraData) {
+                        $content.data('loaded', true);
+                    }
 
                     // Fire event so TileReloader injects its button
                     $(document).trigger('os-hub:tile-opened', [{ tileId: tileId, $panel: $panel }]);
@@ -1959,6 +1963,68 @@
                     }
                 })
                 .always(() => { $btn.prop('disabled', false); $loading.hide(); });
+        });
+
+        // Audit log (History) filters, sorting, and pagination handlers
+        $(document).on('click', '#history-filter-apply-btn', function () {
+            var $panel = $('#os-hub-tile-panel-history');
+            var $btn = $('#os-hub-tile-btn-history');
+            
+            var extraData = {
+                search:           $('#history-filter-search').val(),
+                date_from:        $('#history-filter-date-from').val(),
+                date_to:          $('#history-filter-date-to').val(),
+                amount:           $('#history-filter-amount').val(),
+                service_type:     $('#history-filter-service-type').val(),
+                agreement_nature: $('#history-filter-agreement-nature').val(),
+                orderby:          $('#history-filter-orderby').val(),
+                order:            $('#history-sort-toggle-btn').data('order') || 'desc',
+                paged:            1
+            };
+            
+            TileManager.open('history', $btn, $panel, extraData);
+        });
+
+        $(document).on('click', '#history-sort-toggle-btn', function () {
+            var currentOrder = $(this).data('order') || 'desc';
+            var newOrder = (currentOrder === 'desc') ? 'asc' : 'desc';
+            $(this).data('order', newOrder);
+            
+            // Re-trigger apply
+            $('#history-filter-apply-btn').trigger('click');
+        });
+
+        $(document).on('click', '#history-header-date', function () {
+            var nextOrder = $(this).data('order') || 'desc';
+            
+            // Force orderby to date
+            $('#history-filter-orderby').val('date');
+            
+            // Update sort toggle btn order data attribute
+            $('#history-sort-toggle-btn').data('order', nextOrder);
+            
+            // Re-trigger apply
+            $('#history-filter-apply-btn').trigger('click');
+        });
+
+        $(document).on('click', '.history-paged-btn', function () {
+            var page = $(this).data('page');
+            var $panel = $('#os-hub-tile-panel-history');
+            var $btn = $('#os-hub-tile-btn-history');
+            
+            var extraData = {
+                search:           $('#history-filter-search').val(),
+                date_from:        $('#history-filter-date-from').val(),
+                date_to:          $('#history-filter-date-to').val(),
+                amount:           $('#history-filter-amount').val(),
+                service_type:     $('#history-filter-service-type').val(),
+                agreement_nature: $('#history-filter-agreement-nature').val(),
+                orderby:          $('#history-filter-orderby').val(),
+                order:            $('#history-sort-toggle-btn').data('order') || 'desc',
+                paged:            page
+            };
+            
+            TileManager.open('history', $btn, $panel, extraData);
         });
 
         // Phase 6: Preload customer/family if passed in URL

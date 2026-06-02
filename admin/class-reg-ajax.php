@@ -2471,35 +2471,81 @@ class Olama_Reg_Ajax
     {
         global $wpdb;
 
+        // Retrieve filter, sorting, and pagination parameters
+        $search = sanitize_text_field($_POST['search'] ?? '');
+        $date_from = sanitize_text_field($_POST['date_from'] ?? '');
+        $date_to = sanitize_text_field($_POST['date_to'] ?? '');
+        $filter_amount = sanitize_text_field($_POST['amount'] ?? '');
+        $service_type = sanitize_text_field($_POST['service_type'] ?? '');
+        $agreement_nature = sanitize_text_field($_POST['agreement_nature'] ?? '');
+        $orderby = sanitize_key($_POST['orderby'] ?? 'date'); 
+        $order = sanitize_key($_POST['order'] ?? 'desc'); 
+        $paged = max(1, (int)($_POST['paged'] ?? 1));
+        $per_page = 10;
+
+        $custom_services = get_option('olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي']);
+        $agreement_natures = get_option('olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية']);
+
+        // Resolve external customer ID if applicable
+        $customer_id = 0;
+        if (strpos($uid, 'CUST-') === 0) {
+            $customer_id = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
+                $uid
+            ));
+        }
+
+        // Get all related entity IDs for this family/customer to match against audit records
+        if ($customer_id) {
+            $invoice_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_invoices WHERE ext_customer_id = %d OR family_uid = %s",
+                $customer_id, $uid
+            )) ?: [0];
+            $payment_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_payments WHERE family_uid = %s",
+                $uid
+            )) ?: [0];
+            $agreement_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_agreements WHERE payer_id = %s",
+                $uid
+            )) ?: [0];
+        } else {
+            $invoice_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_invoices WHERE family_uid = %s",
+                $uid
+            )) ?: [0];
+            $payment_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_payments WHERE family_uid = %s",
+                $uid
+            )) ?: [0];
+            $agreement_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_agreements WHERE payer_id = %s",
+                $uid
+            )) ?: [0];
+        }
+
+        $invoice_ids_str = implode(',', array_map('intval', $invoice_ids)) ?: '0';
+        $payment_ids_str = implode(',', array_map('intval', $payment_ids)) ?: '0';
+        $agreement_ids_str = implode(',', array_map('intval', $agreement_ids)) ?: '0';
+
+        // Select before_state and after_state columns instead of the non-existent notes column
+        $rows = $wpdb->get_results(
+            "SELECT id, action, entity_type, entity_id, actor_id, created_at, before_state, after_state
+             FROM {$wpdb->prefix}olama_billing_audit
+             WHERE (entity_type = 'invoice' AND entity_id IN ($invoice_ids_str))
+                OR (entity_type = 'payment' AND entity_id IN ($payment_ids_str))
+                OR (entity_type = 'agreement' AND entity_id IN ($agreement_ids_str))
+             ORDER BY id DESC"
+        ) ?: [];
+
         // Action label map (Arabic)
         $action_labels = [
-            'invoice_created'   => __('إنشاء فاتورة',      'olama-registration'),
-            'invoice_updated'   => __('تعديل فاتورة',      'olama-registration'),
-            'invoice_cancelled' => __('إلغاء فاتورة',      'olama-registration'),
-            'payment_received'  => __('تسجيل دفعة',        'olama-registration'),
-            'payment_reversed'  => __('عكس دفعة',          'olama-registration'),
-            'agreement_created' => __('إنشاء عقد',           'olama-registration'),
-            'agreement_updated' => __('تعديل عقد',           'olama-registration'),
-            'profile_updated'   => __('تعديل بيانات',       'olama-registration'),
-            'status_changed'    => __('تغيير الحالة',       'olama-registration'),
-            'child_added'       => __('إضافة ابن',           'olama-registration'),
+            'created'        => __('إنشاء', 'olama-registration'),
+            'updated'        => __('تعديل', 'olama-registration'),
+            'cancelled'      => __('إلغاء', 'olama-registration'),
+            'reversed'       => __('عكس دفعة', 'olama-registration'),
+            'status_changed' => __('تغيير الحالة', 'olama-registration'),
         ];
-
-        $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, action, entity_type, entity_id, actor_id, created_at, notes
-             FROM {$wpdb->prefix}olama_billing_audit
-             WHERE entity_id = %s
-             ORDER BY id DESC
-             LIMIT 100",
-            $uid
-        ));
-
-        if (! $rows) {
-            return ['html' => $this->hub_empty_state(
-                __('لا توجد سجلات تدقيق', 'olama-registration'),
-                'dashicons-backup'
-            )];
-        }
 
         // Pre-fetch user display names (batch, avoid N+1)
         $actor_ids = array_unique(array_filter(array_column($rows, 'actor_id')));
@@ -2509,32 +2555,289 @@ class Olama_Reg_Ajax
             $user_names[$actor_id] = $u ? $u->display_name : __('مجهول', 'olama-registration');
         }
 
-        $html  = '<table class="os-hub-data-table widefat fixed striped">';
+        // Process, populate, and filter rows in PHP
+        $processed = [];
+        $service_types = [];
+
+        foreach ($rows as $r) {
+            $after = !empty($r->after_state) ? json_decode($r->after_state) : null;
+            $actor_name   = $user_names[$r->actor_id] ?? __('نظام', 'olama-registration');
+            $action_label = $action_labels[$r->action] ?? esc_html($r->action);
+            
+            // Extract amount
+            $amount = 0.0;
+            if ($r->entity_type === 'invoice') {
+                $amount = (float)($after->total ?? 0);
+            } elseif ($r->entity_type === 'payment') {
+                $amount = (float)($after->amount ?? 0);
+            } elseif ($r->entity_type === 'agreement') {
+                $amount = (float)($after->total_amount ?? 0);
+            }
+            $r->extracted_amount = $amount;
+
+            // Extract service type
+            $stype = '';
+            if ($r->entity_type === 'invoice' && !empty($after->notes)) {
+                $clean_notes = trim($after->notes);
+                if (preg_match('/^(?:طبيعة الخدمة|رسوم خدمة|رسوم خدمة إضافية):\s*(.+)$/mu', $clean_notes, $matches)) {
+                    $stype = trim($matches[1]);
+                }
+            }
+            $r->extracted_service_type = $stype;
+
+            // Extract contract nature
+            $cnature = '';
+            if ($r->entity_type === 'agreement' && !empty($after->activity_type)) {
+                $cnature = $after->activity_type;
+            }
+            $r->extracted_contract_nature = $cnature;
+
+            // Build dynamic description
+            $note_desc = '—';
+            switch ($r->action) {
+                case 'created':
+                    if ($r->entity_type === 'invoice') {
+                        $note_desc = sprintf(__('تم إصدار الفاتورة %s بقيمة %s د.أ', 'olama-registration'), 
+                            '<code>' . esc_html($after->invoice_number ?? '') . '</code>', 
+                            '<strong>' . number_format((float)($after->total ?? 0), 2) . '</strong>'
+                        );
+                    } elseif ($r->entity_type === 'payment') {
+                        $note_desc = sprintf(__('تم تسجيل سند قبض بقيمة %s د.أ للفاتورة %s', 'olama-registration'), 
+                            '<strong>' . number_format((float)($after->amount ?? 0), 2) . '</strong>',
+                            '<code>' . esc_html($after->invoice_number ?? ('#' . ($after->invoice_id ?? ''))) . '</code>'
+                        );
+                    } elseif ($r->entity_type === 'agreement') {
+                        $note_desc = sprintf(__('تم إنشاء العقد %s بقيمة إجمالية %s د.أ', 'olama-registration'), 
+                            '<code>' . esc_html($after->agreement_number ?? '') . '</code>', 
+                            '<strong>' . number_format((float)($after->total_amount ?? 0), 2) . '</strong>'
+                        );
+                    }
+                    break;
+                case 'updated':
+                    if ($r->entity_type === 'invoice') {
+                        $note_desc = sprintf(__('تم تعديل تفاصيل الفاتورة %s', 'olama-registration'), 
+                            '<code>' . esc_html($after->invoice_number ?? '') . '</code>'
+                        );
+                    } elseif ($r->entity_type === 'agreement') {
+                        $note_desc = sprintf(__('تم تعديل تفاصيل العقد %s', 'olama-registration'), 
+                            '<code>' . esc_html($after->agreement_number ?? '') . '</code>'
+                        );
+                    }
+                    break;
+                case 'cancelled':
+                    if ($r->entity_type === 'invoice') {
+                        $note_desc = sprintf(__('تم إلغاء الفاتورة %s', 'olama-registration'), 
+                            '<code>' . esc_html($after->invoice_number ?? '') . '</code>'
+                        );
+                    }
+                    break;
+                case 'reversed':
+                    if ($r->entity_type === 'payment') {
+                        $note_desc = sprintf(__('تم عكس السند المالي للفاتورة %s بقيمة %s د.أ', 'olama-registration'), 
+                            '<code>' . esc_html($after->invoice_number ?? ('#' . ($after->invoice_id ?? ''))) . '</code>',
+                            '<strong>' . number_format((float)($after->amount ?? 0), 2) . '</strong>'
+                        );
+                    }
+                    break;
+                case 'status_changed':
+                    if ($r->entity_type === 'invoice') {
+                        $note_desc = sprintf(__('تغيرت حالة الفاتورة %s إلى: %s', 'olama-registration'), 
+                            '<code>' . esc_html($after->invoice_number ?? '') . '</code>',
+                            '<strong>' . esc_html($after->status ?? '') . '</strong>'
+                        );
+                    }
+                    break;
+            }
+
+            if ($note_desc === '—' && !empty($after->notes)) {
+                $note_desc = esc_html($after->notes);
+            }
+
+            $r->dynamic_desc = $note_desc;
+            $r->action_label = $action_label;
+            $r->actor_name = $actor_name;
+
+            // 1. Search Filter (checks description, action, or type)
+            if ($search) {
+                $search_lower = mb_strtolower($search);
+                $found = (strpos(mb_strtolower($r->dynamic_desc), $search_lower) !== false)
+                    || (strpos(mb_strtolower($r->action_label), $search_lower) !== false)
+                    || (strpos(mb_strtolower($r->actor_name), $search_lower) !== false)
+                    || (strpos(mb_strtolower($r->entity_type), $search_lower) !== false);
+                if (!$found) continue;
+            }
+
+            // 2. Date From Filter
+            if ($date_from) {
+                $row_date = date('Y-m-d', strtotime($r->created_at));
+                if ($row_date < $date_from) continue;
+            }
+
+            // 3. Date To Filter
+            if ($date_to) {
+                $row_date = date('Y-m-d', strtotime($r->created_at));
+                if ($row_date > $date_to) continue;
+            }
+
+            // 4. Amount Filter
+            if ($filter_amount !== '') {
+                if (abs($amount - (float)$filter_amount) > 0.01) continue;
+            }
+
+            // 5. Service Type Filter
+            if ($service_type) {
+                if (mb_strtolower($r->extracted_service_type) !== mb_strtolower($service_type)) continue;
+            }
+
+            // 6. Agreement Nature Filter
+            if ($agreement_nature) {
+                if (mb_strtolower($r->extracted_contract_nature) !== mb_strtolower($agreement_nature)) continue;
+            }
+
+            $processed[] = $r;
+        }
+
+        // Apply Sorting
+        usort($processed, function ($a, $b) use ($orderby, $order) {
+            if ($orderby === 'amount') {
+                $valA = $a->extracted_amount;
+                $valB = $b->extracted_amount;
+            } else {
+                $valA = strtotime($a->created_at);
+                $valB = strtotime($b->created_at);
+            }
+
+            if ($valA == $valB) return 0;
+            if ($order === 'asc') {
+                return ($valA < $valB) ? -1 : 1;
+            } else {
+                return ($valA > $valB) ? -1 : 1;
+            }
+        });
+
+        // Apply Pagination
+        $total_items = count($processed);
+        $total_pages = ceil($total_items / $per_page);
+        $paged = min($paged, max(1, $total_pages));
+        $offset = ($paged - 1) * $per_page;
+        $paginated_rows = array_slice($processed, $offset, $per_page);
+
+        // Build HTML Filters Bar
+        $html = '<div class="os-hub-history-filters" style="display: flex; gap: 12px; margin-bottom: 16px; background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; align-items: flex-end; flex-wrap: wrap;" dir="rtl">';
+        $html .= '  <div style="flex: 1; min-width: 150px;">';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('البحث العام', 'olama-registration') . '</label>';
+        $html .= '      <input type="text" id="history-filter-search" value="' . esc_attr($search) . '" placeholder="' . esc_attr__('بحث بالعملية...', 'olama-registration') . '" style="width: 100%; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px;">';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('من تاريخ', 'olama-registration') . '</label>';
+        $html .= '      <input type="date" id="history-filter-date-from" value="' . esc_attr($date_from) . '" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px;">';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('إلى تاريخ', 'olama-registration') . '</label>';
+        $html .= '      <input type="date" id="history-filter-date-to" value="' . esc_attr($date_to) . '" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px;">';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('القيمة (د.أ)', 'olama-registration') . '</label>';
+        $html .= '      <input type="number" step="0.01" id="history-filter-amount" value="' . esc_attr($filter_amount) . '" placeholder="0.00" style="width: 80px; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px;">';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('طبيعة الخدمة', 'olama-registration') . '</label>';
+        $html .= '      <select id="history-filter-service-type" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px; min-width: 110px;">';
+        $html .= '          <option value="">' . __('الكل', 'olama-registration') . '</option>';
+        foreach ($custom_services as $st) {
+            $html .= '      <option value="' . esc_attr($st) . '" ' . selected($service_type, $st, false) . '>' . esc_html($st) . '</option>';
+        }
+        $html .= '      </select>';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('طبيعة العقد', 'olama-registration') . '</label>';
+        $html .= '      <select id="history-filter-agreement-nature" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px; min-width: 110px;">';
+        $html .= '          <option value="">' . __('الكل', 'olama-registration') . '</option>';
+        foreach ($agreement_natures as $an) {
+            $html .= '      <option value="' . esc_attr($an) . '" ' . selected($agreement_nature, $an, false) . '>' . esc_html($an) . '</option>';
+        }
+        $html .= '      </select>';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <label style="font-weight: 700; font-size: 11px; display: block; margin-bottom: 4px; color: #475569;">' . __('ترتيب حسب', 'olama-registration') . '</label>';
+        $html .= '      <select id="history-filter-orderby" style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; height: 32px;">';
+        $html .= '          <option value="date" ' . selected($orderby, 'date', false) . '>' . __('التاريخ', 'olama-registration') . '</option>';
+        $html .= '          <option value="amount" ' . selected($orderby, 'amount', false) . '>' . __('القيمة المالية', 'olama-registration') . '</option>';
+        $html .= '      </select>';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <button type="button" id="history-sort-toggle-btn" class="button" data-order="' . esc_attr($order) . '" style="height: 32px; display: flex; align-items: center; justify-content: center; gap: 4px; font-size:12px;">';
+        if ($order === 'asc') {
+            $html .= '      <span class="dashicons dashicons-arrow-up-alt2"></span> ' . __('تصاعدي', 'olama-registration');
+        } else {
+            $html .= '      <span class="dashicons dashicons-arrow-down-alt2"></span> ' . __('تنازلي', 'olama-registration');
+        }
+        $html .= '      </button>';
+        $html .= '  </div>';
+        $html .= '  <div>';
+        $html .= '      <button type="button" id="history-filter-apply-btn" class="button button-primary" style="height: 32px; background: #E8920A; border-color: #E8920A; color: white;">' . __('تصفية', 'olama-registration') . '</button>';
+        $html .= '  </div>';
+        $html .= '</div>';
+
+        // Check if there are results
+        if (empty($paginated_rows)) {
+            $html .= $this->hub_empty_state(
+                __('لا توجد سجلات تطابق عوامل التصفية الحالية', 'olama-registration'),
+                'dashicons-backup'
+            );
+            return ['html' => $html];
+        }
+
+        // Render Table
+        $html .= '<table class="os-hub-data-table widefat fixed striped">';
         $html .= '<thead><tr>';
         $html .= '<th>' . __('الإجراء', 'olama-registration') . '</th>';
         $html .= '<th>' . __('المستخدم', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('التاريخ', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('ملاحظات', 'olama-registration') . '</th>';
+        
+        $date_active = ($orderby === 'date');
+        $date_next_order = ($date_active && $order === 'desc') ? 'asc' : 'desc';
+        $date_icon = '';
+        if ($date_active) {
+            $date_icon = $order === 'asc' ? ' <span class="dashicons dashicons-arrow-up-alt2" style="font-size: 14px; width: 14px; height: 14px; vertical-align: middle;"></span>' : ' <span class="dashicons dashicons-arrow-down-alt2" style="font-size: 14px; width: 14px; height: 14px; vertical-align: middle;"></span>';
+        }
+        $html .= '<th style="cursor: pointer; user-select: none;" id="history-header-date" data-order="' . esc_attr($date_next_order) . '" title="' . esc_attr__('ترتيب حسب التاريخ', 'olama-registration') . '">' . __('التاريخ', 'olama-registration') . $date_icon . '</th>';
+        
+        $html .= '<th>' . __('التفاصيل والعملية', 'olama-registration') . '</th>';
         $html .= '</tr></thead><tbody>';
 
-        foreach ($rows as $r) {
-            $action_label = $action_labels[$r->action] ?? esc_html($r->action);
-            $actor_name   = $user_names[$r->actor_id] ?? __('نظام', 'olama-registration');
-            $date         = $r->created_at
-                ? wp_date('Y/m/d H:i', strtotime($r->created_at))
-                : '—';
+        foreach ($paginated_rows as $r) {
+            $date = $r->created_at ? wp_date('Y/m/d H:i', strtotime($r->created_at)) : '—';
 
             $html .= '<tr>';
-            $html .= '<td><span class="os-hub-badge os-hub-badge--blue">' . esc_html($action_label) . '</span></td>';
-            $html .= '<td>' . esc_html($actor_name) . '</td>';
+            $html .= '<td><span class="os-hub-badge os-hub-badge--blue">' . esc_html($r->action_label) . '</span></td>';
+            $html .= '<td>' . esc_html($r->actor_name) . '</td>';
             $html .= '<td dir="ltr" style="white-space:nowrap;">' . esc_html($date) . '</td>';
-            $html .= '<td>' . esc_html($r->notes ?? '—') . '</td>';
+            $html .= '<td>' . $r->dynamic_desc . '</td>';
             $html .= '</tr>';
         }
 
         $html .= '</tbody></table>';
 
-        return ['html' => $html, 'meta' => ['count' => count($rows)]];
+        // Render Pagination Controls
+        if ($total_pages > 1) {
+            $html .= '<div class="os-hub-pagination" style="display: flex; gap: 4px; justify-content: center; margin-top: 16px; align-items: center;" dir="rtl">';
+            
+            $first_disabled = $paged === 1 ? 'disabled="disabled"' : '';
+            $last_disabled = $paged === $total_pages ? 'disabled="disabled"' : '';
+            
+            $html .= '  <button type="button" class="button history-paged-btn" data-page="1" ' . $first_disabled . ' title="' . esc_attr__('الصفحة الأولى', 'olama-registration') . '">&laquo;</button>';
+            $html .= '  <button type="button" class="button history-paged-btn" data-page="' . ($paged - 1) . '" ' . $first_disabled . ' title="' . esc_attr__('السابق', 'olama-registration') . '">&lsaquo;</button>';
+            
+            $html .= '  <span style="margin: 0 8px; font-size: 13px;">';
+            $html .= sprintf(__('صفحة %d من %d (الإجمالي: %d عملية)', 'olama-registration'), $paged, $total_pages, $total_items);
+            $html .= '  </span>';
+
+            $html .= '  <button type="button" class="button history-paged-btn" data-page="' . ($paged + 1) . '" ' . $last_disabled . ' title="' . esc_attr__('التالي', 'olama-registration') . '">&rsaquo;</button>';
+            $html .= '  <button type="button" class="button history-paged-btn" data-page="' . $total_pages . '" ' . $last_disabled . ' title="' . esc_attr__('الصفحة الأخيرة', 'olama-registration') . '">&raquo;</button>';
+            $html .= '</div>';
+        }
+
+        return ['html' => $html, 'meta' => ['count' => count($processed)]];
     }
 
     // ── Tile: Settlement Receipts (families only) ─────────────────────────────
