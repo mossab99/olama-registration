@@ -31,13 +31,21 @@ class Olama_Reg_Billing_Reports {
         }
 
         $query = "SELECT 
-            COALESCE(SUM(total), 0) AS total_invoiced,
-            COALESCE(SUM(amount_paid), 0) AS total_collected,
-            COALESCE(SUM(balance), 0) AS total_receivables,
-            COALESCE(SUM(discount), 0) AS total_discount,
-            COALESCE(SUM(CASE WHEN due_date < CURDATE() AND balance > 0 AND status NOT IN ('paid', 'cancelled') THEN balance ELSE 0 END), 0) AS total_overdue
-            FROM " . self::t( 'olama_invoices' ) . "
-            WHERE {$where}";
+            COALESCE(SUM(i.total + COALESCE(adj.debit_total, 0) - COALESCE(adj.credit_total, 0)), 0) AS total_invoiced,
+            COALESCE(SUM(i.amount_paid), 0) AS total_collected,
+            COALESCE(SUM(i.balance), 0) AS total_receivables,
+            COALESCE(SUM(i.discount), 0) AS total_discount,
+            COALESCE(SUM(CASE WHEN i.due_date < CURDATE() AND i.balance > 0 AND i.status NOT IN ('paid', 'cancelled') THEN i.balance ELSE 0 END), 0) AS total_overdue
+            FROM " . self::t( 'olama_invoices' ) . " i
+            LEFT JOIN (
+                SELECT invoice_id,
+                       SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) AS debit_total,
+                       SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) AS credit_total
+                FROM " . self::t( 'olama_invoice_adjustments' ) . "
+                WHERE status = 'issued'
+                GROUP BY invoice_id
+            ) adj ON adj.invoice_id = i.id
+            WHERE " . str_replace( [ 'status', 'academic_year_id' ], [ 'i.status', 'i.academic_year_id' ], $where );
 
         if ( ! empty( $params ) ) {
             $row = $wpdb->get_row( $wpdb->prepare( $query, ...$params ) );
@@ -146,18 +154,19 @@ class Olama_Reg_Billing_Reports {
         global $wpdb;
 
         $params = [];
-        $where = "status NOT IN ('paid','cancelled') AND balance > 0 AND due_date < CURDATE()";
+        $where = "i.status NOT IN ('paid','cancelled') AND (inst.amount_due - inst.amount_paid) > 0 AND inst.due_date < CURDATE()";
         if ( $year_id > 0 ) {
-            $where .= " AND academic_year_id = %d";
+            $where .= " AND i.academic_year_id = %d";
             $params[] = $year_id;
         }
 
         $query = "SELECT 
-            SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) <= 30 THEN balance ELSE 0 END) AS band_30,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) BETWEEN 31 AND 60 THEN balance ELSE 0 END) AS band_60,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) BETWEEN 61 AND 90 THEN balance ELSE 0 END) AS band_90,
-            SUM(CASE WHEN DATEDIFF(CURDATE(), due_date) > 90 THEN balance ELSE 0 END) AS band_90_plus
-            FROM " . self::t( 'olama_invoices' ) . "
+            SUM(CASE WHEN DATEDIFF(CURDATE(), inst.due_date) <= 30 THEN (inst.amount_due - inst.amount_paid) ELSE 0 END) AS band_30,
+            SUM(CASE WHEN DATEDIFF(CURDATE(), inst.due_date) BETWEEN 31 AND 60 THEN (inst.amount_due - inst.amount_paid) ELSE 0 END) AS band_60,
+            SUM(CASE WHEN DATEDIFF(CURDATE(), inst.due_date) BETWEEN 61 AND 90 THEN (inst.amount_due - inst.amount_paid) ELSE 0 END) AS band_90,
+            SUM(CASE WHEN DATEDIFF(CURDATE(), inst.due_date) > 90 THEN (inst.amount_due - inst.amount_paid) ELSE 0 END) AS band_90_plus
+            FROM " . self::t( 'olama_invoice_installments' ) . " inst
+            INNER JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = inst.invoice_id
             WHERE {$where}";
 
         if ( ! empty( $params ) ) {

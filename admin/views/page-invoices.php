@@ -325,15 +325,27 @@ if ( $filter_year ) {
 }
 if ( $search_q ) {
     $like = '%' . $wpdb->esc_like( $search_q ) . '%';
-    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.family_name LIKE %s)";
+    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.family_name LIKE %s OR ft.template_name LIKE %s OR a.agreement_number LIKE %s)";
+    $params[] = $like;
+    $params[] = $like;
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
 }
 
-$query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_name
+$query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_name,
+                 ft.template_name AS fee_template_name,
+                 ft.subject_type AS fee_subject_type,
+                 ft.subject_value AS fee_subject_value,
+                 a.agreement_number,
+                 s.student_name AS direct_student_name,
+                 ec.child_name AS direct_child_name
           FROM " . $wpdb->prefix . "olama_invoices i
           LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = i.family_uid
+          LEFT JOIN " . $wpdb->prefix . "olama_fee_templates ft ON ft.id = i.fee_template_id
+          LEFT JOIN " . $wpdb->prefix . "olama_agreements a ON a.id = i.agreement_id
+          LEFT JOIN " . $wpdb->prefix . "olama_students s ON s.student_uid = i.student_uid
+          LEFT JOIN " . $wpdb->prefix . "olama_customer_children ec ON ec.id = i.ext_child_id
           WHERE {$where}
           ORDER BY i.issue_date DESC, i.id DESC";
 
@@ -343,13 +355,84 @@ if ( ! empty( $params ) ) {
     $invoices = $wpdb->get_results( $query ) ?: [];
 }
 
+foreach ( $invoices as $invoice_row ) {
+    if ( empty( $invoice_row->fee_template_name ) && ! empty( $invoice_row->agreement_id ) ) {
+        $templates = $wpdb->get_results( $wpdb->prepare(
+            "SELECT DISTINCT ft.template_name, ft.subject_type, ft.subject_value
+             FROM {$wpdb->prefix}olama_agreement_fees af
+             LEFT JOIN {$wpdb->prefix}olama_fee_templates ft ON ft.id = CAST(af.fee_category AS UNSIGNED)
+             WHERE af.agreement_id = %d
+               AND af.fee_category REGEXP '^[0-9]+'
+               AND ft.id IS NOT NULL
+             ORDER BY ft.template_name ASC",
+            (int) $invoice_row->agreement_id
+        ) ) ?: [];
+
+        if ( ! empty( $templates ) ) {
+            $invoice_row->fee_template_name = implode( '، ', wp_list_pluck( $templates, 'template_name' ) );
+            $invoice_row->fee_subject_type  = $templates[0]->subject_type ?? 'agreement';
+            $invoice_row->fee_subject_value = $templates[0]->subject_value ?? '';
+        }
+    }
+
+    $covered_children = [];
+    if ( ! empty( $invoice_row->agreement_id ) ) {
+        $agreement = $wpdb->get_row( $wpdb->prepare(
+            "SELECT payer_type, participant_type FROM {$wpdb->prefix}olama_agreements WHERE id = %d",
+            (int) $invoice_row->agreement_id
+        ) );
+
+        if ( $agreement && $agreement->payer_type === 'family' ) {
+            $covered_children = $wpdb->get_col( $wpdb->prepare(
+                "SELECT DISTINCT s.student_name
+                 FROM {$wpdb->prefix}olama_agreement_fees af
+                 LEFT JOIN {$wpdb->prefix}olama_students s
+                    ON s.student_uid = af.child_id
+                    OR s.id = CAST(af.child_id AS UNSIGNED)
+                 WHERE af.agreement_id = %d
+                   AND af.child_id IS NOT NULL
+                   AND af.child_id != ''
+                   AND s.student_name IS NOT NULL
+                 ORDER BY s.student_name ASC",
+                (int) $invoice_row->agreement_id
+            ) ) ?: [];
+        } else {
+            $covered_children = $wpdb->get_col( $wpdb->prepare(
+                "SELECT DISTINCT ch.child_name
+                 FROM {$wpdb->prefix}olama_agreement_fees af
+                 LEFT JOIN {$wpdb->prefix}olama_customer_children ch
+                    ON ch.id = CAST(af.child_id AS UNSIGNED)
+                    OR ch.child_uid = af.child_id
+                 WHERE af.agreement_id = %d
+                   AND af.child_id IS NOT NULL
+                   AND af.child_id != ''
+                   AND ch.child_name IS NOT NULL
+                 ORDER BY ch.child_name ASC",
+                (int) $invoice_row->agreement_id
+            ) ) ?: [];
+        }
+    } elseif ( ! empty( $invoice_row->direct_student_name ) ) {
+        $covered_children[] = $invoice_row->direct_student_name;
+    } elseif ( ! empty( $invoice_row->direct_child_name ) ) {
+        $covered_children[] = $invoice_row->direct_child_name;
+    }
+
+    $invoice_row->covered_children_names = array_values( array_unique( array_filter( array_map( static function ( $name ) {
+        $parts = preg_split( '/\s+/u', trim( (string) $name ) );
+        return $parts[0] ?? '';
+    }, $covered_children ) ) ) );
+}
+
 // Get years for dropdown
 $years = [];
 if ( class_exists( 'Olama_School_Academic' ) ) {
     $years = Olama_School_Academic::get_years();
 }
 
-$fee_templates = Olama_Reg_Billing_Fees::get_templates();
+$fee_templates = array_values( array_filter(
+    Olama_Reg_Billing_Fees::get_templates(),
+    static fn( $tpl ) => ( $tpl->subject_type ?? 'general' ) === 'service'
+) );
 $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 ?>
 <?php
@@ -471,6 +554,8 @@ $_inv_stats = $wpdb->get_row(
                         <th><?php esc_html_e( 'رقم الفاتورة', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'رقم الملف', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'ولي الأمر', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'النوع / نموذج الرسم', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'رقم العقد', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'تاريخ الإصدار', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'الإجمالي', 'olama-registration' ); ?></th>
                         <th><?php esc_html_e( 'الخصم', 'olama-registration' ); ?></th>
@@ -483,7 +568,7 @@ $_inv_stats = $wpdb->get_row(
                 <tbody>
                     <?php if ( empty( $invoices ) ): ?>
                         <tr>
-                            <td colspan="9" class="olama-reg-empty-state">
+                            <td colspan="12" class="olama-reg-empty-state">
                                 <span class="dashicons dashicons-info"></span><br>
                                 <?php esc_html_e( 'لم يتم العثور على أي فواتير مطابقة.', 'olama-registration' ); ?>
                             </td>
@@ -518,7 +603,48 @@ $_inv_stats = $wpdb->get_row(
                             <tr>
                                 <td><strong style="letter-spacing:0.3px;"><?php echo esc_html( $inv->invoice_number ); ?></strong></td>
                                 <td><span class="olama-reg-uid-badge"><?php echo esc_html( $inv->family_uid ); ?></span></td>
-                                <td><?php echo esc_html( $inv->father_first_name . ' ' . $inv->father_family_name ); ?></td>
+                                <td>
+                                    <?php echo esc_html( trim( $inv->father_first_name . ' ' . $inv->father_family_name ) ); ?>
+                                    <?php if ( ! empty( $inv->covered_children_names ) ) : ?>
+                                        <div style="margin-top:4px; color:var(--reg-text-muted); font-size:12px; line-height:1.6;">
+                                            <?php esc_html_e( 'الأبناء:', 'olama-registration' ); ?>
+                                            <?php echo esc_html( implode( '، ', $inv->covered_children_names ) ); ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php
+                                    $subject_type = $inv->fee_subject_type ?? '';
+                                    $type_label = '';
+                                    if ( ! empty( $inv->agreement_id ) ) {
+                                        $type_label = __( 'عقد', 'olama-registration' );
+                                    } elseif ( $subject_type === 'service' ) {
+                                        $type_label = __( 'خدمة', 'olama-registration' );
+                                    } elseif ( $subject_type === 'agreement' ) {
+                                        $type_label = __( 'عقد', 'olama-registration' );
+                                    } elseif ( $subject_type === 'general' ) {
+                                        $type_label = __( 'عام', 'olama-registration' );
+                                    }
+                                    $template_label = $inv->fee_template_name ?: ( $inv->fee_subject_value ?? '' );
+                                    ?>
+                                    <?php if ( $type_label ) : ?>
+                                        <span class="olama-reg-badge olama-reg-badge--info"><?php echo esc_html( $type_label ); ?></span>
+                                    <?php endif; ?>
+                                    <?php if ( $template_label ) : ?>
+                                        <div style="margin-top:4px; font-weight:700;"><?php echo esc_html( $template_label ); ?></div>
+                                    <?php else : ?>
+                                        <span style="color:var(--reg-text-muted);">-</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ( ! empty( $inv->agreement_id ) && ! empty( $inv->agreement_number ) ) : ?>
+                                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-agreements&action=edit&id=' . (int) $inv->agreement_id ) ); ?>" class="olama-reg-uid-badge">
+                                            <?php echo esc_html( $inv->agreement_number ); ?>
+                                        </a>
+                                    <?php else : ?>
+                                        <span style="color:var(--reg-text-muted);">-</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td style="color:var(--reg-text-muted);"><?php echo esc_html( $inv->issue_date ); ?></td>
                                 <td class="olama-reg-text--bold"><?php echo esc_html( number_format( $inv->total, 2 ) ); ?></td>
                                 <td style="color:#c62828; font-weight:700;"><?php echo esc_html( number_format( $inv->discount ?? 0, 2 ) ); ?></td>
@@ -625,16 +751,17 @@ $_inv_stats = $wpdb->get_row(
                                 <select id="inv_fee_template_id" name="fee_template_id" required>
                                     <option value=""><?php esc_html_e( '— اختر نموذج الرسوم —', 'olama-registration' ); ?></option>
                                     <?php foreach ( $fee_templates as $tpl ): ?>
-                                        <option value="<?php echo esc_attr( $tpl->id ); ?>" data-items="<?php echo esc_attr( wp_json_encode( $tpl->items ) ); ?>" data-inst="<?php echo esc_attr( $tpl->installments ); ?>">
+                                        <option value="<?php echo esc_attr( $tpl->id ); ?>"
+                                                data-items="<?php echo esc_attr( wp_json_encode( $tpl->items ) ); ?>"
+                                                data-inst="<?php echo esc_attr( $tpl->installments ); ?>"
+                                                data-subject-type="<?php echo esc_attr( $tpl->subject_type ?? 'general' ); ?>"
+                                                data-subject-value="<?php echo esc_attr( $tpl->subject_value ?? '' ); ?>">
                                             <?php echo esc_html( $tpl->template_name ); ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
-                            <div class="olama-reg-field">
-                                <label for="inv_installments"><?php esc_html_e( 'عدد أقساط السداد', 'olama-registration' ); ?></label>
-                                <input type="number" id="inv_installments" name="installments" min="1" max="12" value="1">
-                            </div>
+                            <input type="hidden" id="inv_installments" name="installments" value="1">
                             <div class="olama-reg-field">
                                 <label for="inv_status"><?php esc_html_e( 'حالة الفاتورة عند الإصدار', 'olama-registration' ); ?></label>
                                 <select id="inv_status" name="status">

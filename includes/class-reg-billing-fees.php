@@ -15,11 +15,35 @@ class Olama_Reg_Billing_Fees {
         return $wpdb->prefix . $name;
     }
 
+    private static function ensure_schema(): void {
+        global $wpdb;
+        static $checked = false;
+
+        if ( $checked ) {
+            return;
+        }
+
+        $table = self::t( 'olama_fee_templates' );
+        $columns = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'subject_type', (array) $columns, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `subject_type` varchar(20) NOT NULL DEFAULT 'general' AFTER `template_name`" );
+        }
+
+        if ( ! in_array( 'subject_value', (array) $columns, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `subject_value` varchar(255) DEFAULT NULL AFTER `subject_type`" );
+        }
+
+        $checked = true;
+    }
+
     /**
      * Get all fee templates.
      */
     public static function get_templates(): array {
         global $wpdb;
+        self::ensure_schema();
+
         $results = $wpdb->get_results(
             "SELECT * FROM " . self::t( 'olama_fee_templates' ) . " ORDER BY template_name ASC"
         ) ?: [];
@@ -31,11 +55,28 @@ class Olama_Reg_Billing_Fees {
         return $results;
     }
 
+    public static function get_agreement_templates( string $agreement_nature = '' ): array {
+        $templates = self::get_templates();
+
+        return array_values( array_filter( $templates, static function ( $template ) use ( $agreement_nature ) {
+            $subject_type = $template->subject_type ?? 'general';
+            $subject_value = (string) ( $template->subject_value ?? '' );
+
+            if ( $subject_type !== 'agreement' ) {
+                return false;
+            }
+
+            return $agreement_nature === '' || $subject_value === $agreement_nature;
+        } ) );
+    }
+
     /**
      * Get a single fee template by ID.
      */
     public static function get_template( int $id ): ?object {
         global $wpdb;
+        self::ensure_schema();
+
         $row = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM " . self::t( 'olama_fee_templates' ) . " WHERE id = %d",
             $id
@@ -60,14 +101,46 @@ class Olama_Reg_Billing_Fees {
      */
     public static function save_template( array $data ): int|\WP_Error {
         global $wpdb;
+        self::ensure_schema();
 
         $id            = absint( $data['id'] ?? 0 );
         $template_name = sanitize_text_field( $data['template_name'] ?? '' );
+        $subject_type  = sanitize_key( $data['subject_type'] ?? 'general' );
+        $subject_value = sanitize_text_field( $data['subject_value'] ?? '' );
         $grade_id      = sanitize_text_field( $data['grade_id'] ?? '' ) ?: null;
         $installments  = max( 1, absint( $data['installments'] ?? 1 ) );
 
         if ( ! $template_name ) {
             return new \WP_Error( 'missing_name', __( 'Template name is required.', 'olama-registration' ) );
+        }
+
+        if ( ! in_array( $subject_type, [ 'service', 'agreement', 'general' ], true ) ) {
+            $subject_type = 'general';
+        }
+
+        if ( $subject_type === 'general' ) {
+            $subject_value = '';
+            $installments = 1;
+        } elseif ( ! $subject_value ) {
+            return new \WP_Error( 'missing_subject', __( 'Template service or agreement type is required.', 'olama-registration' ) );
+        }
+
+        if ( $subject_type === 'service' ) {
+            $installments = 1;
+        }
+
+        if ( $subject_type === 'agreement' ) {
+            $agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
+            if ( ! is_array( $agreement_nature_installments ) ) {
+                $agreement_nature_installments = [];
+            }
+            $supports_installments = array_key_exists( $subject_value, $agreement_nature_installments )
+                ? ! empty( $agreement_nature_installments[ $subject_value ] )
+                : true;
+
+            if ( ! $supports_installments ) {
+                $installments = 1;
+            }
         }
 
         // Sanitize items array
@@ -87,6 +160,8 @@ class Olama_Reg_Billing_Fees {
 
         $payload = [
             'template_name' => $template_name,
+            'subject_type'  => $subject_type,
+            'subject_value' => $subject_value ?: null,
             'grade_id'      => $grade_id,
             'installments'  => $installments,
             'items'         => wp_json_encode( $items ),
@@ -119,6 +194,8 @@ class Olama_Reg_Billing_Fees {
      */
     public static function delete_template( int $id ): bool {
         global $wpdb;
+        self::ensure_schema();
+
         $result = $wpdb->delete( self::t( 'olama_fee_templates' ), [ 'id' => $id ] );
         return false !== $result;
     }

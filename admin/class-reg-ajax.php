@@ -26,6 +26,9 @@ class Olama_Reg_Ajax
             'olama_reg_update_invoice',
             'olama_reg_get_invoice',
             'olama_reg_cancel_invoice',
+            'olama_reg_create_invoice_adjustment',
+            'olama_reg_cancel_invoice_adjustment',
+            'olama_reg_get_invoice_activity',
             'olama_reg_record_payment',
             'olama_reg_reverse_payment',
             'olama_reg_get_receipt',
@@ -60,6 +63,9 @@ class Olama_Reg_Ajax
             'olama_reg_agr_save_clause',
             'olama_reg_agr_delete_clause',
             'olama_reg_agr_reorder_clauses',
+            'olama_reg_agr_save_due_schedule',
+            'olama_reg_agr_generate_due_schedule',
+            'olama_reg_agr_complete',
             'olama_reg_agr_generate_invoice',
             'olama_reg_agr_get_unpaid_fees',
             'olama_reg_reset_system',
@@ -549,6 +555,16 @@ class Olama_Reg_Ajax
         } else {
             $invoice->payments = [];
         }
+        $invoice->adjustments = Olama_Reg_Billing_Invoice::get_adjustments($id);
+        $invoice->activity = Olama_Reg_Billing_Invoice::get_activity($id);
+        $invoice->policy = [
+            'can_record_payment' => !is_wp_error(Olama_Reg_Billing_Invoice::can_record_payment($invoice)),
+            'can_update_financial_fields' => !is_wp_error(Olama_Reg_Billing_Invoice::can_update_financial_fields($invoice)),
+            'can_update_non_financial_fields' => !is_wp_error(Olama_Reg_Billing_Invoice::can_update_non_financial_fields($invoice)),
+            'can_cancel' => !is_wp_error(Olama_Reg_Billing_Invoice::can_cancel($invoice)),
+            'can_create_credit_note' => !is_wp_error(Olama_Reg_Billing_Invoice::can_create_credit_note($invoice)),
+            'can_create_debit_note' => !is_wp_error(Olama_Reg_Billing_Invoice::can_create_debit_note($invoice)),
+        ];
 
         wp_send_json_success(['invoice' => $invoice]);
     }
@@ -565,6 +581,53 @@ class Olama_Reg_Ajax
 
         wp_send_json_success([
             'message' => __('تم إلغاء الفاتورة بنجاح.', 'olama-registration'),
+        ]);
+    }
+
+    public function ajax_create_invoice_adjustment(): void
+    {
+        $this->guard();
+
+        $invoice_id = (int) ($_POST['invoice_id'] ?? 0);
+        $type = sanitize_key($_POST['type'] ?? '');
+        $amount = round((float) ($_POST['amount'] ?? 0), 2);
+        $reason = sanitize_text_field($_POST['reason'] ?? '');
+        $notes = sanitize_textarea_field($_POST['notes'] ?? '');
+
+        $result = Olama_Reg_Billing_Invoice::create_adjustment($invoice_id, $type, $amount, $reason, $notes);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success([
+            'message' => $type === 'credit' ? __('تم إصدار الإشعار الدائن بنجاح.', 'olama-registration') : __('تم إصدار الإشعار المدين بنجاح.', 'olama-registration'),
+            'adjustment_id' => $result,
+        ]);
+    }
+
+    public function ajax_cancel_invoice_adjustment(): void
+    {
+        $this->guard();
+
+        $id = (int) ($_POST['id'] ?? 0);
+        $result = Olama_Reg_Billing_Invoice::cancel_adjustment($id);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success([
+            'message' => __('تم إلغاء الإشعار المالي بنجاح.', 'olama-registration'),
+        ]);
+    }
+
+    public function ajax_get_invoice_activity(): void
+    {
+        $this->guard();
+        $id = (int) ($_POST['invoice_id'] ?? $_POST['id'] ?? 0);
+        wp_send_json_success([
+            'activity' => Olama_Reg_Billing_Invoice::get_activity($id),
         ]);
     }
 
@@ -1016,6 +1079,13 @@ class Olama_Reg_Ajax
     {
         $this->guard();
         $id = (int) ($_POST['id'] ?? 0);
+        $active_year_id = 0;
+        if (class_exists('Olama_School_Academic')) {
+            $active_year = Olama_School_Academic::get_active_year();
+            if ($active_year) {
+                $active_year_id = (int) $active_year->id;
+            }
+        }
 
         $participant_id = 0;
         $participant_ids = [];
@@ -1036,30 +1106,33 @@ class Olama_Reg_Ajax
             'participant_id' => $participant_id,
             'participant_ids' => $participant_ids,
             'activity_type' => sanitize_text_field($_POST['activity_type'] ?? ''),
+            'academic_year_id' => $active_year_id ?: null,
             'start_date' => sanitize_text_field($_POST['start_date'] ?? ''),
             'end_date' => sanitize_text_field($_POST['end_date'] ?? ''),
             'notes' => sanitize_textarea_field($_POST['notes'] ?? ''),
             'template_id' => absint($_POST['template_id'] ?? 0) ?: null,
         ];
 
-        if (isset($_POST['status'])) {
-            $data['status'] = sanitize_text_field($_POST['status']);
-        }
+        $data['status'] = 'draft';
 
         if (empty($data['end_date'])) {
-            $data['end_date'] = null; // Important for DB
+            $data['end_date'] = Olama_Reg_Agreement_Invoice::get_active_academic_year_end_date() ?: null;
         }
 
         if ($id > 0) {
             $old = Olama_Reg_Agreement::get($id);
             $old_template_id = $old ? $old->template_id : null;
             $old_participant_count = $old ? count($old->participant_ids_array) : 0;
+            if ($old && in_array($old->status, ['completed', 'cancelled'], true)) {
+                $data['status'] = $old->status;
+            }
 
             $result = Olama_Reg_Agreement::update($id, $data);
             if ($result) {
                 $existing_fees = Olama_Reg_Agreement_Fees::get_by_agreement($id);
                 if ($data['template_id'] && ($data['template_id'] != $old_template_id || empty($existing_fees))) {
                     Olama_Reg_Agreement_Fees::apply_template_fees($id, $data['template_id']);
+                    Olama_Reg_Agreement_Invoice::generate_default_due_schedule($id);
                 }
                 $agreement = Olama_Reg_Agreement::get($id);
                 wp_send_json_success([
@@ -1074,6 +1147,7 @@ class Olama_Reg_Ajax
                 if ($data['template_id']) {
                     Olama_Reg_Agreement_Fees::apply_template_fees($id, $data['template_id']);
                 }
+                Olama_Reg_Agreement_Invoice::generate_default_due_schedule($id);
                 $agreement = Olama_Reg_Agreement::get($id);
                 wp_send_json_success([
                     'message'          => __('تم إنشاء العقد.', 'olama-registration'),
@@ -1227,15 +1301,26 @@ class Olama_Reg_Ajax
         if (empty($data['due_date']))
             $data['due_date'] = null;
 
+        if ($data['discount'] < 0 || $data['discount'] > $data['amount']) {
+            wp_send_json_error(['message' => __('الخصم لا يجوز أن يتجاوز المبلغ الأصلي.', 'olama-registration')]);
+        }
+
+        $template = is_numeric($data['fee_category']) ? Olama_Reg_Billing_Fees::get_template((int) $data['fee_category']) : null;
+        if (!$template || ($template->subject_type ?? '') !== 'agreement') {
+            wp_send_json_error(['message' => __('يجب اختيار نموذج عقد صالح من نماذج الرسوم المرتبطة بالعقود فقط.', 'olama-registration')]);
+        }
+
         if ($id > 0) {
             $result = Olama_Reg_Agreement_Fees::update($id, $data);
             if ($result) {
+                Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
                 wp_send_json_success(['message' => __('تم تحديث الرسم.', 'olama-registration'), 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
             }
         } else {
             $data['agreement_id'] = $agreement_id;
             $new_id = Olama_Reg_Agreement_Fees::add($agreement_id, $data);
             if ($new_id) {
+                Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
                 wp_send_json_success(['message' => __('تمت إضافة الرسم.', 'olama-registration'), 'id' => $new_id, 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
             }
         }
@@ -1249,6 +1334,7 @@ class Olama_Reg_Ajax
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
 
         if (Olama_Reg_Agreement_Fees::delete($id)) {
+            Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
             wp_send_json_success(['message' => __('تم حذف الرسم.', 'olama-registration'), 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
         }
         wp_send_json_error(['message' => __('لا يمكن حذف هذا الرسم.', 'olama-registration')]);
@@ -1301,9 +1387,66 @@ class Olama_Reg_Ajax
         wp_send_json_error();
     }
 
+    public function ajax_agr_save_due_schedule(): void
+    {
+        $this->guard();
+        $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $lines = json_decode(stripslashes($_POST['lines'] ?? '[]'), true);
+        if (!is_array($lines)) {
+            $lines = [];
+        }
+
+        $result = Olama_Reg_Agreement_Invoice::save_due_schedule($agreement_id, $lines);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success([
+            'message' => __('تم حفظ توزيع الاستحقاق.', 'olama-registration'),
+            'schedule' => Olama_Reg_Agreement_Invoice::get_due_schedule($agreement_id),
+        ]);
+    }
+
+    public function ajax_agr_generate_due_schedule(): void
+    {
+        $this->guard();
+        $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+
+        $result = Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success([
+            'message' => __('تم إنشاء توزيع الاستحقاق المقترح.', 'olama-registration'),
+            'schedule' => Olama_Reg_Agreement_Invoice::get_due_schedule($agreement_id),
+        ]);
+    }
+
+    public function ajax_agr_complete(): void
+    {
+        $this->guard();
+        $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $lines = json_decode(stripslashes($_POST['lines'] ?? '[]'), true);
+        if (is_array($lines)) {
+            $saved = Olama_Reg_Agreement_Invoice::save_due_schedule($agreement_id, $lines);
+            if (is_wp_error($saved)) {
+                wp_send_json_error(['message' => $saved->get_error_message()]);
+            }
+        }
+
+        $result = Olama_Reg_Agreement_Invoice::complete_agreement($agreement_id);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success(['message' => __('تم إكمال العقد وإنشاء الفاتورة بنجاح.', 'olama-registration')]);
+    }
+
     public function ajax_agr_generate_invoice(): void
     {
         $this->guard();
+        wp_send_json_error(['message' => __('يتم إنشاء فاتورة العقد فقط عند إكمال العقد بعد تحقق جميع الشروط.', 'olama-registration')]);
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
         $fee_ids = isset($_POST['fee_ids']) && is_array($_POST['fee_ids']) ? array_map('intval', $_POST['fee_ids']) : [];
 
@@ -3242,4 +3385,3 @@ class Olama_Reg_Ajax
     }
 
 }
-

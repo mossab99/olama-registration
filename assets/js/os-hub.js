@@ -1481,6 +1481,9 @@
                             });
                         }
                     }
+                    if (window.olamaRegSyncAgreementFeeTemplateOptions) {
+                        window.olamaRegSyncAgreementFeeTemplateOptions($('#os-agr-fees-table'));
+                    }
                     $('#os-agr-total-label').text(parseFloat(agreement.total_amount).toFixed(3));
                 });
 

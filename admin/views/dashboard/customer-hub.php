@@ -150,6 +150,10 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
     $years = Olama_School_Academic::get_years();
 }
 $fee_templates = Olama_Reg_Billing_Fees::get_templates();
+$invoice_fee_templates = array_values( array_filter(
+    $fee_templates,
+    static fn( $tpl ) => ( $tpl->subject_type ?? 'general' ) === 'service'
+) );
 $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
 $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 ?>
@@ -209,17 +213,18 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
                             <label for="inv_fee_template_id"><?php esc_html_e( 'استيراد بنود نموذج رسوم', 'olama-registration' ); ?></label>
                             <select id="inv_fee_template_id" name="fee_template_id" required>
                                 <option value=""><?php esc_html_e( '— اختر نموذج الرسوم —', 'olama-registration' ); ?></option>
-                                <?php foreach ( $fee_templates as $tpl ): ?>
-                                    <option value="<?php echo esc_attr( $tpl->id ); ?>" data-items="<?php echo esc_attr( wp_json_encode( $tpl->items ) ); ?>" data-inst="<?php echo esc_attr( $tpl->installments ); ?>">
+                                <?php foreach ( $invoice_fee_templates as $tpl ): ?>
+                                    <option value="<?php echo esc_attr( $tpl->id ); ?>"
+                                            data-items="<?php echo esc_attr( wp_json_encode( $tpl->items ) ); ?>"
+                                            data-inst="<?php echo esc_attr( $tpl->installments ); ?>"
+                                            data-subject-type="<?php echo esc_attr( $tpl->subject_type ?? 'general' ); ?>"
+                                            data-subject-value="<?php echo esc_attr( $tpl->subject_value ?? '' ); ?>">
                                         <?php echo esc_html( $tpl->template_name ); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="olama-reg-field">
-                            <label for="inv_installments"><?php esc_html_e( 'عدد أقساط السداد', 'olama-registration' ); ?></label>
-                            <input type="number" id="inv_installments" name="installments" min="1" max="12" value="1">
-                        </div>
+                        <input type="hidden" id="inv_installments" name="installments" value="1">
                         <div class="olama-reg-field">
                             <label for="inv_status"><?php esc_html_e( 'حالة الفاتورة عند الإصدار', 'olama-registration' ); ?></label>
                             <select id="inv_status" name="status">
@@ -347,8 +352,13 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
                                     <option value=""><?php esc_html_e('اختر طبيعة العقد', 'olama-registration'); ?></option>
                                     <?php
                                     $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
+                                    $agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
+                                    if ( ! is_array( $agreement_nature_installments ) ) {
+                                        $agreement_nature_installments = [];
+                                    }
                                     foreach ($agreement_natures as $nature) {
-                                        echo '<option value="' . esc_attr($nature) . '">' . esc_html($nature) . '</option>';
+                                        $has_installments = array_key_exists( $nature, $agreement_nature_installments ) ? ! empty( $agreement_nature_installments[ $nature ] ) : true;
+                                        echo '<option value="' . esc_attr($nature) . '" data-has-installments="' . ( $has_installments ? '1' : '0' ) . '">' . esc_html($nature) . '</option>';
                                     }
                                     ?>
                                 </select>
@@ -424,11 +434,6 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
                         <div style="margin-top: 20px; display:flex; justify-content:space-between; align-items:center;">
                             <button type="button" class="olama-reg-btn olama-reg-btn--secondary" id="os-agr-add-fee-row">
                                 <span class="dashicons dashicons-plus" style="margin-top:4px;"></span> <?php esc_html_e('إضافة بند رسوم', 'olama-registration'); ?>
-                            </button>
-                            <button type="button" class="olama-reg-btn olama-reg-btn--primary" id="os-agr-open-invoice-modal"
-                                data-status=""
-                                data-has-unpaid="0">
-                                <span class="dashicons dashicons-media-document" style="margin-top:4px;"></span> <?php esc_html_e('معالجة الرسوم (دفعات مخصصة)', 'olama-registration'); ?>
                             </button>
                         </div>
                     </div>
@@ -524,7 +529,7 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
                             foreach ($tpl->items as $it) {
                                 $total += (float) ($it['amount'] ?? 0);
                             }
-                            echo '<option value="' . esc_attr($tpl->id) . '" data-name="' . esc_attr($tpl->template_name) . '" data-amount="' . esc_attr($total) . '">' . esc_html($tpl->template_name) . '</option>';
+                            echo '<option value="' . esc_attr($tpl->id) . '" data-name="' . esc_attr($tpl->template_name) . '" data-amount="' . esc_attr($total) . '" data-subject-type="' . esc_attr($tpl->subject_type ?? 'general') . '" data-subject-value="' . esc_attr($tpl->subject_value ?? '') . '">' . esc_html($tpl->template_name) . '</option>';
                         }
                     }
                     ?>
@@ -751,7 +756,10 @@ $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نش
                                     foreach ( $fee_templates as $fee ) :
                                         $total_val = array_sum( array_column( $fee->items, 'amount' ) );
                                     ?>
-                                        <option value="<?php echo esc_attr($fee->id); ?>" data-amount="<?php echo esc_attr($total_val); ?>">
+                                        <option value="<?php echo esc_attr($fee->id); ?>"
+                                                data-amount="<?php echo esc_attr($total_val); ?>"
+                                                data-subject-type="<?php echo esc_attr( $fee->subject_type ?? 'general' ); ?>"
+                                                data-subject-value="<?php echo esc_attr( $fee->subject_value ?? '' ); ?>">
                                             <?php echo esc_html($fee->template_name); ?> (<?php echo number_format($total_val, 2); ?>)
                                         </option>
                                     <?php endforeach; ?>
@@ -954,6 +962,3 @@ include OLAMA_REG_PATH . 'admin/views/partial-customer-modal.php';
         </form>
     </div>
 </div>
-
-
-

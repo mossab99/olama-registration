@@ -25,11 +25,14 @@ class Olama_Reg_Activator {
 
         self::create_financial_table( $wpdb, $charset );
         self::create_billing_tables( $wpdb, $charset );
+        self::create_billing_control_tables( $wpdb, $charset );
         self::create_settlement_receipts_table( $wpdb, $charset );
         self::create_customers_table( $wpdb, $charset );
         self::create_customer_children_table( $wpdb, $charset );
         self::create_agreements_tables( $wpdb, $charset );
         self::upgrade_invoices_table( $wpdb );
+        self::upgrade_payments_table( $wpdb );
+        self::upgrade_installments_table( $wpdb );
     }
 
 
@@ -162,6 +165,32 @@ class Olama_Reg_Activator {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `agreement_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `id`" );
             $wpdb->query( "ALTER TABLE {$table} ADD KEY `agreement_id` (`agreement_id`)" );
         }
+        if ( ! in_array( 'cancelled_by', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cancelled_by` bigint(20) UNSIGNED DEFAULT NULL AFTER `created_by`" );
+        }
+        if ( ! in_array( 'cancelled_at', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cancelled_at` datetime DEFAULT NULL AFTER `cancelled_by`" );
+        }
+    }
+
+    private static function upgrade_payments_table( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_payments';
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'reversed_payment_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `reversed_payment_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `reference`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `reversed_payment_id` (`reversed_payment_id`)" );
+        }
+    }
+
+    private static function upgrade_installments_table( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_invoice_installments';
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'agreement_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `agreement_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `invoice_id`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `agreement_id` (`agreement_id`)" );
+        }
     }
 
 
@@ -205,6 +234,8 @@ class Olama_Reg_Activator {
         $sql_fee_templates = "CREATE TABLE {$wpdb->prefix}olama_fee_templates (
             id mediumint(9) NOT NULL AUTO_INCREMENT,
             template_name varchar(255) NOT NULL,
+            subject_type varchar(20) NOT NULL DEFAULT 'general',
+            subject_value varchar(255) DEFAULT NULL,
             grade_id varchar(100) DEFAULT NULL,
             installments int(11) DEFAULT 1,
             items text DEFAULT NULL,
@@ -254,13 +285,15 @@ class Olama_Reg_Activator {
         $sql_installments = "CREATE TABLE {$wpdb->prefix}olama_invoice_installments (
             id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
             invoice_id bigint(20) UNSIGNED NOT NULL,
+            agreement_id bigint(20) UNSIGNED DEFAULT NULL,
             installment_no int(11) NOT NULL,
             due_date date DEFAULT NULL,
             amount_due decimal(10,2) NOT NULL DEFAULT 0.00,
             amount_paid decimal(10,2) NOT NULL DEFAULT 0.00,
             status varchar(50) NOT NULL DEFAULT 'pending',
             PRIMARY KEY  (id),
-            KEY invoice_id (invoice_id)
+            KEY invoice_id (invoice_id),
+            KEY agreement_id (agreement_id)
         ) {$charset};";
 
         // 5. Payments
@@ -302,6 +335,48 @@ class Olama_Reg_Activator {
         dbDelta( $sql_installments );
         dbDelta( $sql_payments );
         dbDelta( $sql_audit );
+    }
+
+    private static function create_billing_control_tables( $wpdb, string $charset ): void {
+        $sql_allocations = "CREATE TABLE {$wpdb->prefix}olama_payment_allocations (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            payment_id bigint(20) UNSIGNED NOT NULL,
+            invoice_id bigint(20) UNSIGNED NOT NULL,
+            installment_id bigint(20) UNSIGNED DEFAULT NULL,
+            amount decimal(10,2) NOT NULL DEFAULT 0.00,
+            allocation_date date DEFAULT NULL,
+            type varchar(20) NOT NULL DEFAULT 'normal',
+            reversed_allocation_id bigint(20) UNSIGNED DEFAULT NULL,
+            created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY  (id),
+            KEY payment_id (payment_id),
+            KEY invoice_id (invoice_id),
+            KEY installment_id (installment_id),
+            KEY reversed_allocation_id (reversed_allocation_id)
+        ) {$charset};";
+
+        $sql_adjustments = "CREATE TABLE {$wpdb->prefix}olama_invoice_adjustments (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            adjustment_no varchar(50) NOT NULL,
+            invoice_id bigint(20) UNSIGNED NOT NULL,
+            type varchar(20) NOT NULL,
+            amount decimal(10,2) NOT NULL DEFAULT 0.00,
+            reason varchar(255) NOT NULL DEFAULT '',
+            notes text DEFAULT NULL,
+            status varchar(20) NOT NULL DEFAULT 'issued',
+            created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            cancelled_by bigint(20) UNSIGNED DEFAULT NULL,
+            cancelled_at datetime DEFAULT NULL,
+            PRIMARY KEY  (id),
+            UNIQUE KEY adjustment_no (adjustment_no),
+            KEY invoice_id (invoice_id),
+            KEY type_status (type,status)
+        ) {$charset};";
+
+        dbDelta( $sql_allocations );
+        dbDelta( $sql_adjustments );
     }
 
     // ── Create Settlement Receipts Table ───────────────────────────────────────

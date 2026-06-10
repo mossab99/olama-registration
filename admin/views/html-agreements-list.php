@@ -42,7 +42,6 @@ $table->prepare_items();
                     <select name="status">
                         <option value=""><?php esc_html_e( 'جميع الحالات', 'olama-registration' ); ?></option>
                         <option value="draft" <?php selected( $_REQUEST['status'] ?? '', 'draft' ); ?>><?php esc_html_e( 'مسودة', 'olama-registration' ); ?></option>
-                        <option value="active" <?php selected( $_REQUEST['status'] ?? '', 'active' ); ?>><?php esc_html_e( 'فعال', 'olama-registration' ); ?></option>
                         <option value="completed" <?php selected( $_REQUEST['status'] ?? '', 'completed' ); ?>><?php esc_html_e( 'مكتمل', 'olama-registration' ); ?></option>
                         <option value="cancelled" <?php selected( $_REQUEST['status'] ?? '', 'cancelled' ); ?>><?php esc_html_e( 'ملغي', 'olama-registration' ); ?></option>
                     </select>

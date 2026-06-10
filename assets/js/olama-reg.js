@@ -7,7 +7,16 @@
     // ── Utilities ────────────────────────────────────────────────────────────
 
     function showNotice(msg, isError = false) {
-        const $n = $('#olama-reg-notice');
+        let $n = $('#olama-reg-notice');
+        if (!$n.length) {
+            const $anchor = $('.olama-reg-page-header').first();
+            $n = $('<div id="olama-reg-notice" class="olama-reg-notice" style="display:none; white-space:pre-line;"></div>');
+            if ($anchor.length) {
+                $anchor.after($n);
+            } else {
+                $('body').prepend($n);
+            }
+        }
         $n.removeClass('olama-reg-notice--error')
             .text(msg)
             .show()
@@ -32,6 +41,14 @@
         if ($btn) setLoading($btn, true);
         return $.post(R.ajaxurl, { action, nonce: R.nonce, ...data })
             .always(() => { if ($btn) setLoading($btn, false); });
+    }
+
+    function parseMoney(value) {
+        const cleaned = String(value || '')
+            .replace(/[,،]/g, '')
+            .replace(/[^\d.\-]/g, '');
+        const parsed = parseFloat(cleaned);
+        return Number.isFinite(parsed) ? parsed : 0;
     }
 
     // ── Tab Navigation ────────────────────────────────────────────────────────
@@ -474,6 +491,29 @@
         $('#olama-reg-fee-total-label').text(total.toFixed(2));
     }
 
+    function syncFeeTemplateSubject() {
+        const type = $('#subject_type').val() || 'service';
+        const $activeSelect = $(`.fee-template-subject-value[data-subject-type="${type}"]`);
+        const value = $activeSelect.val() || '';
+        const supportsInstallments = type === 'agreement' && String($activeSelect.find(':selected').data('has-installments')) !== '0';
+
+        $('.fee-template-subject-value, .fee-template-subject-label').hide();
+        $activeSelect.show().prop('required', true);
+        $('.fee-template-subject-value').not($activeSelect).prop('required', false);
+        $(`.fee-template-subject-label--${type}`).show();
+        $('#subject_value').val(value);
+
+        if (supportsInstallments) {
+            $('#fee-template-installments-field').show();
+        } else {
+            $('#fee-template-installments-field').hide();
+            $('#installments').val(1);
+        }
+    }
+
+    $(document).on('change', '#subject_type, .fee-template-subject-value', syncFeeTemplateSubject);
+    $(syncFeeTemplateSubject);
+
     function reindexFeeItems() {
         const $tbody = $('#olama-reg-fee-items-table tbody');
         const $rows = $tbody.find('tr');
@@ -518,6 +558,8 @@
 
     $(document).on('submit', '#olama-reg-fee-template-form', function (e) {
         e.preventDefault();
+        syncFeeTemplateSubject();
+
         const $btn = $('#olama-reg-save-fee-template-btn');
         const formData = {};
         $(this).find('[name]').each(function () {
@@ -589,8 +631,71 @@
         calculateInvoiceTotals();
     }
 
+    function optionMatchesSubject(option, expectedType, expectedValue, includeGeneral = true) {
+        const $opt = $(option);
+        const type = String($opt.data('subject-type') || 'general');
+        const value = String($opt.data('subject-value') || '');
+
+        if (!$opt.val()) return true;
+        if (type === 'general') return includeGeneral;
+        return type === expectedType && value === String(expectedValue || '');
+    }
+
+    function filterTemplateSelect($select, expectedType, expectedValue, keepSelected = false, includeGeneral = true) {
+        const currentValue = $select.val();
+        let currentStillVisible = false;
+
+        $select.find('option').each(function () {
+            const isCurrent = currentValue && String($(this).val()) === String(currentValue);
+            const shouldShow = optionMatchesSubject(this, expectedType, expectedValue, includeGeneral) || (keepSelected && isCurrent);
+            $(this).prop('hidden', !shouldShow).prop('disabled', !shouldShow);
+            if (isCurrent && shouldShow) currentStillVisible = true;
+        });
+
+        if (currentValue && !currentStillVisible) {
+            $select.val('');
+        }
+    }
+
+    function syncInvoiceTemplateOptions() {
+        const serviceType = $('#inv_service_type').val() || '';
+        filterTemplateSelect($('#inv_fee_template_id'), 'service', serviceType, false, false);
+        $('#inv_installments').val(1);
+    }
+
+    function syncCustomPaymentTemplateOptions() {
+        const serviceType = $('#cp_service_type').val() || '';
+        filterTemplateSelect($('#cp_fee_template'), 'service', serviceType, false, false);
+    }
+
+    function getCurrentAgreementNature() {
+        return $('#os-agr-activity-modal').val() || $('#os-agr-activity').val() || '';
+    }
+
+    function syncAgreementFeeTemplateOptions(scope) {
+        const nature = getCurrentAgreementNature();
+        const $scope = scope ? $(scope) : $(document);
+        $scope.find('.os-agr-fee-template-select').each(function () {
+            filterTemplateSelect($(this), 'agreement', nature, true);
+        });
+    }
+    window.olamaRegSyncAgreementFeeTemplateOptions = syncAgreementFeeTemplateOptions;
+
+    $(document).on('change', '#inv_service_type', syncInvoiceTemplateOptions);
+    $(document).on('change', '#cp_service_type', syncCustomPaymentTemplateOptions);
+    $(document).on('change', '#os-agr-activity, #os-agr-activity-modal', function () {
+        syncAgreementFeeTemplateOptions();
+    });
+
+    $(function () {
+        syncInvoiceTemplateOptions();
+        syncCustomPaymentTemplateOptions();
+        syncAgreementFeeTemplateOptions();
+    });
+
     $(document).on('click', '#olama-reg-open-invoice-modal-btn', function () {
         $('#olama-reg-invoice-modal').fadeIn(200);
+        syncInvoiceTemplateOptions();
 
         // Select2 for family select with AJAX search
         if (typeof $.fn.select2 !== 'undefined' && $('#inv_family_uid').length && !$('#inv_family_uid').hasClass('select2-hidden-accessible')) {
@@ -659,7 +764,7 @@
         const inst = parseInt($opt.data('inst')) || 1;
         const itemsRaw = $opt.data('items');
 
-        $('#inv_installments').val(inst);
+        $('#inv_installments').val(1);
 
         const $tbody = $('#olama-reg-invoice-items-table tbody');
         $tbody.find('tr').not('.olama-reg-empty-items-row').remove();
@@ -849,7 +954,10 @@
                             statusLabel = 'ملغاة';
                             break;
                     }
-                    $('#drawer-status-badge').html(`<span class="olama-reg-badge ${statusClass}">${statusLabel}</span>`);
+                    const overdueBadge = inv.is_overdue && inv.status !== 'overdue'
+                        ? ' <span class="olama-reg-badge olama-reg-badge--blacklist">متأخرة</span>'
+                        : '';
+                    $('#drawer-status-badge').html(`<span class="olama-reg-badge ${statusClass}">${statusLabel}</span>${overdueBadge}`);
 
                     // Populate items
                     const $itemsBody = $('#drawer-items-table tbody');
@@ -874,10 +982,16 @@
                             let instStatusClass = 'olama-reg-badge--inactive';
                             let instStatusLabel = 'معلق';
                             switch (inst.status) {
+                                case 'unpaid':
+                                case 'pending':
+                                    instStatusClass = 'olama-reg-badge--inactive';
+                                    instStatusLabel = 'غير مسدد';
+                                    break;
                                 case 'paid':
                                     instStatusClass = 'olama-reg-badge--active';
                                     instStatusLabel = 'مسدد';
                                     break;
+                                case 'partially_paid':
                                 case 'partial':
                                     instStatusClass = 'olama-reg-badge--active';
                                     instStatusLabel = 'جزئي';
@@ -897,6 +1011,8 @@
                                 <td><span class="olama-reg-badge ${instStatusClass}">${instStatusLabel}</span></td>
                             </tr>`);
                         });
+                    } else {
+                        $instBody.append('<tr><td colspan="5" style="text-align:center; color:#6b7280;">لا يوجد جدول استحقاق مرتبط بهذه الفاتورة.</td></tr>');
                     }
 
                     // Populate payments (سجل الدفعات السابقة)
@@ -932,10 +1048,69 @@
                         $paySection.hide();
                     }
 
+                    let $activitySection = $('#drawer-activity-section');
+                    if (!$activitySection.length) {
+                        $activitySection = $(`
+                            <div class="olama-reg-section" id="drawer-activity-section">
+                                <h3 class="olama-reg-section-title">حركات الفاتورة</h3>
+                                <div class="olama-reg-table-wrap">
+                                    <table class="olama-reg-fin-table" id="drawer-activity-table">
+                                        <thead>
+                                            <tr>
+                                                <th>التاريخ</th>
+                                                <th>نوع الحركة</th>
+                                                <th>الرقم المرجعي</th>
+                                                <th>المستخدم</th>
+                                                <th>المبلغ</th>
+                                                <th>الوصف</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `);
+                        $('#drawer-payments-section').after($activitySection);
+                    }
+                    const $activityBody = $('#drawer-activity-table tbody');
+                    $activityBody.empty();
+                    if (inv.activity && inv.activity.length) {
+                        inv.activity.forEach(ev => {
+                            const amount = ev.amount === '' || ev.amount === null ? '—' : parseFloat(ev.amount).toFixed(2);
+                            $activityBody.append(`
+                                <tr>
+                                    <td>${ev.date || '—'}</td>
+                                    <td>${ev.type || '—'}</td>
+                                    <td>${ev.reference || '—'}</td>
+                                    <td>${ev.user || '—'}</td>
+                                    <td>${amount}</td>
+                                    <td>${ev.description || '—'}</td>
+                                </tr>
+                            `);
+                        });
+                    } else {
+                        $activityBody.append('<tr><td colspan="6" style="text-align:center; color:#6b7280;">لا توجد حركات مسجلة.</td></tr>');
+                    }
+
                     // Payment record trigger
                     const $drawerActions = $('#olama-reg-invoice-drawer').find('.olama-reg-form-actions');
-                    $drawerActions.find('.olama-reg-pay-invoice-trigger').remove();
-                    if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                    $drawerActions.find('.olama-reg-pay-invoice-trigger, .olama-reg-adjustment-trigger').remove();
+                    const policy = inv.policy || {};
+                    if (policy.can_create_debit_note) {
+                        $drawerActions.prepend(`
+                            <button type="button" class="button olama-reg-adjustment-trigger" data-type="debit" data-id="${inv.id}">
+                                إشعار مدين
+                            </button>
+                        `);
+                    }
+                    if (policy.can_create_credit_note) {
+                        $drawerActions.prepend(`
+                            <button type="button" class="button olama-reg-adjustment-trigger" data-type="credit" data-id="${inv.id}">
+                                إشعار دائن
+                            </button>
+                        `);
+                    }
+                    if (policy.can_record_payment) {
                         $drawerActions.prepend(`
                             <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger" 
                                     data-id="${inv.id}" data-no="${inv.invoice_number}" data-bal="${inv.balance}" data-family="${inv.family_uid}">
@@ -953,6 +1128,40 @@
 
     $(document).on('click', '.olama-reg-drawer-close', function () {
         $('#olama-reg-invoice-drawer').fadeOut(200);
+    });
+
+    $(document).on('click', '.olama-reg-adjustment-trigger', function () {
+        const $btn = $(this);
+        const invoiceId = $btn.data('id');
+        const type = $btn.data('type');
+        const label = type === 'credit' ? 'الإشعار الدائن' : 'الإشعار المدين';
+        const amount = prompt(`أدخل قيمة ${label}`);
+        if (amount === null) return;
+        const parsedAmount = parseMoney(amount);
+        if (parsedAmount <= 0) {
+            showNotice('يجب أن تكون قيمة الإشعار أكبر من صفر.', true);
+            return;
+        }
+        const reason = prompt(`أدخل سبب ${label}`);
+        if (reason === null) return;
+        if (!String(reason).trim()) {
+            showNotice('يجب إدخال سبب الإشعار المالي.', true);
+            return;
+        }
+
+        ajax('olama_reg_create_invoice_adjustment', {
+            invoice_id: invoiceId,
+            type,
+            amount: parsedAmount,
+            reason
+        }, $btn).done(res => {
+            if (res.success) {
+                showNotice(res.data.message);
+                setTimeout(() => window.location.reload(), 700);
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(() => showNotice(R.strings.error, true));
     });
 
     // ── Billing - Payments & Receipts ────────────────────────────────────────
@@ -2479,7 +2688,10 @@
                                         statusLabel = 'ملغاة';
                                         break;
                                 }
-                                $('#drawer-status-badge').html(`<span class="olama-reg-badge ${statusClass}">${statusLabel}</span>`);
+                                const overdueBadge = inv.is_overdue && inv.status !== 'overdue'
+                                    ? ' <span class="olama-reg-badge olama-reg-badge--blacklist">متأخرة</span>'
+                                    : '';
+                                $('#drawer-status-badge').html(`<span class="olama-reg-badge ${statusClass}">${statusLabel}</span>${overdueBadge}`);
 
                                 // Populate items
                                 const $itemsBody = $('#drawer-items-table tbody');
@@ -2504,10 +2716,16 @@
                                         let instStatusClass = 'olama-reg-badge--inactive';
                                         let instStatusLabel = 'معلق';
                                         switch (inst.status) {
+                                            case 'unpaid':
+                                            case 'pending':
+                                                instStatusClass = 'olama-reg-badge--inactive';
+                                                instStatusLabel = 'غير مسدد';
+                                                break;
                                             case 'paid':
                                                 instStatusClass = 'olama-reg-badge--active';
                                                 instStatusLabel = 'مسدد';
                                                 break;
+                                            case 'partially_paid':
                                             case 'partial':
                                                 instStatusClass = 'olama-reg-badge--active';
                                                 instStatusLabel = 'جزئي';
@@ -2527,12 +2745,29 @@
                                             <td><span class="olama-reg-badge ${instStatusClass}">${instStatusLabel}</span></td>
                                         </tr>`);
                                     });
+                                } else {
+                                    $instBody.append('<tr><td colspan="5" style="text-align:center; color:#6b7280;">لا يوجد جدول استحقاق مرتبط بهذه الفاتورة.</td></tr>');
                                 }
 
                                 // Payment record trigger
                                 const $drawerActions = $('#olama-reg-invoice-drawer').find('.olama-reg-form-actions');
-                                $drawerActions.find('.olama-reg-pay-invoice-trigger').remove();
-                                if (parseFloat(inv.balance) > 0 && inv.status !== 'cancelled' && inv.status !== 'draft') {
+                                $drawerActions.find('.olama-reg-pay-invoice-trigger, .olama-reg-adjustment-trigger').remove();
+                                const policy = inv.policy || {};
+                                if (policy.can_create_debit_note) {
+                                    $drawerActions.prepend(`
+                                        <button type="button" class="button olama-reg-adjustment-trigger" data-type="debit" data-id="${inv.id}">
+                                            إشعار مدين
+                                        </button>
+                                    `);
+                                }
+                                if (policy.can_create_credit_note) {
+                                    $drawerActions.prepend(`
+                                        <button type="button" class="button olama-reg-adjustment-trigger" data-type="credit" data-id="${inv.id}">
+                                            إشعار دائن
+                                        </button>
+                                    `);
+                                }
+                                if (policy.can_record_payment) {
                                     $drawerActions.prepend(`
                                         <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger" 
                                                 data-id="${inv.id}" data-no="${inv.invoice_number}" data-bal="${inv.balance}" data-family="${inv.family_uid}">
@@ -2727,6 +2962,17 @@
         }
 
         $('#os-agr-fees-table tbody').append($template);
+        syncAgreementFeeTemplateOptions($template);
+        const $feeSelect = $template.find('.os-agr-fee-template-select');
+        if (!$feeSelect.val()) {
+            const firstValue = $feeSelect.find('option:not(:disabled):not([hidden])').filter(function () {
+                return $(this).val();
+            }).first().val();
+            if (firstValue) {
+                $feeSelect.val(firstValue);
+            }
+        }
+        $feeSelect.trigger('change');
         initDatepickers($('#os-agr-fees-table tbody tr').last());
     });
 
@@ -2744,6 +2990,18 @@
         if (amount !== undefined) {
             $tr.find('[name="amount"]').val(amount).trigger('input');
         }
+    });
+
+    $(function () {
+        $('.os-agr-fee-template-select').each(function () {
+            const $select = $(this);
+            const $tr = $select.closest('tr');
+            const currentAmount = parseFloat($tr.find('[name="amount"]').val()) || 0;
+            const templateAmount = parseFloat($select.find('option:selected').data('amount')) || 0;
+            if (currentAmount <= 0 && templateAmount > 0) {
+                $select.trigger('change');
+            }
+        });
     });
 
     $(document).on('input', '.os-agr-fee-calc', function () {
@@ -2834,6 +3092,143 @@
             }
         });
     }
+
+    function collectAgreementDueLines() {
+        const lines = [];
+        $('#os-agr-due-table tbody tr').each(function () {
+            const dueDate = $(this).find('.os-agr-due-date').val();
+            const amount = parseMoney($(this).find('.os-agr-due-amount').val());
+            if (dueDate && amount > 0) {
+                lines.push({ due_date: dueDate, amount: amount });
+            }
+        });
+        return lines;
+    }
+
+    function updateAgreementDueTotals() {
+        let total = 0;
+        $('#os-agr-due-table tbody tr').each(function (idx) {
+            $(this).find('.os-agr-due-no').text(idx + 1);
+            total += parseMoney($(this).find('.os-agr-due-amount').val());
+        });
+
+        const net = parseMoney($('#os-agr-total-label').text()) || parseMoney($('#os-agr-due-net').text());
+        const diff = net - total;
+        $('#os-agr-due-net').text(net.toFixed(2));
+        $('#os-agr-due-total').text(total.toFixed(2));
+        $('#os-agr-due-diff').text(diff.toFixed(2));
+        $('#os-agr-due-warning').toggle(Math.abs(diff) > 0.009);
+    }
+
+    function renderAgreementDueSchedule(schedule) {
+        const $tbody = $('#os-agr-due-table tbody');
+        $tbody.empty();
+        (schedule || []).forEach(function (line) {
+            const amount = parseMoney(line.amount_due || 0);
+            const paid = parseMoney(line.amount_paid || 0);
+            const remaining = Math.max(0, amount - paid);
+            $tbody.append(`
+                <tr>
+                    <td class="os-agr-due-no">${line.installment_no || ''}</td>
+                    <td><input type="text" class="os-datepicker os-agr-due-date" value="${line.due_date || ''}" style="width:100%;"></td>
+                    <td><input type="number" step="0.01" min="0.01" class="os-agr-due-amount" value="${amount.toFixed(2)}" style="width:100%;"></td>
+                    <td>${paid.toFixed(2)}</td>
+                    <td>${remaining.toFixed(2)}</td>
+                    <td>${line.status || 'unpaid'}</td>
+                    <td><button type="button" class="button button-small os-agr-delete-due">X</button></td>
+                </tr>
+            `);
+        });
+        initDatepickers($tbody);
+        updateAgreementDueTotals();
+    }
+
+    $(document).on('input change', '.os-agr-due-date, .os-agr-due-amount', updateAgreementDueTotals);
+
+    $(document).on('click', '#os-agr-add-due-row', function () {
+        const nextNo = $('#os-agr-due-table tbody tr').length + 1;
+        $('#os-agr-due-table tbody').append(`
+            <tr>
+                <td class="os-agr-due-no">${nextNo}</td>
+                <td><input type="text" class="os-datepicker os-agr-due-date" value="" style="width:100%;"></td>
+                <td><input type="number" step="0.01" min="0.01" class="os-agr-due-amount" value="0.00" style="width:100%;"></td>
+                <td>0.00</td>
+                <td>0.00</td>
+                <td>unpaid</td>
+                <td><button type="button" class="button button-small os-agr-delete-due">X</button></td>
+            </tr>
+        `);
+        initDatepickers($('#os-agr-due-table tbody tr').last());
+        updateAgreementDueTotals();
+    });
+
+    $(document).on('click', '.os-agr-delete-due', function () {
+        $(this).closest('tr').remove();
+        if ($('#os-agr-due-table tbody tr').length === 0) {
+            $('#os-agr-add-due-row').trigger('click');
+            $('#os-agr-due-table tbody tr:last .os-agr-due-amount').val(parseMoney($('#os-agr-due-net').text()).toFixed(2));
+        }
+        updateAgreementDueTotals();
+    });
+
+    $(document).on('click', '#os-agr-save-due', function () {
+        const $btn = $(this);
+        const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
+        ajax('olama_reg_agr_save_due_schedule', {
+            agreement_id: agrId,
+            lines: JSON.stringify(collectAgreementDueLines())
+        }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data.message);
+                renderAgreementDueSchedule(res.data.schedule);
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        });
+    });
+
+    $(document).on('click', '#os-agr-regenerate-due', function () {
+        const $btn = $(this);
+        const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
+        ajax('olama_reg_agr_generate_due_schedule', { agreement_id: agrId }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data.message);
+                renderAgreementDueSchedule(res.data.schedule);
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        });
+    });
+
+    $(document).on('click', '#os-agr-complete-agreement', function () {
+        const $btn = $(this);
+        const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
+        updateAgreementDueTotals();
+        if ($('#os-agr-due-warning').is(':visible')) {
+            showNotice('مجموع الاستحقاقات لا يساوي صافي العقد. يرجى تعديل توزيع الاستحقاق قبل الحفظ.', true);
+            return;
+        }
+        const hasClause = $('#os-agr-clauses-list .os-agr-clause-text').filter(function () {
+            return $.trim($(this).val()).length > 0;
+        }).length > 0;
+        if (!hasClause) {
+            showNotice('لا يمكن إكمال العقد قبل إضافة بند أو شرط واحد على الأقل.', true);
+            return;
+        }
+        ajax('olama_reg_agr_complete', {
+            agreement_id: agrId,
+            lines: JSON.stringify(collectAgreementDueLines())
+        }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data.message);
+                setTimeout(function () { window.location.reload(); }, 900);
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        });
+    });
+
+    updateAgreementDueTotals();
 
     $(document).on('change', '#os-agr-clause-bank-select', function () {
         const text = $(this).val();

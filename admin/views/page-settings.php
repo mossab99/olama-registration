@@ -15,9 +15,23 @@ if ( $_SERVER['REQUEST_METHOD'] === 'POST' && isset( $_POST['olama_reg_settings_
     }
 
     if ( isset( $_POST['agreement_natures'] ) ) {
-        $natures = array_map( 'sanitize_text_field', (array) $_POST['agreement_natures'] );
-        $natures = array_filter( $natures, 'strlen' );
+        $raw_natures = (array) $_POST['agreement_natures'];
+        $raw_installment_flags = isset( $_POST['agreement_nature_has_installments'] ) ? (array) $_POST['agreement_nature_has_installments'] : [];
+        $natures = [];
+        $installment_flags = [];
+
+        foreach ( $raw_natures as $row_key => $raw_nature ) {
+            $nature = sanitize_text_field( $raw_nature );
+            if ( $nature === '' ) {
+                continue;
+            }
+
+            $natures[] = $nature;
+            $installment_flags[ $nature ] = isset( $raw_installment_flags[ $row_key ] ) ? 1 : 0;
+        }
+
         update_option( 'olama_reg_agreement_natures', array_values( $natures ) );
+        update_option( 'olama_reg_agreement_nature_installments', $installment_flags );
     }
     
     echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'تم حفظ الإعدادات بنجاح.', 'olama-registration' ) . '</p></div>';
@@ -25,6 +39,10 @@ if ( $_SERVER['REQUEST_METHOD'] === 'POST' && isset( $_POST['olama_reg_settings_
 
 $services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
+$agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
+if ( ! is_array( $agreement_nature_installments ) ) {
+    $agreement_nature_installments = [];
+}
 ?>
 
 <div class="wrap olama-reg-wrap">
@@ -80,9 +98,14 @@ $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدر�
                             <th scope="row"><label>طبيعة العقد</label></th>
                             <td>
                                 <div id="olama-reg-natures-list">
-                                    <?php foreach ( $agreement_natures as $nature ): ?>
+                                    <?php foreach ( $agreement_natures as $idx => $nature ): ?>
+                                        <?php $has_installments = array_key_exists( $nature, $agreement_nature_installments ) ? ! empty( $agreement_nature_installments[ $nature ] ) : true; ?>
                                         <div class="olama-reg-nature-row" style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
-                                            <input type="text" name="agreement_natures[]" value="<?php echo esc_attr( $nature ); ?>" class="regular-text" required />
+                                            <input type="text" name="agreement_natures[<?php echo esc_attr( $idx ); ?>]" value="<?php echo esc_attr( $nature ); ?>" class="regular-text" required />
+                                            <label style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap; font-weight:600;">
+                                                <input type="checkbox" name="agreement_nature_has_installments[<?php echo esc_attr( $idx ); ?>]" value="1" <?php checked( $has_installments ); ?> />
+                                                يدعم الأقساط
+                                            </label>
                                             <button type="button" class="button olama-reg-remove-nature" style="color: #dc2626; border-color: #dc2626;"><span class="dashicons dashicons-trash" style="margin-top: 3px;"></span></button>
                                         </div>
                                     <?php endforeach; ?>
@@ -264,9 +287,14 @@ jQuery(document).ready(function($) {
     });
 
     $('#olama-reg-add-nature').on('click', function() {
+        const rowKey = 'new_' + Date.now();
         const row = `
             <div class="olama-reg-nature-row" style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
-                <input type="text" name="agreement_natures[]" value="" class="regular-text" required placeholder="طبيعة العقد..." />
+                <input type="text" name="agreement_natures[${rowKey}]" value="" class="regular-text" required placeholder="طبيعة العقد..." />
+                <label style="display:inline-flex; align-items:center; gap:6px; white-space:nowrap; font-weight:600;">
+                    <input type="checkbox" name="agreement_nature_has_installments[${rowKey}]" value="1" checked />
+                    يدعم الأقساط
+                </label>
                 <button type="button" class="button olama-reg-remove-nature" style="color: #dc2626; border-color: #dc2626;"><span class="dashicons dashicons-trash" style="margin-top: 3px;"></span></button>
             </div>
         `;

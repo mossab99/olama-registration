@@ -14,6 +14,25 @@ if (!defined('ABSPATH'))
 
 class Olama_Reg_Billing_Invoice
 {
+    private const FINANCIAL_UPDATE_ERROR = 'لا يمكن تعديل البيانات المالية للفاتورة لأنها تحتوي على دفعات. يرجى استخدام إشعار دائن أو إشعار مدين أو عكس سند قبض.';
+
+    private const FINANCIAL_FIELDS = [
+        'family_uid',
+        'student_uid',
+        'fee_template_id',
+        'ext_customer_id',
+        'ext_child_id',
+        'linked_agreement_id',
+        'agreement_id',
+        'status',
+        'discount',
+        'items',
+        'installments',
+        'subtotal',
+        'total',
+        'amount_paid',
+        'balance',
+    ];
 
     // ── Table helpers ─────────────────────────────────────────────────────────
 
@@ -96,6 +115,23 @@ class Olama_Reg_Billing_Invoice
 
         $notes = sanitize_textarea_field($data['notes'] ?? '');
         $service_type = sanitize_text_field($data['service_type'] ?? '');
+        $fee_template_id = absint($data['fee_template_id'] ?? 0);
+        $direct_service_invoice = $service_type !== '';
+
+        if ($direct_service_invoice) {
+            if (!$fee_template_id) {
+                return new \WP_Error('missing_fee_template', __('يجب اختيار نموذج رسوم للفاتورة المباشرة.', 'olama-registration'));
+            }
+
+            $fee_template = Olama_Reg_Billing_Fees::get_template($fee_template_id);
+            if (!$fee_template || ($fee_template->subject_type ?? 'general') !== 'service' || (string) ($fee_template->subject_value ?? '') !== $service_type) {
+                return new \WP_Error('invalid_fee_template', __('نموذج الرسوم المختار يجب أن يكون مرتبطًا بالخدمة المختارة.', 'olama-registration'));
+            }
+
+            $data['installments'] = 1;
+            $data['linked_agreement_id'] = 0;
+        }
+
         if ($service_type) {
             $notes = "طبيعة الخدمة: " . $service_type . "\n" . $notes;
         }
@@ -105,7 +141,7 @@ class Olama_Reg_Billing_Invoice
             'family_uid' => $family_uid,
             'student_uid' => sanitize_text_field($data['student_uid'] ?? '') ?: null,
             'academic_year_id' => $year_id,
-            'fee_template_id' => absint($data['fee_template_id'] ?? 0) ?: null,
+            'fee_template_id' => $fee_template_id ?: null,
             'ext_customer_id' => absint($data['ext_customer_id'] ?? 0) ?: null,
             'ext_child_id' => absint($data['ext_child_id'] ?? 0) ?: null,
             'agreement_id' => absint($data['linked_agreement_id'] ?? 0) ?: null,
@@ -145,6 +181,29 @@ class Olama_Reg_Billing_Invoice
 
         // Generate installments if requested
         $installments = absint($data['installments'] ?? 1);
+        if (!empty($payload['fee_template_id'])) {
+            $fee_template = Olama_Reg_Billing_Fees::get_template((int) $payload['fee_template_id']);
+            if ($fee_template) {
+                $subject_type = $fee_template->subject_type ?? 'general';
+                $subject_value = $fee_template->subject_value ?? '';
+
+                if ($subject_type === 'service') {
+                    $installments = 1;
+                } elseif ($subject_type === 'agreement') {
+                    $agreement_nature_installments = get_option('olama_reg_agreement_nature_installments', []);
+                    if (!is_array($agreement_nature_installments)) {
+                        $agreement_nature_installments = [];
+                    }
+                    $supports_installments = array_key_exists($subject_value, $agreement_nature_installments)
+                        ? !empty($agreement_nature_installments[$subject_value])
+                        : true;
+
+                    if (!$supports_installments) {
+                        $installments = 1;
+                    }
+                }
+            }
+        }
         if ($installments > 1) {
             self::generate_installments($invoice_id, $installments);
         }
@@ -166,6 +225,19 @@ class Olama_Reg_Billing_Invoice
         $before = self::get_invoice($id);
         if (!$before) {
             return new \WP_Error('not_found', __('Invoice not found.', 'olama-registration'));
+        }
+
+        $has_financial_changes = self::contains_financial_changes($data);
+        if ($has_financial_changes) {
+            $can_update = self::can_update_financial_fields($before);
+            if (is_wp_error($can_update)) {
+                return $can_update;
+            }
+        } else {
+            $can_update = self::can_update_non_financial_fields($before);
+            if (is_wp_error($can_update)) {
+                return $can_update;
+            }
         }
 
         $payload = [];
@@ -247,6 +319,33 @@ class Olama_Reg_Billing_Invoice
             $id
         )) ?: [];
 
+        $adjustment_totals = self::get_adjustment_totals($id);
+        $inv->debit_notes_total = $adjustment_totals['debit'];
+        $inv->credit_notes_total = $adjustment_totals['credit'];
+        $inv->effective_total = self::effective_total($inv);
+
+        if (empty($inv->installments) && !empty($inv->agreement_id)) {
+            $wpdb->query($wpdb->prepare(
+                "UPDATE " . self::t('olama_invoice_installments') . "
+                 SET invoice_id = %d
+                 WHERE agreement_id = %d
+                   AND (invoice_id = 0 OR invoice_id IS NULL)",
+                $id,
+                (int) $inv->agreement_id
+            ));
+
+            $inv->installments = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM " . self::t('olama_invoice_installments') . "
+                 WHERE invoice_id = %d
+                    OR (agreement_id = %d AND (invoice_id = 0 OR invoice_id IS NULL))
+                 ORDER BY installment_no ASC",
+                $id,
+                (int) $inv->agreement_id
+            )) ?: [];
+        }
+
+        $inv->is_overdue = self::is_overdue($inv);
+
         return $inv;
     }
 
@@ -320,19 +419,27 @@ class Olama_Reg_Billing_Invoice
         $params = [$customer_id, $customer_uid];
         $year_clause = '';
         if ($year_id > 0) {
-            $year_clause = ' AND academic_year_id = %d';
+            $year_clause = ' AND i.academic_year_id = %d';
             $params[] = $year_id;
         }
 
         $row = $wpdb->get_row($wpdb->prepare(
             "SELECT
                 COUNT(*) AS invoice_count,
-                COALESCE(SUM(total), 0)       AS total_invoiced,
+                COALESCE(SUM(total + COALESCE(adj.debit_total, 0) - COALESCE(adj.credit_total, 0)), 0) AS total_invoiced,
                 COALESCE(SUM(amount_paid), 0) AS total_paid,
                 COALESCE(SUM(balance), 0)     AS balance
-             FROM " . self::t('olama_invoices') . "
-             WHERE ( ext_customer_id = %d OR ( family_uid = %s AND family_uid != '' ) ) {$year_clause}
-               AND status NOT IN ('draft','cancelled')",
+             FROM " . self::t('olama_invoices') . " i
+             LEFT JOIN (
+                SELECT invoice_id,
+                       SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) AS debit_total,
+                       SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) AS credit_total
+                FROM " . self::t('olama_invoice_adjustments') . "
+                WHERE status = 'issued'
+                GROUP BY invoice_id
+             ) adj ON adj.invoice_id = i.id
+             WHERE ( i.ext_customer_id = %d OR ( i.family_uid = %s AND i.family_uid != '' ) ) {$year_clause}
+               AND i.status NOT IN ('draft','cancelled')",
             ...$params
         ));
 
@@ -374,6 +481,12 @@ class Olama_Reg_Billing_Invoice
             return false;
 
         $status = self::valid_status($status);
+        if ($status !== (string) $before->status) {
+            $can_update = self::can_update_financial_fields($before);
+            if (is_wp_error($can_update)) {
+                return false;
+            }
+        }
 
         $result = $wpdb->update(
             self::t('olama_invoices'),
@@ -401,14 +514,27 @@ class Olama_Reg_Billing_Invoice
         }
 
         if ((float) $inv->amount_paid > 0) {
-            return new \WP_Error('has_payments', __('لا يمكن إلغاء فاتورة مسددة جزئياً أو كلياً. يرجى عكس السندات أولاً.', 'olama-registration'));
+            return new \WP_Error('has_payments', __('لا يمكن إلغاء الفاتورة لأنها تحتوي على سندات قبض. يجب عكس السندات أولاً.', 'olama-registration'));
+        }
+
+        if (self::has_active_adjustments($id)) {
+            return new \WP_Error('has_adjustments', __('لا يمكن إلغاء الفاتورة لأنها تحتوي على إشعارات مالية نشطة. يجب إلغاء الإشعارات أولاً.', 'olama-registration'));
         }
 
         if ($inv->status === 'cancelled') {
             return true;
         }
 
-        $wpdb->update(self::t('olama_invoices'), ['status' => 'cancelled'], ['id' => $id]);
+        $cancel_payload = ['status' => 'cancelled'];
+        $columns = $wpdb->get_col("DESCRIBE " . self::t('olama_invoices'), 0);
+        if (in_array('cancelled_by', (array) $columns, true)) {
+            $cancel_payload['cancelled_by'] = get_current_user_id();
+        }
+        if (in_array('cancelled_at', (array) $columns, true)) {
+            $cancel_payload['cancelled_at'] = current_time('mysql');
+        }
+
+        $wpdb->update(self::t('olama_invoices'), $cancel_payload, ['id' => $id]);
         $wpdb->update(self::t('olama_invoice_installments'), ['status' => 'cancelled'], ['invoice_id' => $id]);
 
         self::log_audit('invoice', $id, 'cancelled', $inv, self::get_invoice($id));
@@ -442,6 +568,8 @@ class Olama_Reg_Billing_Invoice
 
         $discount = (float) $inv->discount;
         $total = max(0.0, $subtotal - $discount);
+        $adjustment_totals = self::get_adjustment_totals($id);
+        $effective_total = max(0.0, $total + $adjustment_totals['debit'] - $adjustment_totals['credit']);
 
         // Sum payments
         $amount_paid = (float) $wpdb->get_var($wpdb->prepare(
@@ -449,7 +577,7 @@ class Olama_Reg_Billing_Invoice
             $id
         ));
 
-        $balance = $total - $amount_paid;
+        $balance = $effective_total - $amount_paid;
 
         // Auto status
         $status = $inv->status;
@@ -543,6 +671,245 @@ class Olama_Reg_Billing_Invoice
         return true;
     }
 
+    public static function can_view(object $invoice): true|\WP_Error
+    {
+        return true;
+    }
+
+    public static function can_print(object $invoice): true|\WP_Error
+    {
+        return true;
+    }
+
+    public static function can_record_payment(object $invoice): true|\WP_Error
+    {
+        $status = (string) ($invoice->status ?? '');
+        if ($status === 'cancelled') {
+            return new \WP_Error('invoice_cancelled', __('لا يمكن تسجيل دفعة على فاتورة ملغاة.', 'olama-registration'));
+        }
+        if ($status === 'paid' || (float) ($invoice->balance ?? 0) <= 0) {
+            return new \WP_Error('invoice_paid', __('لا يمكن تسجيل دفعة على فاتورة مدفوعة بالكامل.', 'olama-registration'));
+        }
+        if (!in_array($status, ['issued', 'partial', 'overdue'], true)) {
+            return new \WP_Error('invoice_not_payable', __('لا يمكن تسجيل دفعة على هذه الفاتورة بحالتها الحالية.', 'olama-registration'));
+        }
+        return true;
+    }
+
+    public static function can_update_financial_fields(object $invoice): true|\WP_Error
+    {
+        if ((string) ($invoice->status ?? '') === 'cancelled') {
+            return new \WP_Error('invoice_cancelled', __('لا يمكن تعديل فاتورة ملغاة.', 'olama-registration'));
+        }
+        if ((float) ($invoice->amount_paid ?? 0) > 0) {
+            return new \WP_Error('financial_locked', __(self::FINANCIAL_UPDATE_ERROR, 'olama-registration'));
+        }
+        if (!in_array((string) ($invoice->status ?? ''), ['draft', 'issued'], true)) {
+            return new \WP_Error('financial_locked_status', __('لا يمكن تعديل البيانات المالية إلا لفاتورة مسودة أو صادرة وغير مدفوعة.', 'olama-registration'));
+        }
+        return true;
+    }
+
+    public static function can_update_non_financial_fields(object $invoice): true|\WP_Error
+    {
+        if ((string) ($invoice->status ?? '') === 'cancelled') {
+            return new \WP_Error('invoice_cancelled', __('لا يمكن تعديل فاتورة ملغاة.', 'olama-registration'));
+        }
+        return true;
+    }
+
+    public static function can_cancel(object $invoice): true|\WP_Error
+    {
+        if ((string) ($invoice->status ?? '') === 'cancelled') {
+            return new \WP_Error('already_cancelled', __('الفاتورة ملغاة مسبقاً.', 'olama-registration'));
+        }
+        if ((float) ($invoice->amount_paid ?? 0) > 0) {
+            return new \WP_Error('has_payments', __('لا يمكن إلغاء الفاتورة لأنها تحتوي على سندات قبض. يجب عكس السندات أولاً.', 'olama-registration'));
+        }
+        if (self::has_active_adjustments((int) $invoice->id)) {
+            return new \WP_Error('has_adjustments', __('لا يمكن إلغاء الفاتورة لأنها تحتوي على إشعارات مالية نشطة. يجب إلغاء الإشعارات أولاً.', 'olama-registration'));
+        }
+        return true;
+    }
+
+    public static function can_create_credit_note(object $invoice): true|\WP_Error
+    {
+        return self::can_create_adjustment($invoice);
+    }
+
+    public static function can_create_debit_note(object $invoice): true|\WP_Error
+    {
+        return self::can_create_adjustment($invoice);
+    }
+
+    private static function can_create_adjustment(object $invoice): true|\WP_Error
+    {
+        if ((string) ($invoice->status ?? '') === 'cancelled') {
+            return new \WP_Error('invoice_cancelled', __('لا يمكن إصدار إشعار مالي على فاتورة ملغاة.', 'olama-registration'));
+        }
+        if (!in_array((string) ($invoice->status ?? ''), ['issued', 'partial', 'paid', 'overdue'], true)) {
+            return new \WP_Error('invalid_status', __('لا يمكن إصدار إشعار مالي على هذه الفاتورة بحالتها الحالية.', 'olama-registration'));
+        }
+        return true;
+    }
+
+    public static function get_adjustments(int $invoice_id): array
+    {
+        global $wpdb;
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT a.*, u.display_name AS created_by_name
+             FROM " . self::t('olama_invoice_adjustments') . " a
+             LEFT JOIN {$wpdb->users} u ON u.ID = a.created_by
+             WHERE a.invoice_id = %d
+             ORDER BY a.created_at ASC, a.id ASC",
+            $invoice_id
+        )) ?: [];
+    }
+
+    public static function create_adjustment(int $invoice_id, string $type, float $amount, string $reason, string $notes = ''): int|\WP_Error
+    {
+        global $wpdb;
+
+        $invoice = self::get_invoice($invoice_id);
+        if (!$invoice) {
+            return new \WP_Error('not_found', __('Invoice not found.', 'olama-registration'));
+        }
+
+        $type = sanitize_key($type);
+        if (!in_array($type, ['credit', 'debit'], true)) {
+            return new \WP_Error('invalid_type', __('نوع الإشعار المالي غير صحيح.', 'olama-registration'));
+        }
+
+        $policy = $type === 'credit' ? self::can_create_credit_note($invoice) : self::can_create_debit_note($invoice);
+        if (is_wp_error($policy)) {
+            return $policy;
+        }
+
+        $amount = round($amount, 2);
+        if ($amount <= 0) {
+            return new \WP_Error('invalid_amount', __('يجب أن تكون قيمة الإشعار أكبر من صفر.', 'olama-registration'));
+        }
+
+        $reason = sanitize_text_field($reason);
+        if ($reason === '') {
+            return new \WP_Error('missing_reason', __('يجب إدخال سبب الإشعار المالي.', 'olama-registration'));
+        }
+
+        if ($type === 'credit' && $amount > (float) $invoice->balance) {
+            return new \WP_Error('credit_exceeds_balance', __('لا يمكن أن يكون الإشعار الدائن أكبر من الرصيد المتبقي دون وجود آلية رد مبالغ.', 'olama-registration'));
+        }
+
+        $before = self::get_invoice($invoice_id);
+        $result = $wpdb->insert(self::t('olama_invoice_adjustments'), [
+            'adjustment_no' => self::generate_adjustment_number($type),
+            'invoice_id' => $invoice_id,
+            'type' => $type,
+            'amount' => $amount,
+            'reason' => $reason,
+            'notes' => sanitize_textarea_field($notes) ?: null,
+            'status' => 'issued',
+            'created_by' => get_current_user_id(),
+        ]);
+
+        if (!$result) {
+            return new \WP_Error('db_error', $wpdb->last_error);
+        }
+
+        $adjustment_id = (int) $wpdb->insert_id;
+        self::recalculate_totals($invoice_id);
+        self::log_audit('invoice_adjustment', $adjustment_id, $type . '_note_issued', $before, self::get_invoice($invoice_id));
+
+        return $adjustment_id;
+    }
+
+    public static function cancel_adjustment(int $adjustment_id): bool|\WP_Error
+    {
+        global $wpdb;
+
+        $adjustment = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM " . self::t('olama_invoice_adjustments') . " WHERE id = %d",
+            $adjustment_id
+        ));
+        if (!$adjustment) {
+            return new \WP_Error('not_found', __('الإشعار المالي غير موجود.', 'olama-registration'));
+        }
+        if ($adjustment->status === 'cancelled') {
+            return true;
+        }
+
+        $before = self::get_invoice((int) $adjustment->invoice_id);
+        $wpdb->update(self::t('olama_invoice_adjustments'), [
+            'status' => 'cancelled',
+            'cancelled_by' => get_current_user_id(),
+            'cancelled_at' => current_time('mysql'),
+        ], ['id' => $adjustment_id]);
+
+        self::recalculate_totals((int) $adjustment->invoice_id);
+        self::log_audit('invoice_adjustment', $adjustment_id, 'adjustment_cancelled', $before, self::get_invoice((int) $adjustment->invoice_id));
+
+        return true;
+    }
+
+    public static function get_activity(int $invoice_id): array
+    {
+        global $wpdb;
+
+        $events = [];
+        $audit_rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT a.*, u.display_name AS actor_name
+             FROM " . self::t('olama_billing_audit') . " a
+             LEFT JOIN {$wpdb->users} u ON u.ID = a.actor_id
+             WHERE (a.entity_type = 'invoice' AND a.entity_id = %d)
+                OR (a.entity_type = 'payment' AND a.entity_id IN (SELECT id FROM " . self::t('olama_payments') . " WHERE invoice_id = %d))
+             ORDER BY a.created_at ASC, a.id ASC",
+            $invoice_id,
+            $invoice_id
+        )) ?: [];
+
+        foreach ($audit_rows as $row) {
+            $events[] = [
+                'date' => $row->created_at,
+                'type' => self::activity_label((string) $row->action),
+                'reference' => '#' . $row->entity_id,
+                'user' => $row->actor_name ?: '',
+                'amount' => '',
+                'description' => $row->action,
+            ];
+        }
+
+        $payments = $wpdb->get_results($wpdb->prepare(
+            "SELECT p.*, u.display_name AS user_name
+             FROM " . self::t('olama_payments') . " p
+             LEFT JOIN {$wpdb->users} u ON u.ID = p.received_by
+             WHERE p.invoice_id = %d",
+            $invoice_id
+        )) ?: [];
+        foreach ($payments as $p) {
+            $events[] = [
+                'date' => $p->created_at ?: $p->payment_date,
+                'type' => ((float) $p->amount < 0 || $p->method === 'reversal') ? 'عكس سند قبض' : 'إصدار سند قبض',
+                'reference' => '#' . $p->id,
+                'user' => $p->user_name ?: '',
+                'amount' => (float) $p->amount,
+                'description' => $p->notes ?: '',
+            ];
+        }
+
+        foreach (self::get_adjustments($invoice_id) as $adj) {
+            $events[] = [
+                'date' => $adj->created_at,
+                'type' => $adj->type === 'credit' ? 'إصدار إشعار دائن' : 'إصدار إشعار مدين',
+                'reference' => $adj->adjustment_no,
+                'user' => $adj->created_by_name ?: '',
+                'amount' => (float) $adj->amount,
+                'description' => $adj->reason,
+            ];
+        }
+
+        usort($events, static fn($a, $b) => strcmp((string) $a['date'], (string) $b['date']));
+        return $events;
+    }
+
     // ── Invoice summary for financial tab ─────────────────────────────────────
 
     /**
@@ -555,19 +922,27 @@ class Olama_Reg_Billing_Invoice
         $params = [$family_uid];
         $year_clause = '';
         if ($year_id > 0) {
-            $year_clause = ' AND academic_year_id = %d';
+            $year_clause = ' AND i.academic_year_id = %d';
             $params[] = $year_id;
         }
 
         $row = $wpdb->get_row($wpdb->prepare(
             "SELECT
                 COUNT(*) AS invoice_count,
-                COALESCE(SUM(total), 0)       AS total_invoiced,
+                COALESCE(SUM(total + COALESCE(adj.debit_total, 0) - COALESCE(adj.credit_total, 0)), 0) AS total_invoiced,
                 COALESCE(SUM(amount_paid), 0) AS total_paid,
                 COALESCE(SUM(balance), 0)     AS balance
-             FROM " . self::t('olama_invoices') . "
-             WHERE family_uid = %s {$year_clause}
-               AND status NOT IN ('draft','cancelled')",
+             FROM " . self::t('olama_invoices') . " i
+             LEFT JOIN (
+                SELECT invoice_id,
+                       SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) AS debit_total,
+                       SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) AS credit_total
+                FROM " . self::t('olama_invoice_adjustments') . "
+                WHERE status = 'issued'
+                GROUP BY invoice_id
+             ) adj ON adj.invoice_id = i.id
+             WHERE i.family_uid = %s {$year_clause}
+               AND i.status NOT IN ('draft','cancelled')",
             ...$params
         ));
 
@@ -607,6 +982,91 @@ class Olama_Reg_Billing_Invoice
     {
         $allowed = ['draft', 'issued', 'partial', 'paid', 'overdue', 'cancelled'];
         return in_array($s, $allowed, true) ? $s : 'draft';
+    }
+
+    private static function contains_financial_changes(array $data): bool
+    {
+        foreach (self::FINANCIAL_FIELDS as $field) {
+            if (array_key_exists($field, $data)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function get_adjustment_totals(int $invoice_id): array
+    {
+        global $wpdb;
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT
+                COALESCE(SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END), 0) AS debit_total,
+                COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS credit_total
+             FROM " . self::t('olama_invoice_adjustments') . "
+             WHERE invoice_id = %d AND status = 'issued'",
+            $invoice_id
+        ));
+
+        return [
+            'debit' => (float) ($row->debit_total ?? 0),
+            'credit' => (float) ($row->credit_total ?? 0),
+        ];
+    }
+
+    private static function has_active_adjustments(int $invoice_id): bool
+    {
+        global $wpdb;
+        return (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM " . self::t('olama_invoice_adjustments') . " WHERE invoice_id = %d AND status = 'issued'",
+            $invoice_id
+        )) > 0;
+    }
+
+    private static function effective_total(object $invoice): float
+    {
+        $debit = (float) ($invoice->debit_notes_total ?? 0);
+        $credit = (float) ($invoice->credit_notes_total ?? 0);
+        return round(max(0.0, (float) ($invoice->total ?? 0) + $debit - $credit), 2);
+    }
+
+    private static function is_overdue(object $invoice): bool
+    {
+        if (in_array((string) ($invoice->status ?? ''), ['paid', 'cancelled'], true)) {
+            return false;
+        }
+
+        foreach ((array) ($invoice->installments ?? []) as $inst) {
+            $remaining = (float) ($inst->amount_due ?? 0) - (float) ($inst->amount_paid ?? 0);
+            if (!empty($inst->due_date) && $inst->due_date < date('Y-m-d') && $remaining > 0.009) {
+                return true;
+            }
+        }
+
+        return !empty($invoice->due_date) && $invoice->due_date < date('Y-m-d') && (float) ($invoice->balance ?? 0) > 0.009;
+    }
+
+    private static function generate_adjustment_number(string $type): string
+    {
+        global $wpdb;
+        $prefix = ($type === 'credit' ? 'CRN-' : 'DBN-') . date('Y') . '-';
+        $max = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(MAX(CAST(SUBSTRING(adjustment_no, %d) AS UNSIGNED)), 0)
+             FROM " . self::t('olama_invoice_adjustments') . "
+             WHERE adjustment_no LIKE %s",
+            strlen($prefix) + 1,
+            $wpdb->esc_like($prefix) . '%'
+        ));
+
+        return $prefix . str_pad((string) ($max + 1), 5, '0', STR_PAD_LEFT);
+    }
+
+    private static function activity_label(string $action): string
+    {
+        return [
+            'created' => 'إنشاء الفاتورة',
+            'updated' => 'تعديل بيانات الفاتورة',
+            'status_changed' => 'تغيير حالة الفاتورة',
+            'cancelled' => 'إلغاء الفاتورة',
+        ][$action] ?? $action;
     }
 
     private static function sanitize_date(string $val): string

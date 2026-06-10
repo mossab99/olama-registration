@@ -202,7 +202,7 @@ class Olama_Reg_Agreement {
      * Change status with validation
      */
     public static function change_status( int $id, string $new_status ): bool|WP_Error {
-        $allowed_statuses = [ 'draft', 'active', 'completed', 'cancelled' ];
+        $allowed_statuses = [ 'draft', 'completed', 'cancelled' ];
         if ( ! in_array( $new_status, $allowed_statuses, true ) ) {
             return new WP_Error( 'invalid_status', 'Invalid status provided.' );
         }
@@ -212,9 +212,16 @@ class Olama_Reg_Agreement {
             return new WP_Error( 'not_found', 'Agreement not found.' );
         }
 
-        // Add any business logic rules here (e.g., can't cancel a completed agreement)
-        if ( $agreement->status === 'completed' && $new_status === 'cancelled' ) {
-            return new WP_Error( 'invalid_transition', 'Cannot cancel a completed agreement.' );
+        if ( $new_status === 'completed' ) {
+            if ( ! class_exists( 'Olama_Reg_Agreement_Invoice' ) ) {
+                return new WP_Error( 'missing_accounting', 'Accounting module is not loaded.' );
+            }
+
+            return Olama_Reg_Agreement_Invoice::complete_agreement( $id );
+        }
+
+        if ( $new_status === 'cancelled' && class_exists( 'Olama_Reg_Agreement_Invoice' ) ) {
+            return Olama_Reg_Agreement_Invoice::cancel_agreement( $id );
         }
 
         return self::update( $id, [ 'status' => $new_status ] );

@@ -37,9 +37,22 @@ class Olama_Reg_Billing_Payment {
             return new \WP_Error( 'missing_invoice', __( 'Invoice ID is required.', 'olama-registration' ) );
         }
 
+        $invoice = Olama_Reg_Billing_Invoice::get_invoice( $invoice_id );
+        if ( ! $invoice ) {
+            return new \WP_Error( 'not_found', __( 'Invoice not found.', 'olama-registration' ) );
+        }
+
+        $policy = Olama_Reg_Billing_Invoice::can_record_payment( $invoice );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
+        }
+
         $amount = round( (float) ( $data['amount'] ?? 0 ), 2 );
         if ( $amount <= 0 ) {
             return new \WP_Error( 'invalid_amount', __( 'Payment amount must be greater than zero.', 'olama-registration' ) );
+        }
+        if ( $amount > round( (float) $invoice->balance, 2 ) ) {
+            return new \WP_Error( 'overpayment', __( 'لا يمكن تسجيل دفعة أكبر من الرصيد المتبقي على الفاتورة.', 'olama-registration' ) );
         }
 
         $family_uid = sanitize_text_field( $data['family_uid'] ?? '' );
@@ -114,8 +127,9 @@ class Olama_Reg_Billing_Payment {
             return new \WP_Error( 'not_found', __( 'Payment not found.', 'olama-registration' ) );
         }
 
-        if ( (float) $payment->amount <= 0 || $payment->method === 'reversal' ) {
-            return new \WP_Error( 'already_reversed', __( 'لا يمكن عكس هذا السند.', 'olama-registration' ) );
+        $policy = self::can_reverse_payment( $payment );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
         }
 
         // Check if already reversed
@@ -135,6 +149,7 @@ class Olama_Reg_Billing_Payment {
             'amount'         => -1 * (float) $payment->amount,
             'method'         => 'reversal',
             'reference'      => 'REVERSAL-' . $id,
+            'reversed_payment_id' => $id,
             'received_by'    => get_current_user_id(),
             'notes'          => sanitize_textarea_field( $notes ) ?: __( 'عكس سند قبض رقم', 'olama-registration' ) . ' #' . $id,
         ];
@@ -148,8 +163,7 @@ class Olama_Reg_Billing_Payment {
         }
         $new_payment_id = (int) $wpdb->insert_id;
 
-        // Reset all installments and recalculate
-        self::reallocate_all_installments( (int) $payment->invoice_id );
+        self::reverse_allocations( $id, $new_payment_id );
 
         // Recalculate invoice totals
         Olama_Reg_Billing_Invoice::recalculate_totals( (int) $payment->invoice_id );
@@ -216,12 +230,23 @@ class Olama_Reg_Billing_Payment {
         $installments = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM " . self::t( 'olama_invoice_installments' ) . "
              WHERE invoice_id = %d
-               AND status IN ('pending','partial','overdue')
+               AND status IN ('pending','unpaid','partial','partially_paid','overdue')
              ORDER BY installment_no ASC",
             (int) $payment->invoice_id
         ) );
 
-        if ( empty( $installments ) ) return;
+        if ( empty( $installments ) ) {
+            $wpdb->insert( self::t( 'olama_payment_allocations' ), [
+                'payment_id'      => $payment_id,
+                'invoice_id'      => (int) $payment->invoice_id,
+                'installment_id'  => null,
+                'amount'          => round( $remaining, 2 ),
+                'allocation_date' => $payment->payment_date ?: date( 'Y-m-d' ),
+                'type'            => 'normal',
+                'created_by'      => get_current_user_id(),
+            ] );
+            return;
+        }
 
         foreach ( $installments as $inst ) {
             if ( $remaining <= 0 ) break;
@@ -233,7 +258,7 @@ class Olama_Reg_Billing_Payment {
             $new_paid = round( (float) $inst->amount_paid + $apply, 2 );
             $remaining = round( $remaining - $apply, 2 );
 
-            $new_status = 'partial';
+            $new_status = 'partially_paid';
             if ( $new_paid >= (float) $inst->amount_due ) {
                 $new_status = 'paid';
             } elseif ( ! empty( $inst->due_date ) && $inst->due_date < date( 'Y-m-d' ) ) {
@@ -248,6 +273,16 @@ class Olama_Reg_Billing_Payment {
                 ],
                 [ 'id' => (int) $inst->id ]
             );
+
+            $wpdb->insert( self::t( 'olama_payment_allocations' ), [
+                'payment_id'      => $payment_id,
+                'invoice_id'      => (int) $payment->invoice_id,
+                'installment_id'  => (int) $inst->id,
+                'amount'          => round( $apply, 2 ),
+                'allocation_date' => $payment->payment_date ?: date( 'Y-m-d' ),
+                'type'            => 'normal',
+                'created_by'      => get_current_user_id(),
+            ] );
         }
     }
 
@@ -262,7 +297,7 @@ class Olama_Reg_Billing_Payment {
         $wpdb->query( $wpdb->prepare(
             "UPDATE " . self::t( 'olama_invoice_installments' ) . " 
              SET amount_paid = 0, 
-                 status = IF(due_date < CURDATE(), 'overdue', 'pending')
+                 status = IF(due_date < CURDATE(), 'overdue', 'unpaid')
              WHERE invoice_id = %d",
             $invoice_id
         ) );
@@ -294,7 +329,7 @@ class Olama_Reg_Billing_Payment {
             $new_paid = $apply;
             $remaining = round( $remaining - $apply, 2 );
 
-            $new_status = 'partial';
+            $new_status = 'partially_paid';
             if ( $new_paid >= (float) $inst->amount_due ) {
                 $new_status = 'paid';
             } elseif ( ! empty( $inst->due_date ) && $inst->due_date < date( 'Y-m-d' ) ) {
@@ -309,6 +344,91 @@ class Olama_Reg_Billing_Payment {
                 ],
                 [ 'id' => (int) $inst->id ]
             );
+        }
+    }
+
+    public static function get_payment_allocations( int $payment_id ): array {
+        global $wpdb;
+
+        return $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM " . self::t( 'olama_payment_allocations' ) . "
+             WHERE payment_id = %d
+             ORDER BY id ASC",
+            $payment_id
+        ) ) ?: [];
+    }
+
+    public static function can_reverse_payment( object $payment ): true|\WP_Error {
+        global $wpdb;
+
+        if ( (float) $payment->amount <= 0 || $payment->method === 'reversal' ) {
+            return new \WP_Error( 'already_reversed', __( 'لا يمكن عكس هذا السند.', 'olama-registration' ) );
+        }
+
+        $exists = $wpdb->get_var( $wpdb->prepare(
+            "SELECT id FROM " . self::t( 'olama_payments' ) . " WHERE reference = %s OR reversed_payment_id = %d",
+            'REVERSAL-' . (int) $payment->id,
+            (int) $payment->id
+        ) );
+        if ( $exists ) {
+            return new \WP_Error( 'already_reversed', __( 'السند معكوس مسبقاً.', 'olama-registration' ) );
+        }
+
+        return true;
+    }
+
+    private static function reverse_allocations( int $original_payment_id, int $reversal_payment_id ): void {
+        global $wpdb;
+
+        $original = self::get_payment_row( $original_payment_id );
+        if ( ! $original ) return;
+
+        $allocations = self::get_payment_allocations( $original_payment_id );
+        if ( empty( $allocations ) ) {
+            self::reallocate_all_installments( (int) $original->invoice_id );
+            return;
+        }
+
+        foreach ( $allocations as $allocation ) {
+            $amount = round( -1 * (float) $allocation->amount, 2 );
+
+            if ( ! empty( $allocation->installment_id ) ) {
+                $inst = $wpdb->get_row( $wpdb->prepare(
+                    "SELECT * FROM " . self::t( 'olama_invoice_installments' ) . " WHERE id = %d",
+                    (int) $allocation->installment_id
+                ) );
+                if ( $inst ) {
+                    $new_paid = max( 0, round( (float) $inst->amount_paid + $amount, 2 ) );
+                    $status = 'unpaid';
+                    if ( $new_paid >= (float) $inst->amount_due ) {
+                        $status = 'paid';
+                    } elseif ( $new_paid > 0 ) {
+                        $status = 'partially_paid';
+                    } elseif ( ! empty( $inst->due_date ) && $inst->due_date < date( 'Y-m-d' ) ) {
+                        $status = 'overdue';
+                    }
+
+                    $wpdb->update(
+                        self::t( 'olama_invoice_installments' ),
+                        [
+                            'amount_paid' => $new_paid,
+                            'status'      => $status,
+                        ],
+                        [ 'id' => (int) $inst->id ]
+                    );
+                }
+            }
+
+            $wpdb->insert( self::t( 'olama_payment_allocations' ), [
+                'payment_id'                => $reversal_payment_id,
+                'invoice_id'                => (int) $allocation->invoice_id,
+                'installment_id'            => $allocation->installment_id ? (int) $allocation->installment_id : null,
+                'amount'                    => $amount,
+                'allocation_date'           => date( 'Y-m-d' ),
+                'type'                      => 'reversal',
+                'reversed_allocation_id'    => (int) $allocation->id,
+                'created_by'                => get_current_user_id(),
+            ] );
         }
     }
 

@@ -83,13 +83,7 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
             'print' => sprintf('<a href="%s" target="_blank">%s</a>', esc_url($print_url), __('طباعة', 'olama-registration')),
         ];
 
-        // Only allow cancel/delete if there is NO active invoice/payment impact!
-        $has_invoices = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-            $item->id
-        )) > 0;
-
-        if (!$has_invoices) {
+        if ($item->status !== 'cancelled') {
             $cancel_url = admin_url('admin.php?page=olama-registration-agreements&action=cancel&id=' . $item->id);
             $actions['cancel'] = sprintf(
                 '<a href="%s" style="color:#d63638;" onclick="return confirm(\'%s\');">%s</a>',
@@ -134,10 +128,6 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
         $label = $status;
 
         switch ($status) {
-            case 'active':
-                $badge_class = 'badge-success';
-                $label = __('فعال', 'olama-registration');
-                break;
             case 'completed':
                 $badge_class = 'badge-primary';
                 $label = __('مكتمل', 'olama-registration');
@@ -168,13 +158,8 @@ class Olama_Reg_Agreement_Table extends WP_List_Table
         }
         $links = [];
         foreach ($invoices as $inv) {
-            $payment_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}olama_payments WHERE invoice_id = %d LIMIT 1", $inv->id));
-            if ($payment_id) {
-                $url = admin_url('admin.php?page=olama-registration-payments&action=print_receipt&id=' . $payment_id);
-                $links[] = '<a href="' . esc_url($url) . '" target="_blank">' . esc_html($inv->invoice_number) . '</a>';
-            } else {
-                $links[] = esc_html($inv->invoice_number);
-            }
+            $url = admin_url('admin.php?page=olama-registration-invoices&action=view&id=' . (int) $inv->id);
+            $links[] = '<a href="' . esc_url($url) . '">' . esc_html($inv->invoice_number) . '</a>';
         }
         return implode('<br>', $links);
     }

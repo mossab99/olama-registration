@@ -15,6 +15,13 @@ if ( isset($_GET['from_agreement']) && !empty($_GET['fee_ids']) ) {
     $agreement = Olama_Reg_Agreement::get($agr_id);
     if ( $agreement ) {
         $fees = Olama_Reg_Agreement_Fees::get_by_agreement($agr_id);
+        $agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
+        if ( ! is_array( $agreement_nature_installments ) ) {
+            $agreement_nature_installments = [];
+        }
+        $has_installments = array_key_exists( $agreement->activity_type, $agreement_nature_installments )
+            ? ! empty( $agreement_nature_installments[ $agreement->activity_type ] )
+            : true;
         
         $total_amount = 0;
         $total_discount = 0;
@@ -39,6 +46,7 @@ if ( isset($_GET['from_agreement']) && !empty($_GET['fee_ids']) ) {
             'payer_name' => $agreement->payer_name,
             'participants' => !empty($selected_fee_children) ? $selected_fee_children : $agreement->participant_ids_array, // array of child IDs or UIDs
             'activity_type' => $agreement->activity_type,
+            'has_installments' => $has_installments ? 1 : 0,
             'amount' => $total_amount,
             'discount' => $total_discount,
             'fee_ids' => $fee_ids,
@@ -205,7 +213,10 @@ if ( isset($_GET['from_agreement']) && !empty($_GET['fee_ids']) ) {
                         <?php foreach ( $fee_templates as $fee ) :
                             $total_val = array_sum( array_column( $fee->items, 'amount' ) );
                         ?>
-                            <option value="<?php echo esc_attr($fee->id); ?>" data-amount="<?php echo esc_attr($total_val); ?>">
+                            <option value="<?php echo esc_attr($fee->id); ?>"
+                                    data-amount="<?php echo esc_attr($total_val); ?>"
+                                    data-subject-type="<?php echo esc_attr( $fee->subject_type ?? 'general' ); ?>"
+                                    data-subject-value="<?php echo esc_attr( $fee->subject_value ?? '' ); ?>">
                                 <?php echo esc_html($fee->template_name); ?> (<?php echo number_format($total_val, 2); ?>)
                             </option>
                         <?php endforeach; ?>

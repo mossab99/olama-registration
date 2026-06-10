@@ -13,12 +13,25 @@ if ( $action === 'edit' && $id ) {
 }
 
 $templates = Olama_Reg_Billing_Fees::get_templates();
+$custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
+$agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
+$agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
+if ( ! is_array( $agreement_nature_installments ) ) {
+    $agreement_nature_installments = [];
+}
 
 // Get grades for dropdown
 $grades = [];
 if ( class_exists( 'Olama_School_Grade' ) ) {
     $grades = Olama_School_Grade::get_grades();
 }
+?>
+<?php
+$selected_subject_type = $template ? ( $template->subject_type ?? 'general' ) : 'service';
+$selected_subject_value = $template ? ( $template->subject_value ?? '' ) : '';
+$selected_subject_supports_installments = $selected_subject_type === 'agreement'
+    ? ( array_key_exists( $selected_subject_value, $agreement_nature_installments ) ? ! empty( $agreement_nature_installments[ $selected_subject_value ] ) : true )
+    : false;
 ?>
 <div class="wrap olama-reg-wrap" dir="rtl">
 
@@ -65,6 +78,7 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
                     <thead>
                         <tr>
                             <th><?php esc_html_e( 'اسم النموذج', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'مرتبط بـ', 'olama-registration' ); ?></th>
                             <th><?php esc_html_e( 'الصف المستهدف', 'olama-registration' ); ?></th>
                             <th style="text-align:center;"><?php esc_html_e( 'عدد الأقساط', 'olama-registration' ); ?></th>
                             <th><?php esc_html_e( 'إجمالي قيمة النموذج', 'olama-registration' ); ?></th>
@@ -74,7 +88,7 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
                     <tbody>
                         <?php if ( empty( $templates ) ): ?>
                             <tr>
-                                <td colspan="5">
+                                <td colspan="6">
                                     <div class="olama-reg-empty-state">
                                         <span class="dashicons dashicons-clipboard"></span>
                                         <p><?php esc_html_e( 'لا يوجد نماذج رسوم مضافة حتى الآن.', 'olama-registration' ); ?></p>
@@ -94,6 +108,21 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
                                     </td>
                                     <td>
                                         <?php
+                                        $subject_type = $tpl->subject_type ?? 'general';
+                                        $subject_value = $tpl->subject_value ?? '';
+                                        if ( $subject_type === 'service' ) {
+                                            echo '<span class="olama-reg-badge olama-reg-badge--info">' . esc_html__( 'خدمة', 'olama-registration' ) . '</span> ';
+                                            echo esc_html( $subject_value );
+                                        } elseif ( $subject_type === 'agreement' ) {
+                                            echo '<span class="olama-reg-badge olama-reg-badge--warning">' . esc_html__( 'عقد', 'olama-registration' ) . '</span> ';
+                                            echo esc_html( $subject_value );
+                                        } else {
+                                            echo '<span class="olama-reg-badge olama-reg-badge--inactive">' . esc_html__( 'عام', 'olama-registration' ) . '</span>';
+                                        }
+                                        ?>
+                                    </td>
+                                    <td>
+                                        <?php
                                         $grade_name = '<span class="olama-reg-badge olama-reg-badge--inactive">' . esc_html__( 'عام', 'olama-registration' ) . '</span>';
                                         if ( ! empty( $tpl->grade_id ) ) {
                                             foreach ( $grades as $g ) {
@@ -107,9 +136,13 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
                                         ?>
                                     </td>
                                     <td style="text-align:center;">
-                                        <span class="olama-reg-uid-badge" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);letter-spacing:0.5px;">
-                                            <?php echo esc_html( $tpl->installments ); ?> قسط
-                                        </span>
+                                        <?php if ( (int) $tpl->installments > 1 ): ?>
+                                            <span class="olama-reg-uid-badge" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);letter-spacing:0.5px;">
+                                                <?php echo esc_html( $tpl->installments ); ?> قسط
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="olama-reg-badge olama-reg-badge--inactive"><?php esc_html_e( 'دفعة واحدة', 'olama-registration' ); ?></span>
+                                        <?php endif; ?>
                                     </td>
                                     <td class="olama-reg-balance-cell">
                                         <strong><?php echo esc_html( number_format( $total_val, 2 ) ); ?></strong>
@@ -149,6 +182,37 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
                     </h3>
                     <div class="olama-reg-grid">
                         <div class="olama-reg-field olama-reg-field--required">
+                            <label for="subject_type"><?php esc_html_e( 'طبيعة نموذج الرسوم', 'olama-registration' ); ?></label>
+                            <select id="subject_type" name="subject_type" required>
+                                <option value="service" <?php selected( $selected_subject_type, 'service' ); ?>><?php esc_html_e( 'خدمة', 'olama-registration' ); ?></option>
+                                <option value="agreement" <?php selected( $selected_subject_type, 'agreement' ); ?>><?php esc_html_e( 'عقد', 'olama-registration' ); ?></option>
+                            </select>
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
+                            <label for="subject_value_service" class="fee-template-subject-label fee-template-subject-label--service"><?php esc_html_e( 'نوع الخدمة', 'olama-registration' ); ?></label>
+                            <label for="subject_value_agreement" class="fee-template-subject-label fee-template-subject-label--agreement" style="display:none;"><?php esc_html_e( 'نوع العقد', 'olama-registration' ); ?></label>
+
+                            <select id="subject_value_service" class="fee-template-subject-value" data-subject-type="service">
+                                <option value=""><?php esc_html_e( 'اختر الخدمة', 'olama-registration' ); ?></option>
+                                <?php foreach ( $custom_services as $service ): ?>
+                                    <option value="<?php echo esc_attr( $service ); ?>" <?php selected( $selected_subject_type === 'service' ? $selected_subject_value : '', $service ); ?>>
+                                        <?php echo esc_html( $service ); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+
+                            <select id="subject_value_agreement" class="fee-template-subject-value" data-subject-type="agreement" style="display:none;">
+                                <option value=""><?php esc_html_e( 'اختر نوع العقد', 'olama-registration' ); ?></option>
+                                <?php foreach ( $agreement_natures as $nature ): ?>
+                                    <?php $has_installments = array_key_exists( $nature, $agreement_nature_installments ) ? ! empty( $agreement_nature_installments[ $nature ] ) : true; ?>
+                                    <option value="<?php echo esc_attr( $nature ); ?>" data-has-installments="<?php echo $has_installments ? '1' : '0'; ?>" <?php selected( $selected_subject_type === 'agreement' ? $selected_subject_value : '', $nature ); ?>>
+                                        <?php echo esc_html( $nature ); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input type="hidden" id="subject_value" name="subject_value" value="<?php echo esc_attr( $selected_subject_value ); ?>">
+                        </div>
+                        <div class="olama-reg-field olama-reg-field--required">
                             <label for="template_name"><?php esc_html_e( 'اسم نموذج الرسوم', 'olama-registration' ); ?></label>
                             <input type="text" id="template_name" name="template_name"
                                    value="<?php echo esc_attr( $template ? $template->template_name : '' ); ?>"
@@ -166,11 +230,12 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="olama-reg-field">
+                        <div class="olama-reg-field" id="fee-template-installments-field" style="<?php echo $selected_subject_supports_installments ? '' : 'display:none;'; ?>">
                             <label for="installments"><?php esc_html_e( 'عدد الأقساط الافتراضي', 'olama-registration' ); ?></label>
                             <input type="number" id="installments" name="installments"
                                    min="1" max="12"
                                    value="<?php echo esc_attr( $template ? $template->installments : 1 ); ?>">
+                            <p class="description" style="margin-top:6px;"><?php esc_html_e( 'يظهر فقط للعقود التي تدعم التقسيط من شاشة الإعدادات.', 'olama-registration' ); ?></p>
                         </div>
                     </div>
                 </div>

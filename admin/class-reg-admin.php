@@ -347,15 +347,11 @@ class Olama_Reg_Admin {
                 wp_die( __( 'Unauthorized', 'olama-registration' ) );
             }
             $id = (int) ( $_GET['id'] ?? 0 );
+            global $wpdb;
             if ($id) {
-                global $wpdb;
-                $has_invoices = (int) $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-                    $id
-                )) > 0;
-
-                if (!$has_invoices) {
-                    Olama_Reg_Agreement::change_status($id, 'cancelled');
+                $cancelled = Olama_Reg_Agreement::change_status($id, 'cancelled');
+                if (is_wp_error($cancelled)) {
+                    wp_die(esc_html($cancelled->get_error_message()));
                 }
             }
 
