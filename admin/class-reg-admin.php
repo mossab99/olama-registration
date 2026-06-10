@@ -381,6 +381,14 @@ class Olama_Reg_Admin {
             exit;
         }
 
+        if ( $page === 'olama-registration-reports' && in_array( $action, [ 'print_cash_register', 'export_cash_register_excel', 'export_cash_register_pdf' ], true ) ) {
+            if ( ! current_user_can( 'olama_manage_registration_reports' ) && ! current_user_can( 'manage_options' ) ) {
+                wp_die( __( 'Unauthorized', 'olama-registration' ) );
+            }
+            include OLAMA_REG_PATH . 'admin/views/page-billing-reports.php';
+            exit;
+        }
+
         if ( $action !== 'print' && $action !== 'print_receipt' ) {
             return;
         }
