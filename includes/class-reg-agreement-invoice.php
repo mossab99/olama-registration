@@ -9,6 +9,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Olama_Reg_Agreement_Invoice {
 
+    public const DEFAULT_INSTALLMENTS = 8;
+
     private static function t( string $name ): string {
         global $wpdb;
         return $wpdb->prefix . $name;
@@ -84,38 +86,46 @@ class Olama_Reg_Agreement_Invoice {
         return true;
     }
 
-    public static function generate_default_due_schedule( int $agreement_id ): bool|\WP_Error {
+    public static function generate_default_due_schedule( int $agreement_id, int $count = 0 ): bool|\WP_Error {
         $agreement = Olama_Reg_Agreement::get( $agreement_id );
         if ( ! $agreement ) {
             return new \WP_Error( 'not_found', __( 'العقد غير موجود.', 'olama-registration' ) );
         }
 
-        $fees = Olama_Reg_Agreement_Fees::get_by_agreement( $agreement_id );
-        $template_id = 0;
-        foreach ( $fees as $fee ) {
-            if ( is_numeric( $fee->fee_category ) && (int) $fee->fee_category > 0 ) {
-                $template_id = (int) $fee->fee_category;
-                break;
-            }
+        if ( $count <= 0 ) {
+            $count = (int) apply_filters( 'olama_reg_agreement_default_installments', self::DEFAULT_INSTALLMENTS, $agreement );
         }
-
-        $count = 1;
-        if ( $template_id ) {
-            $template = Olama_Reg_Billing_Fees::get_template( $template_id );
-            if ( $template && ( $template->subject_type ?? '' ) === 'agreement' ) {
-                $count = max( 1, (int) ( $template->installments ?? 1 ) );
-            }
-        }
+        $count = max( 1, $count );
 
         $total = round( (float) $agreement->total_amount, 2 );
         $start = self::sanitize_date( $agreement->start_date ?: current_time( 'Y-m-d' ) );
+        $end = self::sanitize_date( $agreement->end_date ?: '' );
+        if ( ! $end ) {
+            $end = self::sanitize_date( self::get_active_academic_year_end_date() ?: '' );
+        }
+        if ( ! $end ) {
+            $end = $start;
+        }
+
+        $start_dt = new \DateTime( $start ?: current_time( 'Y-m-d' ) );
+        $end_dt = new \DateTime( $end );
+        if ( $end_dt < $start_dt ) {
+            $end_dt = clone $start_dt;
+        }
+
+        $days_span = max( 0, (int) $start_dt->diff( $end_dt )->days );
         $base = $count > 0 ? floor( ( $total / $count ) * 100 ) / 100 : $total;
         $lines = [];
         $allocated = 0.0;
 
         for ( $i = 1; $i <= $count; $i++ ) {
-            $date = new \DateTime( $start ?: current_time( 'Y-m-d' ) );
-            $date->modify( '+' . ( $i - 1 ) . ' month' );
+            $date = clone $start_dt;
+            if ( $count > 1 && $days_span > 0 ) {
+                $offset_days = (int) round( ( $days_span * ( $i - 1 ) ) / ( $count - 1 ) );
+                if ( $offset_days > 0 ) {
+                    $date->modify( '+' . $offset_days . ' days' );
+                }
+            }
             $amount = ( $i === $count ) ? round( $total - $allocated, 2 ) : $base;
             $allocated = round( $allocated + $amount, 2 );
 

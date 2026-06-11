@@ -982,6 +982,64 @@
     // ── QuickActions: quick-link bar in identity header ───────────────────
     var ADMIN_URL = HUB_DATA.adminUrl || HUB_DATA.ajaxUrl.replace('admin-ajax.php', '');
 
+    var OriginalFormModal = {
+        open: function (form, title, extraData) {
+            var customer = state.currentCustomer;
+            if (!customer) return;
+
+            var $modal = $('#os-hub-original-form-modal');
+            var $content = $('#os-hub-original-form-content');
+
+            $('#os-hub-original-form-title').html(
+                '<span class="dashicons dashicons-media-text"></span> ' + title
+            );
+            $content.html('<div class="os-hub-modal-loading" style="padding:32px; text-align:center;"><span class="spinner is-active" style="float:none;"></span></div>');
+            $modal.fadeIn(150);
+
+            $.post(AJAX_URL, $.extend({
+                action: 'os_hub_load_form',
+                nonce: NONCE,
+                form: form,
+                uid: customer.uid,
+                type: customer.type
+            }, extraData || {})).done(function (res) {
+                if (!res || !res.success) {
+                    $content.html('<div class="notice notice-error inline" style="margin:20px;"><p>' + ((res && res.data && res.data.message) || 'تعذر تحميل النموذج.') + '</p></div>');
+                    return;
+                }
+
+                window.payerChildren = res.data.participants || [];
+                $content.html(res.data.html || '');
+
+                if (typeof $.fn.datepicker !== 'undefined') {
+                    $content.find('.olama-reg-datepicker, .os-datepicker').each(function () {
+                        var $field = $(this);
+                        if (!$field.hasClass('hasDatepicker')) {
+                            $field.datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
+                        }
+                    });
+                }
+
+                if (typeof $.fn.select2 !== 'undefined') {
+                    $content.find('select').each(function () {
+                        var $select = $(this);
+                        if (!$select.hasClass('select2-hidden-accessible') && !$select.prop('disabled')) {
+                            $select.select2({ dir: 'rtl', width: '100%', dropdownParent: $modal });
+                        }
+                    });
+                }
+            }).fail(function () {
+                $content.html('<div class="notice notice-error inline" style="margin:20px;"><p>تعذر تحميل النموذج.</p></div>');
+            });
+        },
+
+        close: function () {
+            $('#os-hub-original-form-modal').fadeOut(150, function () {
+                $('#os-hub-original-form-content').empty();
+            });
+        },
+    };
+
     var QuickActions = {
 
         show: function (customer) {
@@ -1342,6 +1400,22 @@
         TileReloader.init();
         UidCopy.init();
 
+        $(document).on('click', '#os-hub-original-form-modal .olama-reg-modal-close', function () {
+            OriginalFormModal.close();
+        });
+
+        $(document).on('osHub:agreementSaved', function () {
+            refreshDashboardTiles(['agreements', 'invoices', 'financial', 'history']);
+        });
+
+        $(document).on('osHub:invoiceSaved', function () {
+            refreshDashboardTiles(['invoices', 'financial', 'history']);
+        });
+
+        $(document).on('osHub:paymentSaved', function () {
+            refreshDashboardTiles(['payments', 'invoices', 'financial', 'history']);
+        });
+
         // Intercept Invoice Quick Action click to open modal inline on customer hub page
         $(document).on('click', '#os-hub-qaction-invoice', function (e) {
             e.preventDefault();
@@ -1387,6 +1461,9 @@
             e.preventDefault();
             var customer = state.currentCustomer;
             if (!customer) return;
+
+            OriginalFormModal.open('agreement', 'إضافة عقد جديد');
+            return;
 
             var $payerSelect = $('#os-agr-payer-modal');
             if ($payerSelect.length) {
@@ -1467,6 +1544,9 @@
             var agreementId = $(this).data('id');
             var customer = state.currentCustomer;
             if (!customer || !agreementId) return;
+
+            OriginalFormModal.open('agreement', 'تعديل العقد', { id: agreementId });
+            return;
 
             var $payerSelect = $('#os-agr-payer-modal');
             var payerType = (customer.type === 'family') ? 'family' : 'customer';
@@ -1901,7 +1981,7 @@
 
                 $.post(AJAX_URL, {
                     action:     'olama_reg_get_family_students',
-                    nonce:      NONCE,
+                    nonce:      REG_NONCE,
                     family_uid: customer.uid
                 }, function (res) {
                     $list.empty();
@@ -1919,6 +1999,8 @@
                     } else {
                         $list.html('<div style="grid-column:1/-1; color:#dc2626;">لا يوجد طلاب نشطين لهذه العائلة.</div>');
                     }
+                }).fail(function () {
+                    $list.html('<div style="grid-column:1/-1; color:#dc2626;">تعذر تحميل الطلاب.</div>');
                 });
 
             } else {
@@ -1944,7 +2026,7 @@
 
                     $.post(AJAX_URL, {
                         action:      'olama_reg_get_external_customer_children',
-                        nonce:       NONCE,
+                        nonce:       REG_NONCE,
                         customer_id: payerId
                     }, function (res) {
                         $extList.empty();
@@ -1965,6 +2047,9 @@
                         } else {
                             $('#cp_ext_no_children_msg').show();
                         }
+                    }).fail(function () {
+                        $extList.html('<div style="grid-column:1/-1; color:#dc2626;">تعذر تحميل الأبناء.</div>');
+                        $('#cp_ext_no_children_msg').hide();
                     });
                 }
             }

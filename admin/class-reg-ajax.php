@@ -86,6 +86,7 @@ class Olama_Reg_Ajax
         add_action('wp_ajax_os_hub_save_profile', [$this, 'hub_save_profile']);
         add_action('wp_ajax_os_hub_toggle_active',[$this, 'hub_toggle_active']);
         add_action('wp_ajax_os_hub_add_child',    [$this, 'hub_add_child']);
+        add_action('wp_ajax_os_hub_load_form',    [$this, 'hub_load_form']);
     }
 
     // ── Guard ─────────────────────────────────────────────────────────────────
@@ -1479,8 +1480,9 @@ class Olama_Reg_Ajax
     {
         $this->guard();
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $count = max(1, absint($_POST['count'] ?? 0));
 
-        $result = Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
+        $result = Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id, $count);
         if (is_wp_error($result)) {
             wp_send_json_error(['message' => $result->get_error_message()]);
         }
@@ -1605,6 +1607,88 @@ class Olama_Reg_Ajax
      * POST: q (string, min 2), type ('family'|'external')
      * Returns: { results: [ { uid, name, phone, is_active, student_count|child_count } ] }
      */
+    public function hub_load_form(): void
+    {
+        $this->hub_guard();
+
+        $form = sanitize_key($_POST['form'] ?? '');
+        $uid  = sanitize_text_field($_POST['uid'] ?? '');
+        $type = sanitize_key($_POST['type'] ?? 'family');
+        $id   = absint($_POST['id'] ?? 0);
+
+        if ($form !== 'agreement') {
+            wp_send_json_error(['message' => __('Unsupported hub form.', 'olama-registration')], 400);
+        }
+
+        $this->hub_require_caps([
+            'olama_manage_registration_invoices',
+            'olama_manage_registration_fees',
+        ]);
+
+        if ($id <= 0 && $uid === '') {
+            wp_send_json_error(['message' => __('Missing customer context.', 'olama-registration')], 400);
+        }
+
+        $payer_type = ($type === 'family') ? 'family' : 'customer';
+        $payer_uid  = $uid;
+        if ($payer_type === 'customer') {
+            $customer = class_exists('Olama_Reg_Customer') ? Olama_Reg_Customer::get_by_uid($uid) : null;
+            if ($customer && ! empty($customer->id)) {
+                $payer_uid = (string) $customer->id;
+            }
+        }
+
+        $old_get = $_GET;
+        $_GET['action']     = $id > 0 ? 'edit' : 'new';
+        $_GET['id']         = $id;
+        if ($id <= 0) {
+            $_GET['payer_type'] = $payer_type;
+            $_GET['payer_uid']  = $payer_uid;
+        }
+        $_GET['embedded']   = 'hub';
+
+        ob_start();
+        include OLAMA_REG_PATH . 'admin/views/html-agreements-edit.php';
+        $html = ob_get_clean();
+        $_GET = $old_get;
+
+        $participants = [];
+        global $wpdb;
+        if ($id > 0 && class_exists('Olama_Reg_Agreement')) {
+            $agreement = Olama_Reg_Agreement::get($id);
+            if ($agreement) {
+                $payer_type = $agreement->payer_type;
+                $payer_uid = (string) $agreement->payer_id;
+            }
+        }
+
+        if ($payer_type === 'family') {
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT student_uid AS id, student_name AS text FROM {$wpdb->prefix}olama_students WHERE family_id = %s",
+                $payer_uid
+            ));
+        } else {
+            $rows = is_numeric($payer_uid)
+                ? $wpdb->get_results($wpdb->prepare(
+                    "SELECT id, child_name AS text FROM {$wpdb->prefix}olama_customer_children WHERE customer_id = %d AND is_active = 1",
+                    (int) $payer_uid
+                ))
+                : [];
+        }
+
+        foreach ((array) $rows as $row) {
+            $participants[] = ['id' => $row->id, 'text' => $row->text];
+        }
+
+        wp_send_json_success([
+            'html' => $html,
+            'title' => $id > 0 ? __('تعديل العقد', 'olama-registration') : __('إضافة عقد جديد', 'olama-registration'),
+            'payerType' => $payer_type,
+            'payerUid' => $payer_uid,
+            'participants' => $participants,
+        ]);
+    }
+
     public function hub_search(): void
     {
         $this->hub_guard();
@@ -3245,30 +3329,6 @@ class Olama_Reg_Ajax
             'updatedTiles' => ['children'],
         ]);
 
-        // Generate a simple child UID
-        $child_uid = 'C-' . strtoupper(substr(md5($uid . $child_name . time()), 0, 8));
-
-        $inserted = $wpdb->insert(
-            $wpdb->prefix . 'olama_customer_children',
-            [
-                'customer_id' => (int) $customer->id,
-                'child_uid'   => $child_uid,
-                'child_name'  => $child_name,
-                'grade'       => $grade,
-                'is_active'   => 1,
-            ]
-        );
-
-        if (! $inserted) {
-            wp_send_json_error(['message' => __('حدث خطأ أثناء الحفظ.', 'olama-registration')]);
-        }
-
-        wp_send_json_success([
-            'message'    => __('تمت إضافة الابن بنجاح.', 'olama-registration'),
-            'child_name' => $child_name,
-            'child_uid'  => $child_uid,
-            'grade'      => $grade,
-        ]);
     }
 
     // ══════════════════════════════════════════════════════════════════════════

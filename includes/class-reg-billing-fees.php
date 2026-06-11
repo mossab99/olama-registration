@@ -94,7 +94,7 @@ class Olama_Reg_Billing_Fees {
      * Save a fee template (create or update).
      *
      * @param array $data {
-     *   id (optional), template_name, grade_id, installments,
+     *   id (optional), template_name, grade_id,
      *   items: [ [ description, amount ], ... ]
      * }
      * @return int|\WP_Error
@@ -108,7 +108,6 @@ class Olama_Reg_Billing_Fees {
         $subject_type  = sanitize_key( $data['subject_type'] ?? 'general' );
         $subject_value = sanitize_text_field( $data['subject_value'] ?? '' );
         $grade_id      = sanitize_text_field( $data['grade_id'] ?? '' ) ?: null;
-        $installments  = max( 1, absint( $data['installments'] ?? 1 ) );
 
         if ( ! $template_name ) {
             return new \WP_Error( 'missing_name', __( 'Template name is required.', 'olama-registration' ) );
@@ -120,27 +119,8 @@ class Olama_Reg_Billing_Fees {
 
         if ( $subject_type === 'general' ) {
             $subject_value = '';
-            $installments = 1;
         } elseif ( ! $subject_value ) {
             return new \WP_Error( 'missing_subject', __( 'Template service or agreement type is required.', 'olama-registration' ) );
-        }
-
-        if ( $subject_type === 'service' ) {
-            $installments = 1;
-        }
-
-        if ( $subject_type === 'agreement' ) {
-            $agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
-            if ( ! is_array( $agreement_nature_installments ) ) {
-                $agreement_nature_installments = [];
-            }
-            $supports_installments = array_key_exists( $subject_value, $agreement_nature_installments )
-                ? ! empty( $agreement_nature_installments[ $subject_value ] )
-                : true;
-
-            if ( ! $supports_installments ) {
-                $installments = 1;
-            }
         }
 
         // Sanitize items array
@@ -163,7 +143,6 @@ class Olama_Reg_Billing_Fees {
             'subject_type'  => $subject_type,
             'subject_value' => $subject_value ?: null,
             'grade_id'      => $grade_id,
-            'installments'  => $installments,
             'items'         => wp_json_encode( $items ),
         ];
 

@@ -410,22 +410,12 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                                     <td colspan="9" style="text-align:center; font-weight:normal; background-color: #f9f9f9;">
                                         <?php 
                                         $template_name = esc_html($fee_template->template_name);
-                                        $installments = (int)$fee_template->installments;
                                         $total_amount_formatted = number_format((float) $agreement->total_amount, 3);
-                                        
-                                        if ($installments > 1) {
-                                            echo sprintf(
-                                                esc_html__('بناءً على نموذج الرسوم (%s): مبلغ %s دينار مقسمة على %d دفعات.', 'olama-registration'),
-                                                $template_name,
-                                                $total_amount_formatted,
-                                                $installments
-                                            );
-                                        } else {
-                                            echo sprintf(
-                                                esc_html__('بناءً على نموذج الرسوم (%s)', 'olama-registration'),
-                                                $template_name
-                                            );
-                                        }
+                                        echo sprintf(
+                                            esc_html__('بناءً على نموذج الرسوم (%s): صافي %s دينار، ويُوزَّع على أقساط العقد.', 'olama-registration'),
+                                            $template_name,
+                                            $total_amount_formatted
+                                        );
                                         ?>
                                     </td>
                                 </tr>
@@ -502,7 +492,11 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                 </table>
 
                 <div style="margin-top: 20px; display:flex; justify-content:space-between; align-items:center; gap:15px; flex-wrap:wrap;">
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                        <label style="display:flex; align-items:center; gap:8px; font-weight:700;">
+                            <span><?php esc_html_e('عدد الأقساط', 'olama-registration'); ?></span>
+                            <input type="number" id="os-agr-due-count" min="1" max="24" value="<?php echo esc_attr( count( $due_schedule ) ?: Olama_Reg_Agreement_Invoice::DEFAULT_INSTALLMENTS ); ?>" style="width:90px;">
+                        </label>
                         <button type="button" class="olama-reg-btn olama-reg-btn--secondary"
                             id="os-agr-add-fee-row"><span class="dashicons dashicons-plus" style="margin-top:4px;"></span> <?php esc_html_e('إضافة بند رسوم', 'olama-registration'); ?></button>
                         <button type="button" class="button" id="os-agr-add-due-row"><?php esc_html_e('إضافة قسط', 'olama-registration'); ?></button>

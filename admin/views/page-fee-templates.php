@@ -15,10 +15,6 @@ if ( $action === 'edit' && $id ) {
 $templates = Olama_Reg_Billing_Fees::get_templates();
 $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
-$agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
-if ( ! is_array( $agreement_nature_installments ) ) {
-    $agreement_nature_installments = [];
-}
 
 // Get grades for dropdown
 $grades = [];
@@ -29,9 +25,6 @@ if ( class_exists( 'Olama_School_Grade' ) ) {
 <?php
 $selected_subject_type = $template ? ( $template->subject_type ?? 'general' ) : 'service';
 $selected_subject_value = $template ? ( $template->subject_value ?? '' ) : '';
-$selected_subject_supports_installments = $selected_subject_type === 'agreement'
-    ? ( array_key_exists( $selected_subject_value, $agreement_nature_installments ) ? ! empty( $agreement_nature_installments[ $selected_subject_value ] ) : true )
-    : false;
 ?>
 <div class="wrap olama-reg-wrap" dir="rtl">
 
@@ -80,7 +73,6 @@ $selected_subject_supports_installments = $selected_subject_type === 'agreement'
                             <th><?php esc_html_e( 'اسم النموذج', 'olama-registration' ); ?></th>
                             <th><?php esc_html_e( 'مرتبط بـ', 'olama-registration' ); ?></th>
                             <th><?php esc_html_e( 'الصف المستهدف', 'olama-registration' ); ?></th>
-                            <th style="text-align:center;"><?php esc_html_e( 'عدد الأقساط', 'olama-registration' ); ?></th>
                             <th><?php esc_html_e( 'إجمالي قيمة النموذج', 'olama-registration' ); ?></th>
                             <th style="text-align:center; width:100px;"><?php esc_html_e( 'الخيارات', 'olama-registration' ); ?></th>
                         </tr>
@@ -134,15 +126,6 @@ $selected_subject_supports_installments = $selected_subject_type === 'agreement'
                                         }
                                         echo wp_kses_post( $grade_name );
                                         ?>
-                                    </td>
-                                    <td style="text-align:center;">
-                                        <?php if ( (int) $tpl->installments > 1 ): ?>
-                                            <span class="olama-reg-uid-badge" style="background:linear-gradient(135deg,#5C6BC0,#3949AB);letter-spacing:0.5px;">
-                                                <?php echo esc_html( $tpl->installments ); ?> قسط
-                                            </span>
-                                        <?php else: ?>
-                                            <span class="olama-reg-badge olama-reg-badge--inactive"><?php esc_html_e( 'دفعة واحدة', 'olama-registration' ); ?></span>
-                                        <?php endif; ?>
                                     </td>
                                     <td class="olama-reg-balance-cell">
                                         <strong><?php echo esc_html( number_format( $total_val, 2 ) ); ?></strong>
@@ -229,13 +212,6 @@ $selected_subject_supports_installments = $selected_subject_type === 'agreement'
                                     </option>
                                 <?php endforeach; ?>
                             </select>
-                        </div>
-                        <div class="olama-reg-field" id="fee-template-installments-field" style="<?php echo $selected_subject_supports_installments ? '' : 'display:none;'; ?>">
-                            <label for="installments"><?php esc_html_e( 'عدد الأقساط الافتراضي', 'olama-registration' ); ?></label>
-                            <input type="number" id="installments" name="installments"
-                                   min="1" max="12"
-                                   value="<?php echo esc_attr( $template ? $template->installments : 1 ); ?>">
-                            <p class="description" style="margin-top:6px;"><?php esc_html_e( 'يظهر فقط للعقود التي تدعم التقسيط من شاشة الإعدادات.', 'olama-registration' ); ?></p>
                         </div>
                     </div>
                 </div>

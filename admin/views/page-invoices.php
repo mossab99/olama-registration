@@ -848,7 +848,7 @@ $_inv_stats = $wpdb->get_row(
             
             <div class="olama-reg-modal-body">
                 <!-- Header metrics -->
-                <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 20px;">
+                <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 20px; gap:14px;">
                     <div class="olama-reg-metric-card olama-reg-metric-card--primary" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                         <div class="olama-reg-metric-title"><?php esc_html_e( 'قيمة الفاتورة', 'olama-registration' ); ?></div>
                         <div id="drawer-total-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
@@ -864,6 +864,14 @@ $_inv_stats = $wpdb->get_row(
                     <div class="olama-reg-metric-card olama-reg-metric-card--warning" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                         <div class="olama-reg-metric-title"><?php esc_html_e( 'المتبقي المستحق', 'olama-registration' ); ?></div>
                         <div id="drawer-balance-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                    </div>
+                    <div class="olama-reg-metric-card" style="background:#fff7ed; border-left:4px solid #f59e0b; padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                        <div class="olama-reg-metric-title"><?php esc_html_e( 'الإشعار المدين', 'olama-registration' ); ?></div>
+                        <div id="drawer-debit-notes-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0; color:#b45309;">0.00</div>
+                    </div>
+                    <div class="olama-reg-metric-card" style="background:#eff6ff; border-left:4px solid #2563eb; padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                        <div class="olama-reg-metric-title"><?php esc_html_e( 'الإشعار الدائن', 'olama-registration' ); ?></div>
+                        <div id="drawer-credit-notes-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0; color:#1d4ed8;">0.00</div>
                     </div>
                 </div>
 

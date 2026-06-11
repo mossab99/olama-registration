@@ -859,9 +859,14 @@
             .done(res => {
                 if (res.success) {
                     showNotice(R.strings.saved);
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1000);
+                    if ($('#os-hub-data').length) {
+                        $('#olama-reg-invoice-modal').fadeOut(200);
+                        $(document).trigger('osHub:invoiceSaved', [res.data]);
+                    } else {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
                 } else {
                     showNotice(res.data?.message || R.strings.error, true);
                 }
@@ -966,6 +971,8 @@
                     $('#drawer-discount-val').text(parseFloat(inv.discount || 0).toFixed(2) + ' د.أ');
                     $('#drawer-paid-val').text(parseFloat(inv.amount_paid).toFixed(2) + ' د.أ');
                     $('#drawer-balance-val').text(parseFloat(inv.balance).toFixed(2) + ' د.أ');
+                    $('#drawer-debit-notes-val').text(parseFloat(inv.debit_notes_total || 0).toFixed(2) + ' د.أ');
+                    $('#drawer-credit-notes-val').text(parseFloat(inv.credit_notes_total || 0).toFixed(2) + ' د.أ');
                     $('#drawer-family-uid').text(inv.family_uid);
                     $('#drawer-issue-date').text(inv.issue_date);
                     $('#drawer-due-date').text(inv.due_date || '—');
@@ -1410,9 +1417,14 @@
             .done(res => {
                 if (res.success) {
                     showNotice(R.strings.saved);
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1000);
+                    if ($('#os-hub-data').length) {
+                        $('#olama-reg-payment-modal').fadeOut(200);
+                        $(document).trigger('osHub:paymentSaved', [res.data]);
+                    } else {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
                 } else {
                     showNotice(res.data?.message || R.strings.error, true);
                 }
@@ -2700,6 +2712,8 @@
                                 $('#drawer-discount-val').text(parseFloat(inv.discount || 0).toFixed(2) + ' د.أ');
                                 $('#drawer-paid-val').text(parseFloat(inv.amount_paid).toFixed(2) + ' د.أ');
                                 $('#drawer-balance-val').text(parseFloat(inv.balance).toFixed(2) + ' د.أ');
+                                $('#drawer-debit-notes-val').text(parseFloat(inv.debit_notes_total || 0).toFixed(2) + ' د.أ');
+                                $('#drawer-credit-notes-val').text(parseFloat(inv.credit_notes_total || 0).toFixed(2) + ' د.أ');
                                 $('#drawer-family-uid').text(inv.family_uid);
                                 $('#drawer-issue-date').text(inv.issue_date);
                                 $('#drawer-due-date').text(inv.due_date || '—');
@@ -2925,9 +2939,10 @@
 
     $(document).on('submit', '#os-form-agreement-header', function (e) {
         e.preventDefault();
+        const $agreementForm = $(this);
         const $btn = $('#os-btn-save-header');
         const formData = {};
-        $(this).serializeArray().forEach(item => {
+        $agreementForm.serializeArray().forEach(item => {
             if (item.name.endsWith('[]')) {
                 const cleanName = item.name.replace('[]', '');
                 if (!formData[cleanName]) formData[cleanName] = [];
@@ -2963,18 +2978,26 @@
                         jQuery('#os-agr-status-badge').removeClass('olama-reg-badge--active olama-reg-badge--warning olama-reg-badge--inactive').addClass(statusClass).text(formData.status);
                     }
 
-                    const isModal = jQuery('#olama-reg-agreement-modal').is(':visible');
+                    const isHubEmbedded = $agreementForm.closest('#os-hub-original-form-modal').length > 0;
+                    const isModal = jQuery('#olama-reg-agreement-modal').is(':visible') || isHubEmbedded;
                     if (isModal) {
                         // We are inside the Customer Hub modal
-                        jQuery('#os-form-agreement-header input[name="id"]').val(res.data.id);
+                        $agreementForm.find('input[name="id"]').val(res.data.id);
+                        jQuery('#os-agreement-app').attr('data-id', res.data.id);
                         jQuery('#os-agr-fees-table').data('agr-id', res.data.id).attr('data-agr-id', res.data.id);
                         jQuery('#os-agr-add-clause').data('agr-id', res.data.id).attr('data-agr-id', res.data.id);
                         
-                        // Enable tabs in modal
-                        jQuery('#modal-tab-link-fees, #modal-tab-link-clauses').removeClass('os-disabled');
-                        
-                        // Go to Fees tab
-                        jQuery('#modal-tab-link-fees').trigger('click');
+                        if (isHubEmbedded) {
+                            jQuery('.os-nav-tabs .nav-tab[href="#tab-fees"], .os-nav-tabs .nav-tab[href="#tab-clauses"]').removeClass('os-disabled');
+                            jQuery('.os-nav-tabs .nav-tab[href="#tab-fees"]').trigger('click');
+                            jQuery(document).trigger('osHub:agreementSaved', [res.data]);
+                        } else {
+                            // Enable tabs in modal
+                            jQuery('#modal-tab-link-fees, #modal-tab-link-clauses').removeClass('os-disabled');
+
+                            // Go to Fees tab
+                            jQuery('#modal-tab-link-fees').trigger('click');
+                        }
                     } else if (formData.id == 0 && res.data.id) {
                         setTimeout(() => {
                             window.location.href = R.ajaxurl.replace('admin-ajax.php', 'admin.php') + '?page=olama-registration-agreements&action=edit&id=' + res.data.id;
@@ -3230,7 +3253,8 @@
     $(document).on('click', '#os-agr-regenerate-due', function () {
         const $btn = $(this);
         const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
-        ajax('olama_reg_agr_generate_due_schedule', { agreement_id: agrId }, $btn).done(function (res) {
+        const count = parseInt($('#os-agr-due-count').val(), 10) || 8;
+        ajax('olama_reg_agr_generate_due_schedule', { agreement_id: agrId, count }, $btn).done(function (res) {
             if (res.success) {
                 showNotice(res.data.message);
                 renderAgreementDueSchedule(res.data.schedule);
