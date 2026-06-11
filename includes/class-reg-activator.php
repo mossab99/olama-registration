@@ -26,6 +26,9 @@ class Olama_Reg_Activator {
         self::create_financial_table( $wpdb, $charset );
         self::create_billing_tables( $wpdb, $charset );
         self::create_billing_control_tables( $wpdb, $charset );
+        self::create_cash_bank_tables( $wpdb, $charset );
+        self::create_cash_sessions_table( $wpdb, $charset );
+        self::create_payment_method_detail_tables( $wpdb, $charset );
         self::create_settlement_receipts_table( $wpdb, $charset );
         self::create_customers_table( $wpdb, $charset );
         self::create_customer_children_table( $wpdb, $charset );
@@ -177,10 +180,50 @@ class Olama_Reg_Activator {
         $table = $wpdb->prefix . 'olama_payments';
         $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
 
+        if ( ! in_array( 'payment_no', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `payment_no` varchar(50) DEFAULT NULL AFTER `id`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD UNIQUE KEY `payment_no` (`payment_no`)" );
+        }
+        if ( ! in_array( 'account_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `account_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `payment_no`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `account_id` (`account_id`)" );
+        }
+        if ( ! in_array( 'cash_session_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cash_session_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `account_id`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `cash_session_id` (`cash_session_id`)" );
+        }
+        if ( ! in_array( 'status', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `status` varchar(30) NOT NULL DEFAULT 'posted' AFTER `method`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `status` (`status`)" );
+        }
+        if ( ! in_array( 'posted_at', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `posted_at` datetime DEFAULT NULL AFTER `created_at`" );
+        }
+        if ( ! in_array( 'confirmed_by', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `confirmed_by` bigint(20) UNSIGNED DEFAULT NULL AFTER `posted_at`" );
+        }
+        if ( ! in_array( 'confirmed_at', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `confirmed_at` datetime DEFAULT NULL AFTER `confirmed_by`" );
+        }
+        if ( ! in_array( 'reversed_by', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `reversed_by` bigint(20) UNSIGNED DEFAULT NULL AFTER `confirmed_at`" );
+        }
+        if ( ! in_array( 'reversed_at', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `reversed_at` datetime DEFAULT NULL AFTER `reversed_by`" );
+        }
+        if ( ! in_array( 'external_reference', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `external_reference` varchar(190) DEFAULT NULL AFTER `reference`" );
+        }
+        if ( ! in_array( 'admin_notes', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `admin_notes` text DEFAULT NULL AFTER `notes`" );
+        }
         if ( ! in_array( 'reversed_payment_id', (array) $existing, true ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `reversed_payment_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `reference`" );
             $wpdb->query( "ALTER TABLE {$table} ADD KEY `reversed_payment_id` (`reversed_payment_id`)" );
         }
+
+        $wpdb->query( "UPDATE {$table} SET status = 'posted' WHERE status IS NULL OR status = ''" );
+        $wpdb->query( "UPDATE {$table} SET posted_at = created_at WHERE posted_at IS NULL AND amount <> 0 AND (status = 'posted' OR status = 'reversed')" );
     }
 
     private static function upgrade_installments_table( $wpdb ): void {
@@ -190,6 +233,194 @@ class Olama_Reg_Activator {
         if ( ! in_array( 'agreement_id', (array) $existing, true ) ) {
             $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `agreement_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `invoice_id`" );
             $wpdb->query( "ALTER TABLE {$table} ADD KEY `agreement_id` (`agreement_id`)" );
+        }
+    }
+
+    private static function create_cash_bank_tables( $wpdb, string $charset ): void {
+        $accounts = $wpdb->prefix . 'olama_financial_accounts';
+        $movements = $wpdb->prefix . 'olama_cash_bank_movements';
+
+        $sql_accounts = "CREATE TABLE {$accounts} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            account_code varchar(50) NOT NULL,
+            account_name varchar(190) NOT NULL,
+            type varchar(30) NOT NULL,
+            currency varchar(10) NOT NULL DEFAULT 'JOD',
+            is_default tinyint(1) NOT NULL DEFAULT 0,
+            is_active tinyint(1) NOT NULL DEFAULT 1,
+            opening_balance decimal(12,2) NOT NULL DEFAULT 0.00,
+            notes text DEFAULT NULL,
+            created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            UNIQUE KEY account_code (account_code),
+            KEY type_active (type,is_active),
+            KEY is_default (is_default)
+        ) {$charset};";
+
+        $sql_movements = "CREATE TABLE {$movements} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            movement_no varchar(50) NOT NULL,
+            account_id bigint(20) UNSIGNED NOT NULL,
+            cash_session_id bigint(20) UNSIGNED DEFAULT NULL,
+            movement_type varchar(50) NOT NULL,
+            source_type varchar(50) NOT NULL,
+            source_id bigint(20) UNSIGNED NOT NULL,
+            direction varchar(10) NOT NULL,
+            amount decimal(12,2) NOT NULL DEFAULT 0.00,
+            movement_date date DEFAULT NULL,
+            status varchar(30) NOT NULL DEFAULT 'posted',
+            created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            notes text DEFAULT NULL,
+            PRIMARY KEY  (id),
+            UNIQUE KEY movement_no (movement_no),
+            UNIQUE KEY source_event (source_type,source_id,movement_type),
+            KEY account_date (account_id,movement_date),
+            KEY cash_session_id (cash_session_id),
+            KEY direction (direction),
+            KEY status (status)
+        ) {$charset};";
+
+        dbDelta( $sql_accounts );
+        dbDelta( $sql_movements );
+
+        self::seed_default_financial_accounts( $wpdb );
+    }
+
+    private static function create_cash_sessions_table( $wpdb, string $charset ): void {
+        $table = $wpdb->prefix . 'olama_cash_sessions';
+
+        $sql = "CREATE TABLE {$table} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            session_no varchar(50) NOT NULL,
+            account_id bigint(20) UNSIGNED NOT NULL,
+            cashier_id bigint(20) UNSIGNED NOT NULL,
+            session_date date NOT NULL,
+            opened_at datetime DEFAULT NULL,
+            closed_at datetime DEFAULT NULL,
+            opening_balance decimal(12,2) NOT NULL DEFAULT 0.00,
+            cash_in_total decimal(12,2) NOT NULL DEFAULT 0.00,
+            cash_out_total decimal(12,2) NOT NULL DEFAULT 0.00,
+            expected_closing_balance decimal(12,2) NOT NULL DEFAULT 0.00,
+            actual_closing_balance decimal(12,2) DEFAULT NULL,
+            difference_amount decimal(12,2) DEFAULT NULL,
+            status varchar(30) NOT NULL DEFAULT 'open',
+            reviewed_by bigint(20) UNSIGNED DEFAULT NULL,
+            reviewed_at datetime DEFAULT NULL,
+            notes text DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            UNIQUE KEY session_no (session_no),
+            KEY account_cashier_date (account_id,cashier_id,session_date),
+            KEY cashier_status (cashier_id,status),
+            KEY status (status)
+        ) {$charset};";
+
+        dbDelta( $sql );
+    }
+
+    private static function create_payment_method_detail_tables( $wpdb, string $charset ): void {
+        $cheques = $wpdb->prefix . 'olama_cheques';
+        $transfers = $wpdb->prefix . 'olama_bank_transfer_details';
+        $epayments = $wpdb->prefix . 'olama_epayment_details';
+
+        $sql_cheques = "CREATE TABLE {$cheques} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            payment_id bigint(20) UNSIGNED NOT NULL,
+            check_no varchar(100) NOT NULL DEFAULT '',
+            bank_name varchar(190) DEFAULT NULL,
+            branch_name varchar(190) DEFAULT NULL,
+            check_date date DEFAULT NULL,
+            due_date date DEFAULT NULL,
+            amount decimal(12,2) NOT NULL DEFAULT 0.00,
+            status varchar(30) NOT NULL DEFAULT 'received',
+            deposited_at datetime DEFAULT NULL,
+            cleared_at datetime DEFAULT NULL,
+            bounced_at datetime DEFAULT NULL,
+            notes text DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            KEY payment_id (payment_id),
+            KEY check_no (check_no),
+            KEY status (status)
+        ) {$charset};";
+
+        $sql_transfers = "CREATE TABLE {$transfers} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            payment_id bigint(20) UNSIGNED NOT NULL,
+            bank_account_id bigint(20) UNSIGNED DEFAULT NULL,
+            transfer_reference varchar(190) NOT NULL DEFAULT '',
+            transfer_date date DEFAULT NULL,
+            sender_name varchar(190) DEFAULT NULL,
+            attachment_id bigint(20) UNSIGNED DEFAULT NULL,
+            status varchar(30) NOT NULL DEFAULT 'confirmed',
+            confirmed_by bigint(20) UNSIGNED DEFAULT NULL,
+            confirmed_at datetime DEFAULT NULL,
+            rejected_by bigint(20) UNSIGNED DEFAULT NULL,
+            rejected_at datetime DEFAULT NULL,
+            notes text DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            KEY payment_id (payment_id),
+            KEY status (status),
+            KEY transfer_reference (transfer_reference)
+        ) {$charset};";
+
+        $sql_epayments = "CREATE TABLE {$epayments} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            payment_id bigint(20) UNSIGNED NOT NULL,
+            provider varchar(100) DEFAULT NULL,
+            transaction_id varchar(190) DEFAULT NULL,
+            gateway_reference varchar(190) DEFAULT NULL,
+            gross_amount decimal(12,2) NOT NULL DEFAULT 0.00,
+            fee_amount decimal(12,2) NOT NULL DEFAULT 0.00,
+            net_amount decimal(12,2) NOT NULL DEFAULT 0.00,
+            status varchar(30) NOT NULL DEFAULT 'confirmed',
+            confirmed_at datetime DEFAULT NULL,
+            failed_at datetime DEFAULT NULL,
+            refunded_at datetime DEFAULT NULL,
+            raw_payload longtext DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            KEY payment_id (payment_id),
+            KEY status (status),
+            KEY transaction_id (transaction_id)
+        ) {$charset};";
+
+        dbDelta( $sql_cheques );
+        dbDelta( $sql_transfers );
+        dbDelta( $sql_epayments );
+    }
+
+    private static function seed_default_financial_accounts( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_financial_accounts';
+        $defaults = [
+            [ 'CASH-MAIN', 'Main Cashbox', 'cash' ],
+            [ 'BANK-MAIN', 'Main Bank Account', 'bank' ],
+            [ 'CHQ-CLEAR', 'Cheque Clearing Account', 'cheque_clearing' ],
+            [ 'EPAY-MAIN', 'Electronic Payments Account', 'electronic' ],
+        ];
+
+        foreach ( $defaults as $row ) {
+            $exists = $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} WHERE account_code = %s", $row[0] ) );
+            if ( $exists ) {
+                continue;
+            }
+
+            $wpdb->insert( $table, [
+                'account_code' => $row[0],
+                'account_name' => $row[1],
+                'type'         => $row[2],
+                'is_default'   => 1,
+                'is_active'    => 1,
+                'created_by'   => get_current_user_id(),
+            ] );
         }
     }
 

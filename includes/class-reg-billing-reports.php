@@ -271,6 +271,7 @@ class Olama_Reg_Billing_Reports {
                 p.reference,
                 p.notes,
                 p.received_by,
+                cs.session_no,
                 i.invoice_number,
                 i.student_uid,
                 i.academic_year_id,
@@ -283,6 +284,7 @@ class Olama_Reg_Billing_Reports {
             LEFT JOIN " . self::t( 'olama_families' ) . " f ON f.family_uid = p.family_uid
             LEFT JOIN " . self::t( 'olama_customers' ) . " c ON c.customer_uid = p.family_uid
             LEFT JOIN " . self::t( 'olama_customer_children' ) . " ec ON ec.id = i.ext_child_id
+            LEFT JOIN " . self::t( 'olama_cash_sessions' ) . " cs ON cs.id = p.cash_session_id
             LEFT JOIN {$wpdb->users} u ON u.ID = p.received_by
             WHERE {$where_sql}
             ORDER BY p.payment_date ASC, p.id ASC";
@@ -322,6 +324,188 @@ class Olama_Reg_Billing_Reports {
                 'method'     => $method,
                 'cashier_id' => $cashier_id,
             ],
+        ];
+    }
+
+    public static function get_financial_account_options(): array {
+        global $wpdb;
+
+        return $wpdb->get_results(
+            "SELECT id, account_code, account_name, type
+             FROM " . self::t( 'olama_financial_accounts' ) . "
+             WHERE is_active = 1
+             ORDER BY type ASC, is_default DESC, account_name ASC"
+        ) ?: [];
+    }
+
+    public static function get_account_ledger_report( array $filters = [] ): array {
+        global $wpdb;
+
+        $account_id = absint( $filters['account_id'] ?? 0 );
+        $date_from  = self::sanitize_report_date( $filters['date_from'] ?? '' );
+        $date_to    = self::sanitize_report_date( $filters['date_to'] ?? '' );
+
+        $where = [ '1=1' ];
+        $params = [];
+        if ( $account_id > 0 ) {
+            $where[] = 'm.account_id = %d';
+            $params[] = $account_id;
+        }
+        if ( $date_from ) {
+            $where[] = 'm.movement_date >= %s';
+            $params[] = $date_from;
+        }
+        if ( $date_to ) {
+            $where[] = 'm.movement_date <= %s';
+            $params[] = $date_to;
+        }
+
+        $query = "SELECT
+                m.*,
+                a.account_code,
+                a.account_name,
+                a.type AS account_type,
+                a.opening_balance,
+                p.payment_no,
+                p.invoice_id
+            FROM " . self::t( 'olama_cash_bank_movements' ) . " m
+            LEFT JOIN " . self::t( 'olama_financial_accounts' ) . " a ON a.id = m.account_id
+            LEFT JOIN " . self::t( 'olama_payments' ) . " p ON m.source_type = 'payment' AND p.id = m.source_id
+            WHERE " . implode( ' AND ', $where ) . "
+            ORDER BY m.movement_date ASC, m.id ASC";
+
+        $rows = $params
+            ? ( $wpdb->get_results( $wpdb->prepare( $query, ...$params ) ) ?: [] )
+            : ( $wpdb->get_results( $query ) ?: [] );
+
+        $running = [];
+        foreach ( $rows as $row ) {
+            $aid = (int) $row->account_id;
+            if ( ! isset( $running[ $aid ] ) ) {
+                $running[ $aid ] = (float) ( $row->opening_balance ?? 0 );
+            }
+            $running[ $aid ] += (string) $row->direction === 'out' ? -1 * (float) $row->amount : (float) $row->amount;
+            $row->running_balance = round( $running[ $aid ], 2 );
+        }
+
+        return [
+            'rows'    => $rows,
+            'filters' => [
+                'account_id' => $account_id,
+                'date_from'  => $date_from,
+                'date_to'    => $date_to,
+            ],
+        ];
+    }
+
+    public static function get_receipts_report( array $filters = [] ): array {
+        global $wpdb;
+
+        $date_from  = self::sanitize_report_date( $filters['date_from'] ?? '' );
+        $date_to    = self::sanitize_report_date( $filters['date_to'] ?? '' );
+        $method     = sanitize_text_field( $filters['method'] ?? '' );
+        $status     = sanitize_key( $filters['status'] ?? '' );
+        $account_id = absint( $filters['account_id'] ?? 0 );
+
+        $where = [ '1=1' ];
+        $params = [];
+        if ( $date_from ) {
+            $where[] = 'p.payment_date >= %s';
+            $params[] = $date_from;
+        }
+        if ( $date_to ) {
+            $where[] = 'p.payment_date <= %s';
+            $params[] = $date_to;
+        }
+        if ( $method !== '' ) {
+            $where[] = 'p.method = %s';
+            $params[] = $method;
+        }
+        if ( $status !== '' ) {
+            $where[] = 'p.status = %s';
+            $params[] = $status;
+        }
+        if ( $account_id > 0 ) {
+            $where[] = 'p.account_id = %d';
+            $params[] = $account_id;
+        }
+
+        $query = "SELECT p.*, i.invoice_number, a.account_name, cs.session_no, u.display_name AS received_by_name
+            FROM " . self::t( 'olama_payments' ) . " p
+            LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id
+            LEFT JOIN " . self::t( 'olama_financial_accounts' ) . " a ON a.id = p.account_id
+            LEFT JOIN " . self::t( 'olama_cash_sessions' ) . " cs ON cs.id = p.cash_session_id
+            LEFT JOIN {$wpdb->users} u ON u.ID = p.received_by
+            WHERE " . implode( ' AND ', $where ) . "
+            ORDER BY p.payment_date DESC, p.id DESC";
+
+        $rows = $params ? ( $wpdb->get_results( $wpdb->prepare( $query, ...$params ) ) ?: [] ) : ( $wpdb->get_results( $query ) ?: [] );
+
+        return [
+            'rows'    => $rows,
+            'filters' => compact( 'date_from', 'date_to', 'method', 'status', 'account_id' ),
+        ];
+    }
+
+    public static function get_allocation_report( array $filters = [] ): array {
+        global $wpdb;
+
+        $date_from = self::sanitize_report_date( $filters['date_from'] ?? '' );
+        $date_to   = self::sanitize_report_date( $filters['date_to'] ?? '' );
+
+        $where = [ '1=1' ];
+        $params = [];
+        if ( $date_from ) {
+            $where[] = 'pa.allocation_date >= %s';
+            $params[] = $date_from;
+        }
+        if ( $date_to ) {
+            $where[] = 'pa.allocation_date <= %s';
+            $params[] = $date_to;
+        }
+
+        $query = "SELECT pa.*, p.payment_no, p.method, p.status AS payment_status,
+                i.invoice_number, inst.installment_no, inst.due_date, inst.amount_due
+            FROM " . self::t( 'olama_payment_allocations' ) . " pa
+            LEFT JOIN " . self::t( 'olama_payments' ) . " p ON p.id = pa.payment_id
+            LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = pa.invoice_id
+            LEFT JOIN " . self::t( 'olama_invoice_installments' ) . " inst ON inst.id = pa.installment_id
+            WHERE " . implode( ' AND ', $where ) . "
+            ORDER BY pa.allocation_date DESC, pa.id DESC";
+
+        $rows = $params ? ( $wpdb->get_results( $wpdb->prepare( $query, ...$params ) ) ?: [] ) : ( $wpdb->get_results( $query ) ?: [] );
+
+        return [
+            'rows'    => $rows,
+            'filters' => compact( 'date_from', 'date_to' ),
+        ];
+    }
+
+    public static function get_cheques_report( array $filters = [] ): array {
+        global $wpdb;
+
+        $status = sanitize_key( $filters['status'] ?? '' );
+        $where = [ '1=1' ];
+        $params = [];
+        if ( $status !== '' ) {
+            $where[] = 'c.status = %s';
+            $params[] = $status;
+        }
+
+        $query = "SELECT c.*, p.payment_no, p.payment_date, p.reference, p.status AS payment_status,
+                i.invoice_number, a.account_name
+            FROM " . self::t( 'olama_cheques' ) . " c
+            LEFT JOIN " . self::t( 'olama_payments' ) . " p ON p.id = c.payment_id
+            LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id
+            LEFT JOIN " . self::t( 'olama_financial_accounts' ) . " a ON a.id = p.account_id
+            WHERE " . implode( ' AND ', $where ) . "
+            ORDER BY c.due_date ASC, c.id DESC";
+
+        $rows = $params ? ( $wpdb->get_results( $wpdb->prepare( $query, ...$params ) ) ?: [] ) : ( $wpdb->get_results( $query ) ?: [] );
+
+        return [
+            'rows'    => $rows,
+            'filters' => [ 'status' => $status ],
         ];
     }
 

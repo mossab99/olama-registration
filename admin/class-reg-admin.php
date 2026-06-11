@@ -104,6 +104,24 @@ class Olama_Reg_Admin {
 
         add_submenu_page(
             'olama-registration',
+            __( 'Cash Sessions', 'olama-registration' ),
+            __( 'الصناديق والجرد اليومي', 'olama-registration' ),
+            'olama_manage_registration_payments',
+            'olama-registration-cash-sessions',
+            [ $this, 'render_cash_sessions' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
+            __( 'Payment Review', 'olama-registration' ),
+            __( 'مراجعة التحويلات', 'olama-registration' ),
+            'olama_manage_registration_payments',
+            'olama-registration-payment-review',
+            [ $this, 'render_payment_review' ]
+        );
+
+        add_submenu_page(
+            'olama-registration',
             __( 'Settlement Receipts', 'olama-registration' ),
             __( 'إيصالات التسوية', 'olama-registration' ),
             'olama_manage_registration_payments',
@@ -198,6 +216,16 @@ class Olama_Reg_Admin {
     public function render_reports(): void {
         if ( ! current_user_can( 'olama_manage_registration_reports' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
         include OLAMA_REG_PATH . 'admin/views/page-billing-reports.php';
+    }
+
+    public function render_cash_sessions(): void {
+        if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-cash-sessions.php';
+    }
+
+    public function render_payment_review(): void {
+        if ( ! current_user_can( 'olama_manage_registration_payments' ) && ! current_user_can( 'manage_options' ) ) wp_die( __( 'Unauthorized', 'olama-registration' ) );
+        include OLAMA_REG_PATH . 'admin/views/page-payment-review.php';
     }
 
     public function render_custom_payments(): void {

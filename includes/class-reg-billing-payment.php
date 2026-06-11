@@ -42,11 +42,6 @@ class Olama_Reg_Billing_Payment {
             return new \WP_Error( 'not_found', __( 'Invoice not found.', 'olama-registration' ) );
         }
 
-        $policy = Olama_Reg_Billing_Invoice::can_record_payment( $invoice );
-        if ( is_wp_error( $policy ) ) {
-            return $policy;
-        }
-
         $amount = round( (float) ( $data['amount'] ?? 0 ), 2 );
         if ( $amount <= 0 ) {
             return new \WP_Error( 'invalid_amount', __( 'Payment amount must be greater than zero.', 'olama-registration' ) );
@@ -77,37 +72,97 @@ class Olama_Reg_Billing_Payment {
         $method = sanitize_text_field( $data['method'] ?? 'cash' );
         if ( ! in_array( $method, $valid_methods, true ) ) $method = 'cash';
 
+        $policy = Olama_Reg_Payment_Policy::can_create_payment( $invoice, $method, absint( $data['account_id'] ?? 0 ) ?: null );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
+        }
+
+        $default_status = 'posted';
+        if ( $method === 'bank_transfer' && get_option( 'olama_bank_transfer_immediate_posting', '1' ) !== '1' ) {
+            $default_status = 'pending_review';
+        } elseif ( $method === 'online' && get_option( 'olama_epayment_immediate_posting', '1' ) !== '1' ) {
+            $default_status = 'pending_review';
+        } elseif ( $method === 'cheque' && get_option( 'olama_cheque_financial_effect', 'on_receive' ) === 'on_clear' ) {
+            $default_status = 'pending_review';
+        }
+
+        $status = sanitize_key( $data['status'] ?? $default_status );
+        if ( ! in_array( $status, [ 'draft', 'pending_review', 'posted', 'reversed', 'failed', 'cancelled' ], true ) ) {
+            $status = $default_status;
+        }
+        if ( $method === 'cash' ) $status = 'posted';
+
+        $account_id = absint( $data['account_id'] ?? 0 ) ?: Olama_Reg_Cash_Bank_Movement::get_default_account_id_for_method( $method );
+
         $payload = [
+            'payment_no'     => null,
+            'account_id'     => $account_id ?: null,
+            'cash_session_id'=> absint( $data['cash_session_id'] ?? 0 ) ?: null,
             'invoice_id'     => $invoice_id,
             'installment_id' => absint( $data['installment_id'] ?? 0 ) ?: null,
             'family_uid'     => $family_uid,
             'payment_date'   => $payment_date,
             'amount'         => $amount,
             'method'         => $method,
+            'status'         => $status,
             'reference'      => sanitize_text_field( $data['reference'] ?? '' ) ?: null,
+            'external_reference' => sanitize_text_field( $data['external_reference'] ?? '' ) ?: null,
             'received_by'    => get_current_user_id(),
             'notes'          => sanitize_textarea_field( $data['notes'] ?? '' ) ?: null,
+            'admin_notes'    => sanitize_textarea_field( $data['admin_notes'] ?? '' ) ?: null,
+            'posted_at'      => $status === 'posted' ? current_time( 'mysql' ) : null,
         ];
 
         // ── Transaction: insert payment + update totals ────────────────────────
         $wpdb->query( 'START TRANSACTION' );
+        if ( ! self::acquire_number_lock() ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new \WP_Error( 'number_lock_failed', __( 'Could not reserve a receipt number. Please try again.', 'olama-registration' ) );
+        }
+
+        $payload['payment_no'] = self::generate_document_no( 'REC', 'payment_no' );
 
         $result = $wpdb->insert( self::t( 'olama_payments' ), $payload );
 
         if ( ! $result ) {
+            self::release_number_lock();
             $wpdb->query( 'ROLLBACK' );
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
 
         $payment_id = (int) $wpdb->insert_id;
 
-        // Allocate to installments
-        self::allocate_to_installments( $payment_id );
+        $session_link = Olama_Reg_Cash_Session::attach_payment_to_open_session( $payment_id );
+        if ( is_wp_error( $session_link ) ) {
+            self::release_number_lock();
+            $wpdb->query( 'ROLLBACK' );
+            return $session_link;
+        }
 
-        // Recalculate invoice totals (also handles status auto-update)
-        Olama_Reg_Billing_Invoice::recalculate_totals( $invoice_id );
+        $method_details = Olama_Reg_Payment_Method_Details::save_for_payment( $payment_id, $data );
+        if ( is_wp_error( $method_details ) ) {
+            self::release_number_lock();
+            $wpdb->query( 'ROLLBACK' );
+            return $method_details;
+        }
+
+        if ( $status === 'posted' ) {
+            // Allocate to installments
+            self::allocate_to_installments( $payment_id );
+
+            // Recalculate invoice totals (also handles status auto-update)
+            Olama_Reg_Billing_Invoice::recalculate_totals( $invoice_id );
+
+            $movement = Olama_Reg_Cash_Bank_Movement::record_receipt_movement( $payment_id );
+            if ( is_wp_error( $movement ) ) {
+                self::release_number_lock();
+                $wpdb->query( 'ROLLBACK' );
+                return $movement;
+            }
+        }
 
         $wpdb->query( 'COMMIT' );
+        self::release_number_lock();
 
         // Audit
         self::log_audit( 'payment', $payment_id, 'created', null,
@@ -142,22 +197,34 @@ class Olama_Reg_Billing_Payment {
         }
 
         $payload = [
+            'payment_no'     => null,
+            'account_id'     => isset( $payment->account_id ) ? (int) $payment->account_id : null,
+            'cash_session_id'=> isset( $payment->cash_session_id ) ? (int) $payment->cash_session_id : null,
             'invoice_id'     => $payment->invoice_id,
             'installment_id' => $payment->installment_id,
             'family_uid'     => $payment->family_uid,
             'payment_date'   => date( 'Y-m-d' ),
             'amount'         => -1 * (float) $payment->amount,
             'method'         => 'reversal',
+            'status'         => 'posted',
             'reference'      => 'REVERSAL-' . $id,
             'reversed_payment_id' => $id,
             'received_by'    => get_current_user_id(),
+            'posted_at'      => current_time( 'mysql' ),
             'notes'          => sanitize_textarea_field( $notes ) ?: __( 'عكس سند قبض رقم', 'olama-registration' ) . ' #' . $id,
         ];
 
         $wpdb->query( 'START TRANSACTION' );
+        if ( ! self::acquire_number_lock() ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new \WP_Error( 'number_lock_failed', __( 'Could not reserve a receipt number. Please try again.', 'olama-registration' ) );
+        }
+
+        $payload['payment_no'] = self::generate_document_no( 'REC', 'payment_no' );
 
         $result = $wpdb->insert( self::t( 'olama_payments' ), $payload );
         if ( ! $result ) {
+            self::release_number_lock();
             $wpdb->query( 'ROLLBACK' );
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
@@ -165,10 +232,28 @@ class Olama_Reg_Billing_Payment {
 
         self::reverse_allocations( $id, $new_payment_id );
 
+        $wpdb->update(
+            self::t( 'olama_payments' ),
+            [
+                'status'      => 'reversed',
+                'reversed_by' => get_current_user_id(),
+                'reversed_at' => current_time( 'mysql' ),
+            ],
+            [ 'id' => $id ]
+        );
+
         // Recalculate invoice totals
         Olama_Reg_Billing_Invoice::recalculate_totals( (int) $payment->invoice_id );
 
+        $movement = Olama_Reg_Cash_Bank_Movement::record_reversal_movement( $new_payment_id, $id );
+        if ( is_wp_error( $movement ) ) {
+            self::release_number_lock();
+            $wpdb->query( 'ROLLBACK' );
+            return $movement;
+        }
+
         $wpdb->query( 'COMMIT' );
+        self::release_number_lock();
 
         self::log_audit( 'payment', $id, 'reversed', $payment, self::get_payment_row( $id ) );
 
@@ -304,7 +389,10 @@ class Olama_Reg_Billing_Payment {
 
         // 2. Get net sum of all payments for this invoice
         $net_paid = (float) $wpdb->get_var( $wpdb->prepare(
-            "SELECT SUM(amount) FROM " . self::t( 'olama_payments' ) . " WHERE invoice_id = %d",
+            "SELECT SUM(amount)
+             FROM " . self::t( 'olama_payments' ) . "
+             WHERE invoice_id = %d
+               AND (status IS NULL OR status = '' OR status IN ('posted','reversed'))",
             $invoice_id
         ) );
 
@@ -361,6 +449,11 @@ class Olama_Reg_Billing_Payment {
     public static function can_reverse_payment( object $payment ): true|\WP_Error {
         global $wpdb;
 
+        $policy = Olama_Reg_Payment_Policy::can_reverse_payment( $payment );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
+        }
+
         if ( (float) $payment->amount <= 0 || $payment->method === 'reversal' ) {
             return new \WP_Error( 'already_reversed', __( 'لا يمكن عكس هذا السند.', 'olama-registration' ) );
         }
@@ -375,6 +468,29 @@ class Olama_Reg_Billing_Payment {
         }
 
         return true;
+    }
+
+    public static function get_receipt_number( object $payment ): string {
+        $payment_no = trim( (string) ( $payment->payment_no ?? '' ) );
+        if ( $payment_no !== '' ) {
+            return $payment_no;
+        }
+
+        return '#' . (int) ( $payment->id ?? 0 );
+    }
+
+    public static function get_status_label( object $payment ): string {
+        $labels = [
+            'draft'          => __( 'مسودة', 'olama-registration' ),
+            'pending_review' => __( 'قيد المراجعة', 'olama-registration' ),
+            'posted'         => __( 'معتمد', 'olama-registration' ),
+            'reversed'       => __( 'معكوس', 'olama-registration' ),
+            'failed'         => __( 'فشل', 'olama-registration' ),
+            'cancelled'      => __( 'ملغى', 'olama-registration' ),
+        ];
+        $status = (string) ( $payment->status ?? 'posted' );
+
+        return $labels[ $status ] ?? $status;
     }
 
     private static function reverse_allocations( int $original_payment_id, int $reversal_payment_id ): void {
@@ -484,10 +600,31 @@ class Olama_Reg_Billing_Payment {
             $received_by_name = $user ? $user->display_name : '';
         }
 
+        $account = null;
+        if ( ! empty( $payment->account_id ) ) {
+            $account = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM " . self::t( 'olama_financial_accounts' ) . " WHERE id = %d",
+                (int) $payment->account_id
+            ) );
+        }
+
+        $cash_session = null;
+        if ( ! empty( $payment->cash_session_id ) ) {
+            $cash_session = $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM " . self::t( 'olama_cash_sessions' ) . " WHERE id = %d",
+                (int) $payment->cash_session_id
+            ) );
+        }
+
+        $method_details = Olama_Reg_Payment_Method_Details::get_payment_details( (int) $payment->id, (string) $payment->method );
+
         return [
             'payment'           => $payment,
             'invoice'           => $invoice,
             'family'            => $family,
+            'account'           => $account,
+            'cash_session'      => $cash_session,
+            'method_details'    => $method_details,
             'ext_customer_name' => $ext_customer_name,
             'received_by_name'  => $received_by_name,
             'generated_at'      => current_time( 'mysql' ),
@@ -502,6 +639,40 @@ class Olama_Reg_Billing_Payment {
             "SELECT * FROM " . self::t( 'olama_payments' ) . " WHERE id = %d",
             $id
         ) ) ?: null;
+    }
+
+    private static function acquire_number_lock(): bool {
+        global $wpdb;
+        $locked = $wpdb->get_var( "SELECT GET_LOCK('olama_reg_payment_number', 5)" );
+
+        return (string) $locked === '1';
+    }
+
+    private static function release_number_lock(): void {
+        global $wpdb;
+        $wpdb->get_var( "SELECT RELEASE_LOCK('olama_reg_payment_number')" );
+    }
+
+    private static function generate_document_no( string $prefix, string $column ): string {
+        global $wpdb;
+
+        $year = current_time( 'Y' );
+        $base = $prefix . '-' . $year . '-';
+        $latest = (string) $wpdb->get_var( $wpdb->prepare(
+            "SELECT {$column}
+             FROM " . self::t( 'olama_payments' ) . "
+             WHERE {$column} LIKE %s
+             ORDER BY {$column} DESC
+             LIMIT 1",
+            $wpdb->esc_like( $base ) . '%'
+        ) );
+
+        $next = 1;
+        if ( preg_match( '/^' . preg_quote( $base, '/' ) . '(\d+)$/', $latest, $matches ) ) {
+            $next = (int) $matches[1] + 1;
+        }
+
+        return $base . str_pad( (string) $next, 5, '0', STR_PAD_LEFT );
     }
 
     private static function log_audit(

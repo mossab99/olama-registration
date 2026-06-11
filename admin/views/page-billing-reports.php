@@ -23,6 +23,7 @@ if ( class_exists( 'Olama_School_Academic' ) ) {
 $method_labels = Olama_Reg_Billing_Reports::get_method_labels();
 $available_methods = Olama_Reg_Billing_Reports::get_available_payment_methods();
 $cashiers = Olama_Reg_Billing_Reports::get_cashier_options();
+$financial_accounts = Olama_Reg_Billing_Reports::get_financial_account_options();
 
 $cash_filters = [
     'year_id'    => $year_id,
@@ -34,6 +35,34 @@ $cash_filters = [
 $cash_report = Olama_Reg_Billing_Reports::get_cash_register_report( $cash_filters );
 $cash_rows = $cash_report['rows'];
 $cash_summary = $cash_report['summary'];
+
+$ledger_filters = [
+    'account_id' => absint( $_GET['account_id'] ?? 0 ),
+    'date_from'  => sanitize_text_field( $_GET['date_from'] ?? '' ),
+    'date_to'    => sanitize_text_field( $_GET['date_to'] ?? '' ),
+];
+$ledger_report = Olama_Reg_Billing_Reports::get_account_ledger_report( $ledger_filters );
+$ledger_rows = $ledger_report['rows'];
+
+$receipt_report = Olama_Reg_Billing_Reports::get_receipts_report( [
+    'date_from'  => sanitize_text_field( $_GET['date_from'] ?? '' ),
+    'date_to'    => sanitize_text_field( $_GET['date_to'] ?? '' ),
+    'method'     => sanitize_text_field( $_GET['method'] ?? '' ),
+    'status'     => sanitize_key( $_GET['status'] ?? '' ),
+    'account_id' => absint( $_GET['account_id'] ?? 0 ),
+] );
+$receipt_rows = $receipt_report['rows'];
+
+$allocation_report = Olama_Reg_Billing_Reports::get_allocation_report( [
+    'date_from' => sanitize_text_field( $_GET['date_from'] ?? '' ),
+    'date_to'   => sanitize_text_field( $_GET['date_to'] ?? '' ),
+] );
+$allocation_rows = $allocation_report['rows'];
+
+$cheque_report = Olama_Reg_Billing_Reports::get_cheques_report( [
+    'status' => sanitize_key( $_GET['cheque_status'] ?? '' ),
+] );
+$cheque_rows = $cheque_report['rows'];
 
 $money = static function ( $amount ): string {
     return number_format( (float) $amount, 2 );
@@ -235,6 +264,22 @@ function olama_reg_render_cash_register_table( array $rows, array $method_labels
             <span class="dashicons dashicons-portfolio"></span>
             <?php esc_html_e( 'جرد الصندوق', 'olama-registration' ); ?>
         </a>
+        <a class="<?php echo $active_tab === 'account_ledger' ? 'active' : ''; ?>" href="<?php echo $build_url( [ 'page' => 'olama-registration-reports', 'report_tab' => 'account_ledger', 'year_id' => $year_id ] ); ?>">
+            <span class="dashicons dashicons-list-view"></span>
+            <?php esc_html_e( 'كشف حركة الحسابات', 'olama-registration' ); ?>
+        </a>
+        <a class="<?php echo $active_tab === 'receipts' ? 'active' : ''; ?>" href="<?php echo $build_url( [ 'page' => 'olama-registration-reports', 'report_tab' => 'receipts', 'year_id' => $year_id ] ); ?>">
+            <span class="dashicons dashicons-media-document"></span>
+            <?php esc_html_e( 'تقرير الإيصالات', 'olama-registration' ); ?>
+        </a>
+        <a class="<?php echo $active_tab === 'allocations' ? 'active' : ''; ?>" href="<?php echo $build_url( [ 'page' => 'olama-registration-reports', 'report_tab' => 'allocations', 'year_id' => $year_id ] ); ?>">
+            <span class="dashicons dashicons-networking"></span>
+            <?php esc_html_e( 'تخصيصات الدفعات', 'olama-registration' ); ?>
+        </a>
+        <a class="<?php echo $active_tab === 'cheques' ? 'active' : ''; ?>" href="<?php echo $build_url( [ 'page' => 'olama-registration-reports', 'report_tab' => 'cheques', 'year_id' => $year_id ] ); ?>">
+            <span class="dashicons dashicons-tickets-alt"></span>
+            <?php esc_html_e( 'تقرير الشيكات', 'olama-registration' ); ?>
+        </a>
     </div>
 
     <?php if ( $active_tab === 'cash_register' ) : ?>
@@ -359,6 +404,305 @@ function olama_reg_render_cash_register_table( array $rows, array $method_labels
                 <?php esc_html_e( 'جرد الصندوق', 'olama-registration' ); ?>
             </h3>
             <?php olama_reg_render_cash_register_table( $cash_rows, $method_labels, $money ); ?>
+        </div>
+    <?php elseif ( $active_tab === 'account_ledger' ) : ?>
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-filter"></span>
+                <?php esc_html_e( 'فلاتر كشف حركة الحسابات', 'olama-registration' ); ?>
+            </h3>
+            <form method="get" class="olama-reg-grid olama-reg-grid--compact">
+                <input type="hidden" name="page" value="olama-registration-reports">
+                <input type="hidden" name="report_tab" value="account_ledger">
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'الحساب المالي', 'olama-registration' ); ?></label>
+                    <select name="account_id">
+                        <option value="0"><?php esc_html_e( 'جميع الحسابات', 'olama-registration' ); ?></option>
+                        <?php foreach ( $financial_accounts as $account ) : ?>
+                            <option value="<?php echo esc_attr( $account->id ); ?>" <?php selected( $ledger_report['filters']['account_id'], $account->id ); ?>>
+                                <?php echo esc_html( $account->account_name ); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'من تاريخ', 'olama-registration' ); ?></label>
+                    <input type="date" name="date_from" value="<?php echo esc_attr( $ledger_report['filters']['date_from'] ); ?>">
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'إلى تاريخ', 'olama-registration' ); ?></label>
+                    <input type="date" name="date_to" value="<?php echo esc_attr( $ledger_report['filters']['date_to'] ); ?>">
+                </div>
+                <div class="olama-reg-field" style="justify-content:flex-end;">
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                        <span class="dashicons dashicons-search"></span>
+                        <?php esc_html_e( 'عرض الكشف', 'olama-registration' ); ?>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-list-view"></span>
+                <?php esc_html_e( 'كشف حركة الحسابات المالية', 'olama-registration' ); ?>
+            </h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <thead>
+                        <tr>
+                            <th><?php esc_html_e( 'رقم الحركة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'التاريخ', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الحساب', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'نوع الحركة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'المصدر', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'وارد', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'صادر', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الرصيد', 'olama-registration' ); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ( empty( $ledger_rows ) ) : ?>
+                            <tr><td colspan="8" class="olama-reg-empty-state"><?php esc_html_e( 'لا توجد حركات مالية مطابقة.', 'olama-registration' ); ?></td></tr>
+                        <?php else : foreach ( $ledger_rows as $row ) : ?>
+                            <tr>
+                                <td><strong><?php echo esc_html( $row->movement_no ); ?></strong></td>
+                                <td><?php echo esc_html( $row->movement_date ); ?></td>
+                                <td><?php echo esc_html( $row->account_name ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->movement_type ); ?></td>
+                                <td><?php echo esc_html( $row->payment_no ?: '#' . (int) $row->source_id ); ?></td>
+                                <td class="olama-reg-text--success"><?php echo $row->direction === 'in' ? esc_html( $money( $row->amount ) ) : '—'; ?></td>
+                                <td style="color:#c62828;"><?php echo $row->direction === 'out' ? esc_html( $money( $row->amount ) ) : '—'; ?></td>
+                                <td><strong><?php echo esc_html( $money( $row->running_balance ) ); ?></strong></td>
+                            </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php elseif ( $active_tab === 'receipts' ) : ?>
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-filter"></span>
+                <?php esc_html_e( 'فلاتر تقرير الإيصالات', 'olama-registration' ); ?>
+            </h3>
+            <form method="get" class="olama-reg-grid olama-reg-grid--compact">
+                <input type="hidden" name="page" value="olama-registration-reports">
+                <input type="hidden" name="report_tab" value="receipts">
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'من تاريخ', 'olama-registration' ); ?></label>
+                    <input type="date" name="date_from" value="<?php echo esc_attr( $receipt_report['filters']['date_from'] ); ?>">
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'إلى تاريخ', 'olama-registration' ); ?></label>
+                    <input type="date" name="date_to" value="<?php echo esc_attr( $receipt_report['filters']['date_to'] ); ?>">
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></label>
+                    <select name="method">
+                        <option value=""><?php esc_html_e( 'جميع الطرق', 'olama-registration' ); ?></option>
+                        <?php foreach ( $available_methods as $method_key => $method_label ) : ?>
+                            <option value="<?php echo esc_attr( $method_key ); ?>" <?php selected( $receipt_report['filters']['method'], $method_key ); ?>><?php echo esc_html( $method_label ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'الحالة', 'olama-registration' ); ?></label>
+                    <select name="status">
+                        <option value=""><?php esc_html_e( 'جميع الحالات', 'olama-registration' ); ?></option>
+                        <?php foreach ( [ 'posted', 'pending', 'reversed', 'cancelled' ] as $status_key ) : ?>
+                            <option value="<?php echo esc_attr( $status_key ); ?>" <?php selected( $receipt_report['filters']['status'], $status_key ); ?>><?php echo esc_html( Olama_Reg_Billing_Payment::get_status_label( $status_key ) ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'الحساب المالي', 'olama-registration' ); ?></label>
+                    <select name="account_id">
+                        <option value="0"><?php esc_html_e( 'جميع الحسابات', 'olama-registration' ); ?></option>
+                        <?php foreach ( $financial_accounts as $account ) : ?>
+                            <option value="<?php echo esc_attr( $account->id ); ?>" <?php selected( $receipt_report['filters']['account_id'], $account->id ); ?>><?php echo esc_html( $account->account_name ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="olama-reg-field" style="justify-content:flex-end;">
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                        <span class="dashicons dashicons-search"></span>
+                        <?php esc_html_e( 'عرض التقرير', 'olama-registration' ); ?>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-media-document"></span>
+                <?php esc_html_e( 'تقرير الإيصالات', 'olama-registration' ); ?>
+            </h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <thead>
+                        <tr>
+                            <th><?php esc_html_e( 'رقم الإيصال', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'التاريخ', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الفاتورة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الحالة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الحساب', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'جلسة الصندوق', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'المستخدم', 'olama-registration' ); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ( empty( $receipt_rows ) ) : ?>
+                            <tr><td colspan="9" class="olama-reg-empty-state"><?php esc_html_e( 'لا توجد إيصالات مطابقة.', 'olama-registration' ); ?></td></tr>
+                        <?php else : foreach ( $receipt_rows as $row ) : ?>
+                            <tr>
+                                <td><strong><?php echo esc_html( $row->payment_no ?: '#' . (int) $row->id ); ?></strong></td>
+                                <td><?php echo esc_html( $row->payment_date ); ?></td>
+                                <td><?php echo esc_html( $row->invoice_number ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $method_labels[ $row->method ] ?? $row->method ); ?></td>
+                                <td><?php echo esc_html( Olama_Reg_Billing_Payment::get_status_label( $row->status ?: 'posted' ) ); ?></td>
+                                <td><?php echo esc_html( $row->account_name ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->session_no ?: '—' ); ?></td>
+                                <td class="olama-reg-text--success"><?php echo esc_html( $money( $row->amount ) ); ?></td>
+                                <td><?php echo esc_html( $row->received_by_name ?: '—' ); ?></td>
+                            </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php elseif ( $active_tab === 'allocations' ) : ?>
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-filter"></span>
+                <?php esc_html_e( 'فلاتر تخصيصات الدفعات', 'olama-registration' ); ?>
+            </h3>
+            <form method="get" class="olama-reg-grid olama-reg-grid--compact">
+                <input type="hidden" name="page" value="olama-registration-reports">
+                <input type="hidden" name="report_tab" value="allocations">
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'من تاريخ', 'olama-registration' ); ?></label>
+                    <input type="date" name="date_from" value="<?php echo esc_attr( $allocation_report['filters']['date_from'] ); ?>">
+                </div>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'إلى تاريخ', 'olama-registration' ); ?></label>
+                    <input type="date" name="date_to" value="<?php echo esc_attr( $allocation_report['filters']['date_to'] ); ?>">
+                </div>
+                <div class="olama-reg-field" style="justify-content:flex-end;">
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                        <span class="dashicons dashicons-search"></span>
+                        <?php esc_html_e( 'عرض التقرير', 'olama-registration' ); ?>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-networking"></span>
+                <?php esc_html_e( 'تخصيصات الدفعات على الأقساط', 'olama-registration' ); ?>
+            </h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <thead>
+                        <tr>
+                            <th><?php esc_html_e( 'الإيصال', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الفاتورة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'القسط', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'تاريخ الاستحقاق', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'حالة الدفعة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'تاريخ التخصيص', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ( empty( $allocation_rows ) ) : ?>
+                            <tr><td colspan="8" class="olama-reg-empty-state"><?php esc_html_e( 'لا توجد تخصيصات مطابقة.', 'olama-registration' ); ?></td></tr>
+                        <?php else : foreach ( $allocation_rows as $row ) : ?>
+                            <tr>
+                                <td><strong><?php echo esc_html( $row->payment_no ?: '#' . (int) $row->payment_id ); ?></strong></td>
+                                <td><?php echo esc_html( $row->invoice_number ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->installment_no ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->due_date ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $method_labels[ $row->method ] ?? $row->method ); ?></td>
+                                <td><?php echo esc_html( Olama_Reg_Billing_Payment::get_status_label( $row->payment_status ?: 'posted' ) ); ?></td>
+                                <td><?php echo esc_html( $row->allocation_date ); ?></td>
+                                <td class="olama-reg-text--success"><?php echo esc_html( $money( $row->amount_allocated ) ); ?></td>
+                            </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php elseif ( $active_tab === 'cheques' ) : ?>
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-filter"></span>
+                <?php esc_html_e( 'فلاتر الشيكات', 'olama-registration' ); ?>
+            </h3>
+            <form method="get" class="olama-reg-grid olama-reg-grid--compact">
+                <input type="hidden" name="page" value="olama-registration-reports">
+                <input type="hidden" name="report_tab" value="cheques">
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'حالة الشيك', 'olama-registration' ); ?></label>
+                    <select name="cheque_status">
+                        <option value=""><?php esc_html_e( 'جميع الحالات', 'olama-registration' ); ?></option>
+                        <?php foreach ( [ 'received' => __( 'مستلم', 'olama-registration' ), 'cleared' => __( 'محصل', 'olama-registration' ), 'bounced' => __( 'مرتجع', 'olama-registration' ), 'cancelled' => __( 'ملغي', 'olama-registration' ) ] as $status_key => $status_label ) : ?>
+                            <option value="<?php echo esc_attr( $status_key ); ?>" <?php selected( $cheque_report['filters']['status'], $status_key ); ?>><?php echo esc_html( $status_label ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="olama-reg-field" style="justify-content:flex-end;">
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary">
+                        <span class="dashicons dashicons-search"></span>
+                        <?php esc_html_e( 'عرض التقرير', 'olama-registration' ); ?>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div class="olama-reg-section">
+            <h3 class="olama-reg-section-title">
+                <span class="dashicons dashicons-tickets-alt"></span>
+                <?php esc_html_e( 'تقرير الشيكات', 'olama-registration' ); ?>
+            </h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <thead>
+                        <tr>
+                            <th><?php esc_html_e( 'رقم الشيك', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'البنك', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'تاريخ الاستحقاق', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الإيصال', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الفاتورة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'الحساب', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'حالة الشيك', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'حالة الدفعة', 'olama-registration' ); ?></th>
+                            <th><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ( empty( $cheque_rows ) ) : ?>
+                            <tr><td colspan="9" class="olama-reg-empty-state"><?php esc_html_e( 'لا توجد شيكات مطابقة.', 'olama-registration' ); ?></td></tr>
+                        <?php else : foreach ( $cheque_rows as $row ) : ?>
+                            <tr>
+                                <td><strong><?php echo esc_html( $row->cheque_no ?: '—' ); ?></strong></td>
+                                <td><?php echo esc_html( $row->bank_name ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->due_date ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->payment_no ?: '#' . (int) $row->payment_id ); ?></td>
+                                <td><?php echo esc_html( $row->invoice_number ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->account_name ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row->status ); ?></td>
+                                <td><?php echo esc_html( Olama_Reg_Billing_Payment::get_status_label( $row->payment_status ?: 'posted' ) ); ?></td>
+                                <td class="olama-reg-text--success"><?php echo esc_html( $money( $row->amount ) ); ?></td>
+                            </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
     <?php else : ?>
         <div class="olama-reg-filter-bar">

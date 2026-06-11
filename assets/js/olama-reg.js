@@ -912,6 +912,26 @@
 
     // ── Billing - Invoice Details Drawer ─────────────────────────────────────
 
+    $(document).on('click', '.olama-reg-confirm-payment-btn, .olama-reg-reject-payment-btn', function (e) {
+        e.preventDefault();
+        const $btn = $(this);
+        const id = $btn.data('id');
+        const isConfirm = $btn.hasClass('olama-reg-confirm-payment-btn');
+        const notes = prompt(isConfirm ? 'ملاحظات الاعتماد (اختياري):' : 'سبب الرفض (اختياري):', '');
+        if (notes === null) return;
+
+        ajax(isConfirm ? 'olama_reg_confirm_payment' : 'olama_reg_reject_payment', { id, notes }, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    setTimeout(() => window.location.reload(), 700);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
     $(document).on('click', '.olama-reg-view-invoice-btn', function () {
         const id = $(this).data('id');
         const $btn = $(this);

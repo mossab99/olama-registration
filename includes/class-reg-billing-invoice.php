@@ -573,7 +573,10 @@ class Olama_Reg_Billing_Invoice
 
         // Sum payments
         $amount_paid = (float) $wpdb->get_var($wpdb->prepare(
-            "SELECT COALESCE(SUM(amount), 0) FROM " . self::t('olama_payments') . " WHERE invoice_id = %d",
+            "SELECT COALESCE(SUM(amount), 0)
+             FROM " . self::t('olama_payments') . "
+             WHERE invoice_id = %d
+               AND (status IS NULL OR status = '' OR status IN ('posted','reversed'))",
             $id
         ));
 

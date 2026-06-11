@@ -31,6 +31,8 @@ class Olama_Reg_Ajax
             'olama_reg_get_invoice_activity',
             'olama_reg_record_payment',
             'olama_reg_reverse_payment',
+            'olama_reg_confirm_payment',
+            'olama_reg_reject_payment',
             'olama_reg_get_receipt',
             'olama_reg_get_family_billing',
             'olama_reg_get_family_students',
@@ -663,6 +665,34 @@ class Olama_Reg_Ajax
             'message' => __('تم عكس السند بنجاح.', 'olama-registration'),
             'payment_id' => $result,
         ]);
+    }
+
+    public function ajax_confirm_payment(): void
+    {
+        $this->guard();
+        $id = (int) ($_POST['id'] ?? 0);
+        $notes = sanitize_textarea_field($_POST['notes'] ?? '');
+        $result = Olama_Reg_Payment_Method_Details::confirm_payment($id, $notes);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success(['message' => __('تم اعتماد الدفعة بنجاح.', 'olama-registration')]);
+    }
+
+    public function ajax_reject_payment(): void
+    {
+        $this->guard();
+        $id = (int) ($_POST['id'] ?? 0);
+        $notes = sanitize_textarea_field($_POST['notes'] ?? '');
+        $result = Olama_Reg_Payment_Method_Details::reject_payment($id, $notes);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success(['message' => __('تم رفض الدفعة.', 'olama-registration')]);
     }
 
     public function ajax_get_receipt(): void

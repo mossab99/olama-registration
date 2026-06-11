@@ -20,15 +20,20 @@ if ($action === 'print_receipt' && $payment_id) {
     $payment = $receipt['payment'];
     $invoice = $receipt['invoice'];
     $family = $receipt['family'];
+    $account = $receipt['account'] ?? null;
+    $cash_session = $receipt['cash_session'] ?? null;
+    $method_details = $receipt['method_details'] ?? null;
     $ext_customer_name = $receipt['ext_customer_name'] ?? null;
     $received_by_name = $receipt['received_by_name'];
+    $receipt_no = Olama_Reg_Billing_Payment::get_receipt_number($payment);
+    $status_label = Olama_Reg_Billing_Payment::get_status_label($payment);
     ?>
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
 
     <head>
         <meta charset="UTF-8">
-        <title>سند قبض - <?php echo esc_html($payment->id); ?></title>
+        <title>سند قبض - <?php echo esc_html($receipt_no); ?></title>
         <style>
             body {
                 font-family: 'Tajawal', sans-serif;
@@ -180,7 +185,8 @@ if ($action === 'print_receipt' && $payment_id) {
                     </td>
                     <td style="text-align: left; padding-bottom:15px;">
                         <div class="receipt-title">سند قبض مالي</div>
-                        <div class="receipt-no">رقم الإيصال: #<?php echo esc_html($payment->id); ?></div>
+                        <div class="receipt-no">رقم الإيصال: <?php echo esc_html($receipt_no); ?></div>
+                        <div class="receipt-no">حالة السند: <?php echo esc_html($status_label); ?></div>
                     </td>
                 </tr>
             </table>
@@ -260,10 +266,54 @@ if ($action === 'print_receipt' && $payment_id) {
                         <td><strong><?php echo esc_html($payment->reference); ?></strong></td>
                     </tr>
                 <?php endif; ?>
+                <?php if ($method_details && $payment->method === 'cheque'): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('حالة الشيك:', 'olama-registration'); ?></td>
+                        <td><?php echo esc_html($method_details->status); ?></td>
+                    </tr>
+                    <?php if (!empty($method_details->due_date)): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('تاريخ الاستحقاق:', 'olama-registration'); ?></td>
+                        <td><?php echo esc_html($method_details->due_date); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                <?php elseif ($method_details && $payment->method === 'bank_transfer'): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('حالة التحويل:', 'olama-registration'); ?></td>
+                        <td><?php echo esc_html($method_details->status); ?></td>
+                    </tr>
+                <?php elseif ($method_details && $payment->method === 'online'): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('مزود الدفع:', 'olama-registration'); ?></td>
+                        <td><?php echo esc_html($method_details->provider ?: '—'); ?></td>
+                    </tr>
+                    <tr>
+                        <td class="label"><?php esc_html_e('رقم العملية:', 'olama-registration'); ?></td>
+                        <td><?php echo esc_html($method_details->transaction_id ?: '—'); ?></td>
+                    </tr>
+                <?php endif; ?>
+                <?php if ($account): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('الحساب المالي:', 'olama-registration'); ?></td>
+                        <td><strong><?php echo esc_html($account->account_name); ?></strong></td>
+                    </tr>
+                <?php endif; ?>
+                <?php if ($cash_session): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('جلسة الصندوق:', 'olama-registration'); ?></td>
+                        <td><strong><?php echo esc_html($cash_session->session_no); ?></strong></td>
+                    </tr>
+                <?php endif; ?>
                 <tr>
                     <td class="label">تاريخ القبض:</td>
                     <td><?php echo esc_html($payment->payment_date); ?></td>
                 </tr>
+                <?php if (!empty($payment->reversed_payment_id)): ?>
+                    <tr>
+                        <td class="label"><?php esc_html_e('Reversal of:', 'olama-registration'); ?></td>
+                        <td>#<?php echo esc_html((int) $payment->reversed_payment_id); ?></td>
+                    </tr>
+                <?php endif; ?>
                 <?php if ($payment->notes): ?>
                     <tr>
                         <td class="label">ملاحظات:</td>
@@ -348,7 +398,7 @@ if ($action === 'print_receipt' && $payment_id) {
                             ?>
                                 <tr style="background:<?php echo $row_bg; ?>;">
                                     <td style="padding:8px; border:1px solid #E0C090; font-size:13px; color:#1a1a2e;">
-                                        #<?php echo esc_html($p->id); ?> <?php if($is_current) echo '<span style="color:#2E7D32; font-size:11px; font-weight:bold;">(هذا السند)</span>'; ?>
+                                        <?php echo esc_html(Olama_Reg_Billing_Payment::get_receipt_number($p)); ?> <?php if($is_current) echo '<span style="color:#2E7D32; font-size:11px; font-weight:bold;">(هذا السند)</span>'; ?>
                                     </td>
                                     <td style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#1a1a2e;"><?php echo esc_html($p->payment_date); ?></td>
                                     <td style="padding:8px; border:1px solid #E0C090; text-align:center; font-size:13px; color:#1a1a2e;"><?php echo esc_html($method_label); ?></td>
@@ -404,17 +454,20 @@ if ($filter_method) {
 }
 if ($search_q) {
     $like = '%' . $wpdb->esc_like($search_q) . '%';
-    $where .= " AND (p.family_uid LIKE %s OR i.invoice_number LIKE %s OR f.family_name LIKE %s)";
+    $where .= " AND (p.payment_no LIKE %s OR p.family_uid LIKE %s OR i.invoice_number LIKE %s OR f.family_name LIKE %s)";
+    $params[] = $like;
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
 }
 
-$query = "SELECT p.*, i.invoice_number, f.family_name AS father_first_name, '' AS father_family_name, u.display_name AS received_by_name
+$query = "SELECT p.*, i.invoice_number, f.family_name AS father_first_name, '' AS father_family_name, u.display_name AS received_by_name, a.account_name, cs.session_no
           FROM " . $wpdb->prefix . "olama_payments p
           LEFT JOIN " . $wpdb->prefix . "olama_invoices i ON i.id = p.invoice_id
           LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = p.family_uid
           LEFT JOIN {$wpdb->users} u ON u.ID = p.received_by
+          LEFT JOIN " . $wpdb->prefix . "olama_financial_accounts a ON a.id = p.account_id
+          LEFT JOIN " . $wpdb->prefix . "olama_cash_sessions cs ON cs.id = p.cash_session_id
           WHERE {$where}
           ORDER BY p.payment_date DESC, p.id DESC";
 
@@ -506,6 +559,9 @@ $_pay_total = $wpdb->get_var(
                         <th><?php esc_html_e('ولي الأمر', 'olama-registration'); ?></th>
                         <th><?php esc_html_e('القيمة المقبوضة', 'olama-registration'); ?></th>
                         <th><?php esc_html_e('طريقة الدفع', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('الحالة', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('الحساب المالي', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('جلسة الصندوق', 'olama-registration'); ?></th>
                         <th><?php esc_html_e('رقم المرجع / الشيك', 'olama-registration'); ?></th>
                         <th><?php esc_html_e('المستلم', 'olama-registration'); ?></th>
                         <th style="width:60px;"><?php esc_html_e('إيصال', 'olama-registration'); ?></th>
@@ -514,7 +570,7 @@ $_pay_total = $wpdb->get_var(
                 <tbody>
                     <?php if (empty($payments)): ?>
                         <tr>
-                            <td colspan="10" class="olama-reg-empty-state">
+                            <td colspan="13" class="olama-reg-empty-state">
                                 <span class="dashicons dashicons-info"></span><br>
                                 <?php esc_html_e('لا يوجد أي عمليات دفع مسجلة مطابقة.', 'olama-registration'); ?>
                             </td>
@@ -522,7 +578,9 @@ $_pay_total = $wpdb->get_var(
                     <?php else: 
                         $reversed_ids = [];
                         foreach ($payments as $p) {
-                            if (strpos($p->reference ?? '', 'REVERSAL-') === 0) {
+                            if (!empty($p->reversed_payment_id)) {
+                                $reversed_ids[] = (int) $p->reversed_payment_id;
+                            } elseif (strpos($p->reference ?? '', 'REVERSAL-') === 0) {
                                 $reversed_ids[] = (int) str_replace('REVERSAL-', '', $p->reference);
                             }
                         }
@@ -539,7 +597,7 @@ $_pay_total = $wpdb->get_var(
                             ?>
                             <tr<?php echo $is_reversal ? ' class="os-hub-row--reversal"' : ''; ?>>
                                 <td><span
-                                        style="font-weight:700; color:var(--reg-text-muted);">#<?php echo esc_html($pay->id); ?></span>
+                                        style="font-weight:700; color:var(--reg-text-muted);"><?php echo esc_html(Olama_Reg_Billing_Payment::get_receipt_number($pay)); ?></span>
                                 </td>
                                 <td style="color:var(--reg-text-muted);"><?php echo esc_html($pay->payment_date); ?></td>
                                 <td><strong><?php echo esc_html($pay->invoice_number ?: '—'); ?></strong></td>
@@ -553,6 +611,9 @@ $_pay_total = $wpdb->get_var(
                                         <?php echo esc_html($m['label']); ?>
                                     </span>
                                 </td>
+                                <td><?php echo esc_html(Olama_Reg_Billing_Payment::get_status_label($pay)); ?></td>
+                                <td><?php echo esc_html($pay->account_name ?: '—'); ?></td>
+                                <td><?php echo esc_html($pay->session_no ?: '—'); ?></td>
                                 <td><?php echo esc_html($pay->reference ?: '—'); ?></td>
                                 <td><?php echo esc_html($pay->received_by_name); ?></td>
                                 <td style="text-align:center;">
@@ -562,7 +623,7 @@ $_pay_total = $wpdb->get_var(
                                         <span class="dashicons dashicons-printer"></span>
                                     </a>
                                     <?php if ((float) $pay->amount > 0 && $pay->method !== 'reversal'): 
-                                        $is_already_reversed = in_array((int) $pay->id, $reversed_ids, true);
+                                        $is_already_reversed = in_array((int) $pay->id, $reversed_ids, true) || (string)($pay->status ?? '') === 'reversed';
                                         if ($is_already_reversed):
                                     ?>
                                         <button class="button button-small" disabled
