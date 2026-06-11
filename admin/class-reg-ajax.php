@@ -1566,10 +1566,33 @@ class Olama_Reg_Ajax
     private function hub_guard(): void
     {
         check_ajax_referer('os_hub_nonce', 'nonce');
-        if (
-            ! current_user_can('olama_manage_registration_families') &&
-            ! current_user_can('manage_options')
-        ) {
+        if (! $this->hub_user_can(['olama_manage_registration_families'])) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+    }
+
+    private function hub_user_can(array $caps): bool
+    {
+        if (class_exists('Olama_Reg_Payment_Policy')) {
+            return Olama_Reg_Payment_Policy::current_user_can_any($caps);
+        }
+
+        if (current_user_can('manage_options')) {
+            return true;
+        }
+
+        foreach ($caps as $cap) {
+            if (current_user_can($cap)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hub_require_caps(array $caps): void
+    {
+        if (! $this->hub_user_can($caps)) {
             wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
         }
     }
@@ -1869,6 +1892,21 @@ class Olama_Reg_Ajax
         // Settlement tile only for families
         if ($tile === 'settlements' && $type !== 'family') {
             wp_send_json_error(['message' => __('هذا القسم للعائلات فقط.', 'olama-registration')]);
+        }
+
+        $tile_caps = [
+            'profile'     => ['olama_manage_registration_families'],
+            'agreements'  => ['manage_options'],
+            'invoices'    => ['olama_manage_registration_invoices'],
+            'payments'    => ['olama_manage_registration_payments', 'olama_record_payments', 'olama_reverse_payments'],
+            'children'    => ['olama_manage_registration_families', 'olama_manage_registration_students'],
+            'financial'   => ['olama_manage_registration_reports', 'olama_manage_registration_invoices', 'olama_manage_registration_payments'],
+            'history'     => ['olama_manage_registration_reports'],
+            'settlements' => ['olama_manage_registration_payments'],
+        ];
+
+        if (isset($tile_caps[$tile])) {
+            $this->hub_require_caps($tile_caps[$tile]);
         }
 
         $handlers = [
@@ -3164,6 +3202,7 @@ class Olama_Reg_Ajax
     public function hub_add_child(): void
     {
         $this->hub_guard();
+        $this->hub_require_caps(['olama_manage_registration_families']);
 
         $uid        = sanitize_text_field($_POST['uid']        ?? '');
         $child_name = sanitize_text_field($_POST['child_name'] ?? '');
@@ -3179,14 +3218,32 @@ class Olama_Reg_Ajax
 
         global $wpdb;
 
-        $customer = $wpdb->get_row($wpdb->prepare(
-            "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s LIMIT 1",
-            $uid
-        ));
+        $customer = Olama_Reg_Customer::get_by_uid($uid);
 
         if (! $customer) {
             wp_send_json_error(['message' => __('العميل غير موجود.', 'olama-registration')]);
         }
+
+        $child_id = Olama_Reg_Child::add((int) $customer->id, [
+            'child_name' => $child_name,
+            'grade'      => $grade,
+            'notes'      => sanitize_textarea_field($_POST['notes'] ?? ''),
+        ]);
+
+        if (is_wp_error($child_id)) {
+            wp_send_json_error(['message' => $child_id->get_error_message()]);
+        }
+
+        $child = Olama_Reg_Child::get((int) $child_id);
+
+        wp_send_json_success([
+            'message'      => __('Child added successfully.', 'olama-registration'),
+            'child'        => $child,
+            'child_name'   => $child ? $child->child_name : $child_name,
+            'child_uid'    => $child ? $child->child_uid : '',
+            'grade'        => $child ? $child->grade : $grade,
+            'updatedTiles' => ['children'],
+        ]);
 
         // Generate a simple child UID
         $child_uid = 'C-' . strtoupper(substr(md5($uid . $child_name . time()), 0, 8));
@@ -3226,6 +3283,7 @@ class Olama_Reg_Ajax
     public function hub_save_profile(): void
     {
         $this->hub_guard();
+        $this->hub_require_caps(['olama_manage_registration_families']);
 
         $uid  = sanitize_text_field($_POST['uid']  ?? '');
         $type = sanitize_key($_POST['type'] ?? 'family');
@@ -3310,6 +3368,7 @@ class Olama_Reg_Ajax
     public function hub_toggle_active(): void
     {
         $this->hub_guard();
+        $this->hub_require_caps(['olama_manage_registration_families']);
 
         $uid    = sanitize_text_field($_POST['uid']  ?? '');
         $type   = sanitize_key($_POST['type']   ?? 'family');

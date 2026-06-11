@@ -38,6 +38,8 @@
         currentPanel:    'type', // 'type' | 'lookup' | 'hub'
         openTile:        null,   // tile id currently expanded
         currentYearId:   HUB_DATA.currentYearId || 0,  // active academic year filter
+        tileRequestSeq:  0,
+        countRequestSeq: 0,
     };
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -489,12 +491,16 @@
 
             if (!state.currentCustomer) return;
 
+            var requestSeq = ++state.tileRequestSeq;
+            var requestUid = state.currentCustomer.uid;
+            var requestType = state.currentCustomer.type;
+
             var ajaxData = $.extend({
                 action: 'os_hub_tile',
                 nonce:  NONCE,
                 tile:   tileId,
-                uid:    state.currentCustomer.uid,
-                type:   state.currentCustomer.type,
+                uid:    requestUid,
+                type:   requestType,
                 year:   state.currentYearId,
             }, extraData || {});
 
@@ -503,6 +509,16 @@
                 method: 'POST',
                 data:   ajaxData,
                 success: function (response) {
+                    if (
+                        requestSeq !== state.tileRequestSeq ||
+                        !state.currentCustomer ||
+                        state.currentCustomer.uid !== requestUid ||
+                        state.currentCustomer.type !== requestType ||
+                        state.openTile !== tileId
+                    ) {
+                        return;
+                    }
+
                     $loading.hide();
                     $content.show();
 
@@ -525,6 +541,16 @@
                     $(document).trigger('os-hub:tile-opened', [{ tileId: tileId, $panel: $panel }]);
                 },
                 error: function () {
+                    if (
+                        requestSeq !== state.tileRequestSeq ||
+                        !state.currentCustomer ||
+                        state.currentCustomer.uid !== requestUid ||
+                        state.currentCustomer.type !== requestType ||
+                        state.openTile !== tileId
+                    ) {
+                        return;
+                    }
+
                     $loading.hide();
                     $content.show().html(
                         '<div class="os-hub-notice os-hub-notice--error">'
@@ -536,6 +562,25 @@
                     );
                 },
             });
+        },
+
+        refresh: function (tileId, extraData) {
+            if (!tileId) return;
+
+            var $btn = $('#os-hub-tile-btn-' + tileId);
+            var $panel = $('#os-hub-tile-panel-' + tileId);
+            var $content = $panel.find('.os-hub-tile-panel__content');
+
+            if (!$btn.length || !$panel.length) return;
+
+            $content.removeData('loaded');
+            this.open(tileId, $btn, $panel, extraData || { refresh: 1 });
+        },
+
+        refreshCurrent: function () {
+            if (state.openTile) {
+                this.refresh(state.openTile);
+            }
         },
 
         collapseAll: function () {
@@ -551,6 +596,8 @@
     var CountsLoader = {
 
         load: function (uid, type) {
+            var requestSeq = ++state.countRequestSeq;
+
             $.ajax({
                 url:    AJAX_URL,
                 method: 'POST',
@@ -562,6 +609,15 @@
                     year:   state.currentYearId,
                 },
                 success: function (response) {
+                    if (
+                        requestSeq !== state.countRequestSeq ||
+                        !state.currentCustomer ||
+                        state.currentCustomer.uid !== uid ||
+                        state.currentCustomer.type !== type
+                    ) {
+                        return;
+                    }
+
                     if (!response.success) {
                         if (response.data && response.data.code === 'not_found') {
                             alert(response.data.message || 'العميل المحدّد لم يعد موجوداً في النظام.');
@@ -602,6 +658,41 @@
     // ══════════════════════════════════════════════════════════════════════════
     // CustomerHub — top-level: loads customer into the hub (Stage 3)
     // ══════════════════════════════════════════════════════════════════════════
+    function refreshDashboardTiles(tileIds) {
+        if (!state.currentCustomer) return;
+
+        CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+
+        if (Array.isArray(tileIds) && tileIds.length) {
+            if (state.openTile && tileIds.indexOf(state.openTile) !== -1) {
+                TileManager.refresh(state.openTile);
+            }
+            return;
+        }
+
+        TileManager.refreshCurrent();
+    }
+
+    function hubNotice(message, type) {
+        var cls = type === 'error' ? 'notice-error' : 'notice-success';
+        var $target = $('.os-hub-wrap').first();
+        var $notice = $('#os-hub-action-notice');
+
+        if (!$notice.length) {
+            $notice = $('<div id="os-hub-action-notice" class="notice inline" style="margin:12px 0; padding:10px 12px;"></div>');
+            $target.prepend($notice);
+        }
+
+        $notice
+            .removeClass('notice-success notice-error')
+            .addClass(cls)
+            .html('<p style="margin:0;">' + escHtml(message || I18N.errorGeneric) + '</p>')
+            .stop(true, true)
+            .fadeIn(120)
+            .delay(3500)
+            .fadeOut(250);
+    }
+
     var CustomerHub = {
 
         loadCustomer: function (customer) {
@@ -1698,15 +1789,9 @@
 
             $.post(AJAX_URL, data, function (res) {
                 if (res.success) {
-                    alert(res.data.message);
+                    hubNotice(res.data.message);
                     $('#olama-reg-settlement-modal').fadeOut(200);
-                    // Reload settlements tile if it's open
-                    var $panel = $('#os-hub-tile-panel-settlements');
-                    var $btnTile = $('#os-hub-tile-btn-settlements');
-                    $panel.find('.os-hub-tile-panel__content').removeData('loaded').empty();
-                    TileManager.open('settlements', $btnTile, $panel);
-                    // Reload badge count
-                    CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+                    refreshDashboardTiles(['settlements', 'history', 'financial']);
                 } else {
                     alert(res.data.message || 'حدث خطأ');
                 }
@@ -1740,15 +1825,9 @@
 
             $.post(AJAX_URL, data, function (res) {
                 if (res.success) {
-                    alert(res.data.message);
+                    hubNotice(res.data.message);
                     $('#modal-settle-receipt').fadeOut(200);
-                    // Reload settlements tile
-                    var $panel = $('#os-hub-tile-panel-settlements');
-                    var $btnTile = $('#os-hub-tile-btn-settlements');
-                    $panel.find('.os-hub-tile-panel__content').removeData('loaded').empty();
-                    TileManager.open('settlements', $btnTile, $panel);
-                    // Reload badge count
-                    CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+                    refreshDashboardTiles(['settlements', 'history', 'financial']);
                 } else {
                     alert(res.data.message || 'حدث خطأ');
                 }
@@ -1769,14 +1848,8 @@
                 id: id
             }, function (res) {
                 if (res.success) {
-                    alert(res.data.message);
-                    // Reload settlements tile
-                    var $panel = $('#os-hub-tile-panel-settlements');
-                    var $btnTile = $('#os-hub-tile-btn-settlements');
-                    $panel.find('.os-hub-tile-panel__content').removeData('loaded').empty();
-                    TileManager.open('settlements', $btnTile, $panel);
-                    // Reload badge count
-                    CountsLoader.load(state.currentCustomer.uid, state.currentCustomer.type);
+                    hubNotice(res.data.message);
+                    refreshDashboardTiles(['settlements', 'history', 'financial']);
                 } else {
                     alert(res.data.message || 'حدث خطأ');
                 }
@@ -1949,18 +2022,9 @@
                             window.open(url.toString(), '_blank');
                         }
 
-                        // Reload dashboard contextually
-                        setTimeout(() => {
-                            const familyUid = $('#cp_family_uid').val();
-                            const customerUid = $('#cp_customer_uid').val();
-                            let targetUrl = window.location.pathname + '?page=olama-registration';
-                            if (familyUid) {
-                                targetUrl += '&family_uid=' + encodeURIComponent(familyUid);
-                            } else if (customerUid) {
-                                targetUrl += '&customer_uid=' + encodeURIComponent(customerUid);
-                            }
-                            window.location.href = targetUrl;
-                        }, 1000);
+                        $('#olama-reg-custom-payment-modal').fadeOut(200);
+                        hubNotice(res.data.message);
+                        refreshDashboardTiles(['invoices', 'payments', 'financial', 'history']);
                     } else {
                         $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data?.message || 'حدث خطأ.') + '</p></div>').fadeIn();
                     }
