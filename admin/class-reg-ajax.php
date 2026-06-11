@@ -33,6 +33,7 @@ class Olama_Reg_Ajax
             'olama_reg_reverse_payment',
             'olama_reg_confirm_payment',
             'olama_reg_reject_payment',
+            'olama_reg_update_cheque_status',
             'olama_reg_get_receipt',
             'olama_reg_get_family_billing',
             'olama_reg_get_family_students',
@@ -99,7 +100,13 @@ class Olama_Reg_Ajax
             !current_user_can('olama_manage_registration_fees') &&
             !current_user_can('olama_manage_registration_invoices') &&
             !current_user_can('olama_manage_registration_payments') &&
-            !current_user_can('olama_manage_registration_reports')
+            !current_user_can('olama_manage_registration_reports') &&
+            !current_user_can('olama_record_payments') &&
+            !current_user_can('olama_reverse_payments') &&
+            !current_user_can('olama_confirm_bank_payments') &&
+            !current_user_can('olama_manage_cheques') &&
+            !current_user_can('olama_view_cash_reports') &&
+            !current_user_can('olama_manage_financial_accounts')
         ) {
             wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
         }
@@ -638,6 +645,9 @@ class Olama_Reg_Ajax
     public function ajax_record_payment(): void
     {
         $this->guard();
+        if ( ! Olama_Reg_Payment_Policy::current_user_can_any( [ 'olama_record_payments', 'olama_manage_registration_payments' ] ) ) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
         $result = Olama_Reg_Billing_Payment::record($_POST);
 
         if (is_wp_error($result)) {
@@ -653,6 +663,9 @@ class Olama_Reg_Ajax
     public function ajax_reverse_payment(): void
     {
         $this->guard();
+        if ( ! Olama_Reg_Payment_Policy::current_user_can_any( [ 'olama_reverse_payments', 'olama_manage_registration_payments' ] ) ) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
         $id = (int) ($_POST['id'] ?? 0);
         $notes = sanitize_textarea_field($_POST['notes'] ?? '');
         $result = Olama_Reg_Billing_Payment::reverse($id, $notes);
@@ -670,6 +683,9 @@ class Olama_Reg_Ajax
     public function ajax_confirm_payment(): void
     {
         $this->guard();
+        if ( ! Olama_Reg_Payment_Policy::current_user_can_any( [ 'olama_confirm_bank_payments', 'olama_manage_registration_payments' ] ) ) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
         $id = (int) ($_POST['id'] ?? 0);
         $notes = sanitize_textarea_field($_POST['notes'] ?? '');
         $result = Olama_Reg_Payment_Method_Details::confirm_payment($id, $notes);
@@ -684,6 +700,9 @@ class Olama_Reg_Ajax
     public function ajax_reject_payment(): void
     {
         $this->guard();
+        if ( ! Olama_Reg_Payment_Policy::current_user_can_any( [ 'olama_confirm_bank_payments', 'olama_manage_registration_payments' ] ) ) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
         $id = (int) ($_POST['id'] ?? 0);
         $notes = sanitize_textarea_field($_POST['notes'] ?? '');
         $result = Olama_Reg_Payment_Method_Details::reject_payment($id, $notes);
@@ -693,6 +712,25 @@ class Olama_Reg_Ajax
         }
 
         wp_send_json_success(['message' => __('تم رفض الدفعة.', 'olama-registration')]);
+    }
+
+    public function ajax_update_cheque_status(): void
+    {
+        $this->guard();
+        if ( ! Olama_Reg_Payment_Policy::current_user_can_any( [ 'olama_manage_cheques', 'olama_manage_registration_payments' ] ) ) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+
+        $cheque_id = absint($_POST['id'] ?? 0);
+        $action = sanitize_key($_POST['cheque_action'] ?? '');
+        $notes = sanitize_textarea_field($_POST['notes'] ?? '');
+        $result = Olama_Reg_Payment_Method_Details::transition_cheque($cheque_id, $action, $notes);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success(['message' => __('تم تحديث حالة الشيك.', 'olama-registration')]);
     }
 
     public function ajax_get_receipt(): void

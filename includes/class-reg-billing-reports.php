@@ -492,7 +492,7 @@ class Olama_Reg_Billing_Reports {
             $params[] = $status;
         }
 
-        $query = "SELECT c.*, p.payment_no, p.payment_date, p.reference, p.status AS payment_status,
+        $query = "SELECT c.*, c.check_no AS cheque_no, p.payment_no, p.payment_date, p.reference, p.status AS payment_status,
                 i.invoice_number, a.account_name
             FROM " . self::t( 'olama_cheques' ) . " c
             LEFT JOIN " . self::t( 'olama_payments' ) . " p ON p.id = c.payment_id

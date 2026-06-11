@@ -50,6 +50,7 @@ class Olama_Reg_Payment_Method_Details {
             return new \WP_Error( 'overpayment_on_confirm', __( 'This payment is greater than the current invoice balance.', 'olama-registration' ) );
         }
 
+        $wpdb->query( 'START TRANSACTION' );
         $updated = $wpdb->update(
             self::t( 'olama_payments' ),
             [
@@ -62,6 +63,7 @@ class Olama_Reg_Payment_Method_Details {
             [ 'id' => $payment_id ]
         );
         if ( $updated === false ) {
+            $wpdb->query( 'ROLLBACK' );
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
 
@@ -71,8 +73,12 @@ class Olama_Reg_Payment_Method_Details {
 
         $movement = Olama_Reg_Cash_Bank_Movement::record_receipt_movement( $payment_id );
         if ( is_wp_error( $movement ) ) {
+            $wpdb->query( 'ROLLBACK' );
             return $movement;
         }
+
+        $wpdb->query( 'COMMIT' );
+        self::log_audit( 'payment', $payment_id, 'payment_confirmed', $payment, self::get_payment( $payment_id ) );
 
         return true;
     }
@@ -90,6 +96,7 @@ class Olama_Reg_Payment_Method_Details {
             return $policy;
         }
 
+        $wpdb->query( 'START TRANSACTION' );
         $updated = $wpdb->update(
             self::t( 'olama_payments' ),
             [
@@ -99,11 +106,78 @@ class Olama_Reg_Payment_Method_Details {
             [ 'id' => $payment_id ]
         );
         if ( $updated === false ) {
+            $wpdb->query( 'ROLLBACK' );
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
 
         self::mark_detail_status( $payment, 'rejected' );
+        $wpdb->query( 'COMMIT' );
+        self::log_audit( 'payment', $payment_id, 'payment_rejected', $payment, self::get_payment( $payment_id ) );
         return true;
+    }
+
+    public static function transition_cheque( int $cheque_id, string $action, string $notes = '' ): true|\WP_Error {
+        global $wpdb;
+
+        $cheque = self::get_cheque( $cheque_id );
+        if ( ! $cheque ) {
+            return new \WP_Error( 'cheque_not_found', __( 'Cheque not found.', 'olama-registration' ) );
+        }
+        if ( ! Olama_Reg_Payment_Policy::current_user_can_any( [ 'olama_manage_cheques', 'olama_manage_registration_payments' ] ) ) {
+            return new \WP_Error( 'unauthorized_cheque_action', __( 'You are not allowed to manage cheques.', 'olama-registration' ) );
+        }
+
+        $payment = self::get_payment( (int) $cheque->payment_id );
+        if ( ! $payment ) {
+            return new \WP_Error( 'payment_not_found', __( 'Payment not found.', 'olama-registration' ) );
+        }
+
+        if ( $action === 'deposit' ) {
+            return self::update_cheque_status( $cheque, 'deposited', [ 'deposited_at' => current_time( 'mysql' ) ], $notes );
+        }
+
+        if ( $action === 'clear' ) {
+            if ( (string) $payment->status === 'pending_review' ) {
+                $confirmed = self::confirm_payment( (int) $payment->id, $notes );
+                if ( is_wp_error( $confirmed ) ) {
+                    return $confirmed;
+                }
+                $cheque = self::get_cheque( $cheque_id );
+            }
+            return self::update_cheque_status( $cheque, 'cleared', [ 'cleared_at' => current_time( 'mysql' ) ], $notes );
+        }
+
+        if ( $action === 'bounce' ) {
+            if ( (string) $payment->status === 'posted' ) {
+                $reversal = Olama_Reg_Billing_Payment::reverse( (int) $payment->id, $notes ?: __( 'Cheque bounced.', 'olama-registration' ) );
+                if ( is_wp_error( $reversal ) ) {
+                    return $reversal;
+                }
+            } elseif ( in_array( (string) $payment->status, [ 'draft', 'pending_review' ], true ) ) {
+                $rejected = self::reject_payment( (int) $payment->id, $notes ?: __( 'Cheque bounced.', 'olama-registration' ) );
+                if ( is_wp_error( $rejected ) ) {
+                    return $rejected;
+                }
+            }
+            $cheque = self::get_cheque( $cheque_id );
+            return self::update_cheque_status( $cheque, 'bounced', [ 'bounced_at' => current_time( 'mysql' ) ], $notes );
+        }
+
+        if ( $action === 'cancel' ) {
+            if ( ! in_array( (string) $payment->status, [ 'draft', 'pending_review', 'cancelled' ], true ) ) {
+                return new \WP_Error( 'posted_cheque_cancel_forbidden', __( 'Posted cheques must be bounced or reversed, not cancelled.', 'olama-registration' ) );
+            }
+            if ( (string) $payment->status !== 'cancelled' ) {
+                $rejected = self::reject_payment( (int) $payment->id, $notes ?: __( 'Cheque cancelled.', 'olama-registration' ) );
+                if ( is_wp_error( $rejected ) ) {
+                    return $rejected;
+                }
+            }
+            $cheque = self::get_cheque( $cheque_id );
+            return self::update_cheque_status( $cheque, 'cancelled', [], $notes );
+        }
+
+        return new \WP_Error( 'invalid_cheque_action', __( 'Invalid cheque action.', 'olama-registration' ) );
     }
 
     public static function get_pending_payments(): array {
@@ -223,7 +297,42 @@ class Olama_Reg_Payment_Method_Details {
                 'confirmed_at' => $status === 'confirmed' ? current_time( 'mysql' ) : null,
                 'failed_at'    => $status === 'rejected' ? current_time( 'mysql' ) : null,
             ], [ 'payment_id' => (int) $payment->id ] );
+        } elseif ( $payment->method === 'cheque' ) {
+            $wpdb->update( self::t( 'olama_cheques' ), [
+                'status'     => $status === 'rejected' ? 'cancelled' : 'cleared',
+                'cleared_at' => $status === 'confirmed' ? current_time( 'mysql' ) : null,
+            ], [ 'payment_id' => (int) $payment->id ] );
         }
+    }
+
+    private static function update_cheque_status( ?object $cheque, string $status, array $extra = [], string $notes = '' ): true|\WP_Error {
+        global $wpdb;
+
+        if ( ! $cheque ) {
+            return new \WP_Error( 'cheque_not_found', __( 'Cheque not found.', 'olama-registration' ) );
+        }
+
+        $payload = array_merge( [
+            'status' => $status,
+            'notes'  => sanitize_textarea_field( $notes ) ?: $cheque->notes,
+        ], $extra );
+
+        $updated = $wpdb->update( self::t( 'olama_cheques' ), $payload, [ 'id' => (int) $cheque->id ] );
+        if ( $updated === false ) {
+            return new \WP_Error( 'db_error', $wpdb->last_error );
+        }
+
+        self::log_audit( 'cheque', (int) $cheque->id, 'cheque_' . $status, $cheque, self::get_cheque( (int) $cheque->id ) );
+        return true;
+    }
+
+    private static function get_cheque( int $cheque_id ): ?object {
+        global $wpdb;
+
+        return $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM " . self::t( 'olama_cheques' ) . " WHERE id = %d",
+            $cheque_id
+        ) ) ?: null;
     }
 
     private static function get_payment( int $payment_id ): ?object {
@@ -233,6 +342,20 @@ class Olama_Reg_Payment_Method_Details {
             "SELECT * FROM " . self::t( 'olama_payments' ) . " WHERE id = %d",
             $payment_id
         ) ) ?: null;
+    }
+
+    private static function log_audit( string $entity_type, int $entity_id, string $action, ?object $before, ?object $after ): void {
+        global $wpdb;
+
+        $wpdb->insert( self::t( 'olama_billing_audit' ), [
+            'entity_type'  => $entity_type,
+            'entity_id'    => $entity_id,
+            'action'       => $action,
+            'actor_id'     => get_current_user_id(),
+            'before_state' => $before ? wp_json_encode( $before ) : null,
+            'after_state'  => $after ? wp_json_encode( $after ) : null,
+            'ip_address'   => sanitize_text_field( $_SERVER['REMOTE_ADDR'] ?? '' ),
+        ] );
     }
 
     private static function date_or_null( string $date ): ?string {

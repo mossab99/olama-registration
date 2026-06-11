@@ -13,6 +13,7 @@ class Olama_Reg_Activator {
      */
     public static function activate(): void {
         self::run_migrations();
+        self::install_capabilities();
         update_option( 'olama_reg_version', OLAMA_REG_VERSION );
     }
 
@@ -36,6 +37,59 @@ class Olama_Reg_Activator {
         self::upgrade_invoices_table( $wpdb );
         self::upgrade_payments_table( $wpdb );
         self::upgrade_installments_table( $wpdb );
+        self::install_capabilities();
+    }
+
+    public static function financial_capabilities(): array {
+        return [
+            'olama_manage_financial_accounts',
+            'olama_open_cash_session',
+            'olama_close_cash_session',
+            'olama_review_cash_session',
+            'olama_record_payments',
+            'olama_reverse_payments',
+            'olama_confirm_bank_payments',
+            'olama_manage_cheques',
+            'olama_transfer_cash_bank',
+            'olama_view_cash_reports',
+        ];
+    }
+
+    private static function install_capabilities(): void {
+        $caps = self::financial_capabilities();
+        $legacy_payment_caps = [
+            'olama_record_payments',
+            'olama_open_cash_session',
+            'olama_close_cash_session',
+            'olama_reverse_payments',
+            'olama_confirm_bank_payments',
+            'olama_manage_cheques',
+            'olama_transfer_cash_bank',
+        ];
+
+        foreach ( wp_roles()->roles as $role_key => $details ) {
+            $role = get_role( $role_key );
+            if ( ! $role ) {
+                continue;
+            }
+
+            if ( ! empty( $details['capabilities']['manage_options'] ) ) {
+                foreach ( $caps as $cap ) {
+                    $role->add_cap( $cap );
+                }
+                continue;
+            }
+
+            if ( ! empty( $details['capabilities']['olama_manage_registration_payments'] ) ) {
+                foreach ( $legacy_payment_caps as $cap ) {
+                    $role->add_cap( $cap );
+                }
+            }
+
+            if ( ! empty( $details['capabilities']['olama_manage_registration_reports'] ) ) {
+                $role->add_cap( 'olama_view_cash_reports' );
+            }
+        }
     }
 
 

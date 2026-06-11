@@ -63,7 +63,10 @@ class Olama_Reg_Cash_Session {
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
 
-        return (int) $wpdb->insert_id;
+        $id = (int) $wpdb->insert_id;
+        self::log_audit( 'cash_session', $id, 'cash_session_opened', null, self::get( $id ) );
+
+        return $id;
     }
 
     public static function close( int $session_id, float $actual_closing_balance, string $notes = '' ): true|\WP_Error {
@@ -75,6 +78,11 @@ class Olama_Reg_Cash_Session {
         }
         if ( (string) $session->status !== 'open' ) {
             return new \WP_Error( 'session_not_open', __( 'Only open cash sessions can be closed.', 'olama-registration' ) );
+        }
+
+        $policy = Olama_Reg_Payment_Policy::can_close_cash_session( $session );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
         }
 
         $totals = self::calculate_totals( $session_id );
@@ -100,6 +108,8 @@ class Olama_Reg_Cash_Session {
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
 
+        self::log_audit( 'cash_session', $session_id, 'cash_session_closed', $session, self::get( $session_id ) );
+
         return true;
     }
 
@@ -109,6 +119,14 @@ class Olama_Reg_Cash_Session {
         $session = self::get( $session_id );
         if ( ! $session ) {
             return new \WP_Error( 'session_not_found', __( 'Cash session not found.', 'olama-registration' ) );
+        }
+        if ( (string) $session->status !== 'pending_review' ) {
+            return new \WP_Error( 'session_not_pending_review', __( 'Only sessions pending review can be approved or rejected.', 'olama-registration' ) );
+        }
+
+        $policy = Olama_Reg_Payment_Policy::can_review_cash_session( $session );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
         }
 
         $status = $decision === 'reject' ? 'rejected' : 'closed';
@@ -126,6 +144,8 @@ class Olama_Reg_Cash_Session {
         if ( $updated === false ) {
             return new \WP_Error( 'db_error', $wpdb->last_error );
         }
+
+        self::log_audit( 'cash_session', $session_id, $status === 'closed' ? 'cash_session_reviewed' : 'cash_session_rejected', $session, self::get( $session_id ) );
 
         return true;
     }
@@ -323,5 +343,19 @@ class Olama_Reg_Cash_Session {
         }
 
         return $base . str_pad( (string) $next, 5, '0', STR_PAD_LEFT );
+    }
+
+    private static function log_audit( string $entity_type, int $entity_id, string $action, ?object $before, ?object $after ): void {
+        global $wpdb;
+
+        $wpdb->insert( self::t( 'olama_billing_audit' ), [
+            'entity_type'  => $entity_type,
+            'entity_id'    => $entity_id,
+            'action'       => $action,
+            'actor_id'     => get_current_user_id(),
+            'before_state' => $before ? wp_json_encode( $before ) : null,
+            'after_state'  => $after ? wp_json_encode( $after ) : null,
+            'ip_address'   => sanitize_text_field( $_SERVER['REMOTE_ADDR'] ?? '' ),
+        ] );
     }
 }

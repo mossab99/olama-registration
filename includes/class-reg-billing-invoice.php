@@ -1069,6 +1069,23 @@ class Olama_Reg_Billing_Invoice
             'updated' => 'تعديل بيانات الفاتورة',
             'status_changed' => 'تغيير حالة الفاتورة',
             'cancelled' => 'إلغاء الفاتورة',
+            'payment_created' => 'إنشاء سند قبض',
+            'payment_confirmed' => 'اعتماد سند قبض',
+            'payment_rejected' => 'رفض سند قبض',
+            'reversed' => 'عكس سند قبض',
+            'payment_reversed' => 'عكس سند قبض',
+            'cash_session_opened' => 'فتح جلسة صندوق',
+            'cash_session_closed' => 'إغلاق جلسة صندوق',
+            'cash_session_reviewed' => 'اعتماد جرد صندوق',
+            'cash_session_rejected' => 'رفض جرد صندوق',
+            'financial_account_saved' => 'حفظ حساب مالي',
+            'financial_account_activated' => 'تفعيل حساب مالي',
+            'financial_account_deactivated' => 'تعطيل حساب مالي',
+            'cheque_deposited' => 'إيداع شيك',
+            'cheque_cleared' => 'تحصيل شيك',
+            'cheque_bounced' => 'شيك راجع',
+            'cheque_cancelled' => 'إلغاء شيك',
+            'receipt_repair_run' => 'تشغيل إصلاح السندات',
         ][$action] ?? $action;
     }
 

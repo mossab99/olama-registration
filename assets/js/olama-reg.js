@@ -932,6 +932,26 @@
             .fail(() => showNotice(R.strings.error, true));
     });
 
+    $(document).on('click', '.olama-reg-cheque-action-btn', function (e) {
+        e.preventDefault();
+        const $btn = $(this);
+        const id = $btn.data('id');
+        const cheque_action = $btn.data('action');
+        const notes = prompt('ملاحظات الشيك (اختياري):', '');
+        if (notes === null) return;
+
+        ajax('olama_reg_update_cheque_status', { id, cheque_action, notes }, $btn)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message);
+                    setTimeout(() => window.location.reload(), 700);
+                } else {
+                    showNotice(res.data?.message || R.strings.error, true);
+                }
+            })
+            .fail(() => showNotice(R.strings.error, true));
+    });
+
     $(document).on('click', '.olama-reg-view-invoice-btn', function () {
         const id = $(this).data('id');
         const $btn = $(this);

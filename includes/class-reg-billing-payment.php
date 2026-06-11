@@ -72,7 +72,9 @@ class Olama_Reg_Billing_Payment {
         $method = sanitize_text_field( $data['method'] ?? 'cash' );
         if ( ! in_array( $method, $valid_methods, true ) ) $method = 'cash';
 
-        $policy = Olama_Reg_Payment_Policy::can_create_payment( $invoice, $method, absint( $data['account_id'] ?? 0 ) ?: null );
+        $account_id = absint( $data['account_id'] ?? 0 ) ?: Olama_Reg_Cash_Bank_Movement::get_default_account_id_for_method( $method );
+
+        $policy = Olama_Reg_Payment_Policy::can_create_payment( $invoice, $method, $account_id ?: null );
         if ( is_wp_error( $policy ) ) {
             return $policy;
         }
@@ -92,12 +94,31 @@ class Olama_Reg_Billing_Payment {
         }
         if ( $method === 'cash' ) $status = 'posted';
 
-        $account_id = absint( $data['account_id'] ?? 0 ) ?: Olama_Reg_Cash_Bank_Movement::get_default_account_id_for_method( $method );
+        if ( ! $account_id ) {
+            return new \WP_Error( 'missing_account', __( 'Please configure a default financial account before recording receipts.', 'olama-registration' ) );
+        }
+
+        $cash_session_id = absint( $data['cash_session_id'] ?? 0 ) ?: null;
+        if ( $method === 'cash' && $cash_session_id ) {
+            $session = Olama_Reg_Cash_Session::get( $cash_session_id );
+            if ( ! $session || (string) $session->status !== 'open' ) {
+                return new \WP_Error( 'cash_session_not_open', __( 'Cash receipts can only be linked to an open cash session.', 'olama-registration' ) );
+            }
+            if ( (int) $session->account_id !== (int) $account_id ) {
+                return new \WP_Error( 'cash_session_account_mismatch', __( 'The selected cash session does not match the receipt account.', 'olama-registration' ) );
+            }
+            if ( (int) $session->cashier_id !== get_current_user_id() ) {
+                return new \WP_Error( 'cash_session_cashier_mismatch', __( 'Cash receipts must be recorded in your own open cash session.', 'olama-registration' ) );
+            }
+            if ( $session->session_date !== $payment_date ) {
+                return new \WP_Error( 'cash_session_date_mismatch', __( 'Cash receipt date must match the selected cash session date.', 'olama-registration' ) );
+            }
+        }
 
         $payload = [
             'payment_no'     => null,
             'account_id'     => $account_id ?: null,
-            'cash_session_id'=> absint( $data['cash_session_id'] ?? 0 ) ?: null,
+            'cash_session_id'=> $cash_session_id,
             'invoice_id'     => $invoice_id,
             'installment_id' => absint( $data['installment_id'] ?? 0 ) ?: null,
             'family_uid'     => $family_uid,
@@ -165,7 +186,7 @@ class Olama_Reg_Billing_Payment {
         self::release_number_lock();
 
         // Audit
-        self::log_audit( 'payment', $payment_id, 'created', null,
+        self::log_audit( 'payment', $payment_id, 'payment_created', null,
             self::get_payment_row( $payment_id ) );
 
         return $payment_id;
@@ -255,7 +276,7 @@ class Olama_Reg_Billing_Payment {
         $wpdb->query( 'COMMIT' );
         self::release_number_lock();
 
-        self::log_audit( 'payment', $id, 'reversed', $payment, self::get_payment_row( $id ) );
+        self::log_audit( 'payment', $id, 'payment_reversed', $payment, self::get_payment_row( $id ) );
 
         return $new_payment_id;
     }
@@ -479,7 +500,7 @@ class Olama_Reg_Billing_Payment {
         return '#' . (int) ( $payment->id ?? 0 );
     }
 
-    public static function get_status_label( object $payment ): string {
+    public static function get_status_label( object|string $payment ): string {
         $labels = [
             'draft'          => __( 'مسودة', 'olama-registration' ),
             'pending_review' => __( 'قيد المراجعة', 'olama-registration' ),
@@ -488,7 +509,7 @@ class Olama_Reg_Billing_Payment {
             'failed'         => __( 'فشل', 'olama-registration' ),
             'cancelled'      => __( 'ملغى', 'olama-registration' ),
         ];
-        $status = (string) ( $payment->status ?? 'posted' );
+        $status = is_object( $payment ) ? (string) ( $payment->status ?? 'posted' ) : (string) $payment;
 
         return $labels[ $status ] ?? $status;
     }
