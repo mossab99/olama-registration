@@ -15,6 +15,7 @@ if ( $action === 'edit' && $id ) {
 $templates = Olama_Reg_Billing_Fees::get_templates();
 $custom_services = get_option( 'olama_reg_custom_services', ['دوسية', 'نشاط', 'مواصلات', 'امتحان إضافي'] );
 $agreement_natures = get_option( 'olama_reg_agreement_natures', ['عقد مدرسة', 'عقد روضة', 'عقد نادي صيفي', 'رحلة مدرسية'] );
+$agreement_nature_installments = get_option( 'olama_reg_agreement_nature_installments', [] );
 
 // Get grades for dropdown
 $grades = [];
