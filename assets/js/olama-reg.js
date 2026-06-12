@@ -1068,6 +1068,11 @@
                     $payBody.empty();
                     
                     if (inv.payments && inv.payments.length) {
+                        const $payHeadRow = $('#drawer-payments-table thead tr');
+                        if ($payHeadRow.length && $payHeadRow.find('.drawer-payment-status-head').length === 0) {
+                            $('<th class="drawer-payment-status-head">حالة الدفعة</th>').insertAfter($payHeadRow.find('th').eq(2));
+                        }
+
                         inv.payments.forEach(pay => {
                             let methodLabel = 'أخرى';
                             switch(pay.method) {
@@ -1076,6 +1081,35 @@
                                 case 'cheque': methodLabel = 'شيك'; break;
                                 case 'online': methodLabel = 'دفع إلكتروني'; break;
                                 case 'reversal': methodLabel = 'عكس سند'; break;
+                            }
+
+                            let paymentStatusLabel = 'معتمد';
+                            let paymentStatusClass = 'olama-reg-badge--active';
+                            switch (pay.status) {
+                                case 'draft':
+                                    paymentStatusLabel = 'مسودة';
+                                    paymentStatusClass = 'olama-reg-badge--inactive';
+                                    break;
+                                case 'pending_review':
+                                    paymentStatusLabel = 'قيد المراجعة';
+                                    paymentStatusClass = 'olama-reg-badge--warning';
+                                    break;
+                                case 'reversed':
+                                    paymentStatusLabel = 'معكوس';
+                                    paymentStatusClass = 'olama-reg-badge--blacklist';
+                                    break;
+                                case 'failed':
+                                    paymentStatusLabel = 'فشل';
+                                    paymentStatusClass = 'olama-reg-badge--blacklist';
+                                    break;
+                                case 'cancelled':
+                                    paymentStatusLabel = 'ملغى';
+                                    paymentStatusClass = 'olama-reg-badge--inactive';
+                                    break;
+                                default:
+                                    paymentStatusLabel = 'معتمد';
+                                    paymentStatusClass = 'olama-reg-badge--active';
+                                    break;
                             }
                             const isReversal = (pay.method === 'reversal');
                             const color = isReversal ? '#dc2626' : '#16a34a';
@@ -1086,6 +1120,7 @@
                                 <td><strong>#${pay.id}</strong></td>
                                 <td>${pay.payment_date}</td>
                                 <td>${methodLabel}</td>
+                                <td><span class="olama-reg-badge ${paymentStatusClass}">${paymentStatusLabel}</span></td>
                                 <td style="font-weight:800; color:${color};">${formattedAmount}</td>
                                 <td style="font-size:13px; color:#6B7280;">${pay.reference || '—'}</td>
                             </tr>`);
@@ -3012,7 +3047,212 @@
 
     // ── Agreements: Fees ─────────────────────────────────────────────────────
 
+    function agreementFlag(attrName) {
+        const $app = $('#os-agreement-app');
+        if (!$app.length) return true;
+        const raw = $app.attr('data-' + attrName);
+        return raw === undefined || raw === '1' || raw === 'true';
+    }
+
+    function canEditAgreementFinancials() {
+        return agreementFlag('can-edit-financial');
+    }
+
+    function canRescheduleAgreementInstallments() {
+        return agreementFlag('can-reschedule');
+    }
+
+    function canCreateAgreementAmendment() {
+        return agreementFlag('can-create-amendment');
+    }
+
+    function showAgreementLockNotice(type) {
+        const msg = type === 'schedule'
+            ? 'لا يمكن تعديل توزيع الاستحقاق بعد بدء التحصيل أو وجود قيود مالية مرتبطة.'
+            : 'العقد مقفل مالياً ولا يمكن تعديل البنود المالية مباشرة. استخدم إجراء تعديل العقد.';
+        showNotice(msg, true);
+    }
+
+    $(function () {
+        if (!canEditAgreementFinancials()) {
+            $('#os-agr-add-fee-row, .os-agr-save-fee, .os-agr-delete-fee').prop('disabled', true);
+            if (canCreateAgreementAmendment() && $('#os-agr-create-amendment').length === 0) {
+                const $notice = $('#os-agreement-app .notice-warning.inline').first();
+                if ($notice.length) {
+                    $notice.append('<p style="margin:12px 0 0;"><button type="button" class="button button-primary" id="os-agr-create-amendment">تعديل مالي على العقد</button></p>');
+                }
+            }
+        }
+        if (!canRescheduleAgreementInstallments()) {
+            $('#os-agr-due-count, #os-agr-add-due-row, #os-agr-regenerate-due, #os-agr-save-due, .os-agr-delete-due').prop('disabled', true);
+        }
+    });
+
+    $(document).on('click', '#os-agr-create-amendment', function () {
+        const currentTotal = parseMoney($('#os-agr-total-label').text()) || parseMoney($('#os-agr-due-net').text());
+        $('#os-agr-amendment-old').val(currentTotal.toFixed(3));
+        $('#os-agr-amendment-new').val(currentTotal.toFixed(3));
+        $('#os-agr-amendment-diff').val('0.000');
+        $('#os-agr-amendment-reason, #os-agr-amendment-notes').val('');
+        $('#os-agr-amendment-modal').fadeIn(150);
+        initDatepickers($('#os-agr-amendment-modal'));
+    });
+
+    $(document).on('click', '#os-agr-close-amendment-modal', function () {
+        $('#os-agr-amendment-modal').fadeOut(150);
+    });
+
+    $(document).on('input change', '#os-agr-amendment-new', function () {
+        const oldVal = parseMoney($('#os-agr-amendment-old').val());
+        const newVal = parseMoney($(this).val());
+        $('#os-agr-amendment-diff').val((newVal - oldVal).toFixed(3));
+    });
+
+    $(document).on('click', '#os-agr-preview-amendment', function () {
+        const agreementId = $('#os-agreement-app').data('id') || $('#os-agreement-app').attr('data-id');
+        ajax('olama_reg_agr_preview_amendment', {
+            agreement_id: agreementId,
+            new_total: parseMoney($('#os-agr-amendment-new').val())
+        }, $(this)).done(function (res) {
+            if (res.success && res.data.preview) {
+                const p = res.data.preview;
+                $('#os-agr-amendment-old').val(parseFloat(p.old_total || 0).toFixed(3));
+                $('#os-agr-amendment-new').val(parseFloat(p.new_total || 0).toFixed(3));
+                $('#os-agr-amendment-diff').val(parseFloat(p.difference_amount || 0).toFixed(3));
+                showNotice('تم تحديث المعاينة.');
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () {
+            showNotice(R.strings.error, true);
+        });
+    });
+
+    $(document).on('submit', '#os-agr-amendment-form', function (e) {
+        e.preventDefault();
+        const agreementId = $('#os-agreement-app').data('id') || $('#os-agreement-app').attr('data-id');
+        const payload = {
+            agreement_id: agreementId,
+            amendment_type: $('#os-agr-amendment-type').val(),
+            effective_date: $('#os-agr-amendment-date').val(),
+            new_total: parseMoney($('#os-agr-amendment-new').val()),
+            reason: $('#os-agr-amendment-reason').val(),
+            admin_notes: $('#os-agr-amendment-notes').val()
+        };
+        if (!String(payload.reason || '').trim()) {
+            showNotice('سبب التعديل مطلوب.', true);
+            return;
+        }
+
+        ajax('olama_reg_agr_create_amendment', payload, $('#os-agr-save-amendment')).done(function (res) {
+            if (res.success) {
+                showNotice(res.data?.message || 'تم إنشاء مسودة تعديل العقد.');
+                $('#os-agr-amendment-modal').fadeOut(150, function () {
+                    window.location.reload();
+                });
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () {
+            showNotice(R.strings.error, true);
+        });
+    });
+
+    function amendmentRowId($btn) {
+        return $btn.closest('tr').data('amendment-id') || $btn.closest('tr').attr('data-amendment-id');
+    }
+
+    $(document).on('click', '.os-agr-approve-amendment', function () {
+        const $btn = $(this);
+        const amendmentId = amendmentRowId($btn);
+        ajax('olama_reg_agr_approve_amendment', { amendment_id: amendmentId }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data?.message || 'تم اعتماد التعديل.');
+                window.location.reload();
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () { showNotice(R.strings.error, true); });
+    });
+
+    $(document).on('click', '.os-agr-post-amendment', function () {
+        const $btn = $(this);
+        const amendmentId = amendmentRowId($btn);
+        ajax('olama_reg_agr_post_amendment', { amendment_id: amendmentId }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data?.message || 'تم ترحيل التعديل.');
+                window.location.reload();
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () { showNotice(R.strings.error, true); });
+    });
+
+    $(document).on('click', '.os-agr-reject-amendment', function () {
+        const $btn = $(this);
+        const amendmentId = amendmentRowId($btn);
+        const reason = prompt('أدخل سبب الرفض');
+        if (reason === null) return;
+        ajax('olama_reg_agr_reject_amendment', { amendment_id: amendmentId, reason }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data?.message || 'تم رفض التعديل.');
+                window.location.reload();
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () { showNotice(R.strings.error, true); });
+    });
+
+    $(document).on('click', '.os-agr-cancel-amendment', function () {
+        const $btn = $(this);
+        const amendmentId = amendmentRowId($btn);
+        const reason = prompt('أدخل سبب الإلغاء');
+        if (reason === null) return;
+        ajax('olama_reg_agr_cancel_amendment', { amendment_id: amendmentId, reason }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data?.message || 'تم إلغاء التعديل.');
+                window.location.reload();
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () { showNotice(R.strings.error, true); });
+    });
+
+    $(document).on('click', '#os-agr-create-amendment-legacy', function () {
+        const agreementId = $('#os-agreement-app').data('id') || $('#os-agreement-app').attr('data-id');
+        const currentTotal = parseMoney($('#os-agr-total-label').text()) || parseMoney($('#os-agr-due-net').text());
+        const newTotalRaw = prompt('أدخل القيمة الجديدة للعقد', currentTotal ? currentTotal.toFixed(3) : '');
+        if (newTotalRaw === null) return;
+        const reason = prompt('أدخل سبب التعديل المالي');
+        if (reason === null) return;
+        if (!String(reason).trim()) {
+            showNotice('سبب التعديل مطلوب.', true);
+            return;
+        }
+
+        const $btn = $(this);
+        ajax('olama_reg_agr_create_amendment', {
+            agreement_id: agreementId,
+            amendment_type: 'correction_error',
+            effective_date: new Date().toISOString().slice(0, 10),
+            new_total: parseMoney(newTotalRaw),
+            reason: reason
+        }, $btn).done(function (res) {
+            if (res.success) {
+                showNotice(res.data?.message || 'تم إنشاء مسودة تعديل العقد.');
+            } else {
+                showNotice(res.data?.message || R.strings.error, true);
+            }
+        }).fail(function () {
+            showNotice(R.strings.error, true);
+        });
+    });
+
     $(document).on('click', '#os-agr-add-fee-row', function () {
+        if (!canEditAgreementFinancials()) {
+            showAgreementLockNotice('financial');
+            return;
+        }
         const $template = $('#os-agr-fee-row-template').find('tr').clone();
         
         // Dynamically populate child_id options from window.payerChildren if available
@@ -3076,6 +3316,10 @@
     });
 
     $(document).on('click', '.os-agr-save-fee', function () {
+        if (!canEditAgreementFinancials()) {
+            showAgreementLockNotice('financial');
+            return;
+        }
         const $btn = $(this);
         const $tr = $btn.closest('tr');
         const agrId = $('#os-agr-fees-table').data('agr-id');
@@ -3112,6 +3356,10 @@
     });
 
     $(document).on('click', '.os-agr-delete-fee', function () {
+        if (!canEditAgreementFinancials()) {
+            showAgreementLockNotice('financial');
+            return;
+        }
         if (!confirm(R.strings.confirmDelete)) return;
         const $tr = $(this).closest('tr');
         const id = $tr.attr('data-fee-id');
@@ -3186,19 +3434,23 @@
     function renderAgreementDueSchedule(schedule) {
         const $tbody = $('#os-agr-due-table tbody');
         $tbody.empty();
+        const scheduleLocked = !canRescheduleAgreementInstallments();
         (schedule || []).forEach(function (line) {
             const amount = parseMoney(line.amount_due || 0);
             const paid = parseMoney(line.amount_paid || 0);
             const remaining = Math.max(0, amount - paid);
+            const rowLocked = scheduleLocked || paid > 0;
+            const rowDisabledAttr = rowLocked ? ' disabled' : '';
+            const deleteButton = rowLocked ? '' : '<button type="button" class="button button-small os-agr-delete-due">X</button>';
             $tbody.append(`
                 <tr>
                     <td class="os-agr-due-no">${line.installment_no || ''}</td>
-                    <td><input type="text" class="os-datepicker os-agr-due-date" value="${line.due_date || ''}" style="width:100%;"></td>
-                    <td><input type="number" step="0.01" min="0.01" class="os-agr-due-amount" value="${amount.toFixed(2)}" style="width:100%;"></td>
+                    <td><input type="text" class="os-datepicker os-agr-due-date" value="${line.due_date || ''}" style="width:100%;"${rowDisabledAttr}></td>
+                    <td><input type="number" step="0.01" min="0.01" class="os-agr-due-amount" value="${amount.toFixed(2)}" style="width:100%;"${rowDisabledAttr}></td>
                     <td>${paid.toFixed(2)}</td>
                     <td>${remaining.toFixed(2)}</td>
                     <td>${line.status || 'unpaid'}</td>
-                    <td><button type="button" class="button button-small os-agr-delete-due">X</button></td>
+                    <td>${deleteButton}</td>
                 </tr>
             `);
         });
@@ -3209,6 +3461,10 @@
     $(document).on('input change', '.os-agr-due-date, .os-agr-due-amount', updateAgreementDueTotals);
 
     $(document).on('click', '#os-agr-add-due-row', function () {
+        if (!canRescheduleAgreementInstallments()) {
+            showAgreementLockNotice('schedule');
+            return;
+        }
         const nextNo = $('#os-agr-due-table tbody tr').length + 1;
         $('#os-agr-due-table tbody').append(`
             <tr>
@@ -3226,6 +3482,10 @@
     });
 
     $(document).on('click', '.os-agr-delete-due', function () {
+        if (!canRescheduleAgreementInstallments()) {
+            showAgreementLockNotice('schedule');
+            return;
+        }
         $(this).closest('tr').remove();
         if ($('#os-agr-due-table tbody tr').length === 0) {
             $('#os-agr-add-due-row').trigger('click');
@@ -3235,6 +3495,10 @@
     });
 
     $(document).on('click', '#os-agr-save-due', function () {
+        if (!canRescheduleAgreementInstallments()) {
+            showAgreementLockNotice('schedule');
+            return;
+        }
         const $btn = $(this);
         const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
         ajax('olama_reg_agr_save_due_schedule', {
@@ -3251,6 +3515,10 @@
     });
 
     $(document).on('click', '#os-agr-regenerate-due', function () {
+        if (!canRescheduleAgreementInstallments()) {
+            showAgreementLockNotice('schedule');
+            return;
+        }
         const $btn = $(this);
         const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
         const count = parseInt($('#os-agr-due-count').val(), 10) || 8;

@@ -16,6 +16,10 @@ class Olama_Reg_Agreement_Fees {
         global $wpdb;
         $table = $wpdb->prefix . 'olama_agreement_fees';
 
+        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) && is_wp_error( Olama_Reg_Agreement_Policy::can_edit_financial_fields( $agreement_id ) ) ) {
+            return false;
+        }
+
         $defaults = [
             'agreement_id' => $agreement_id,
             'child_id'     => null,
@@ -60,6 +64,9 @@ class Olama_Reg_Agreement_Fees {
         if ( ! $existing || in_array( $existing->paid_status, [ 'invoiced', 'paid' ], true ) ) {
             return false; // Cannot update invoiced/paid rows
         }
+        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) && is_wp_error( Olama_Reg_Agreement_Policy::can_edit_financial_fields( (int) $existing->agreement_id ) ) ) {
+            return false;
+        }
 
         // Remove un-updatable fields
         unset( $data['id'], $data['agreement_id'], $data['invoice_id'], $data['paid_status'] );
@@ -91,6 +98,9 @@ class Olama_Reg_Agreement_Fees {
         $existing = self::get( $fee_id );
         if ( ! $existing || in_array( $existing->paid_status, [ 'invoiced', 'paid' ], true ) ) {
             return false; // Cannot delete invoiced rows
+        }
+        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) && is_wp_error( Olama_Reg_Agreement_Policy::can_edit_financial_fields( (int) $existing->agreement_id ) ) ) {
+            return false;
         }
 
         $deleted = $wpdb->delete( $table, [ 'id' => $fee_id ] );
@@ -149,6 +159,10 @@ class Olama_Reg_Agreement_Fees {
      * Apply fees from a billing fee template
      */
     public static function apply_template_fees( int $agreement_id, int $template_id ): bool {
+        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) && is_wp_error( Olama_Reg_Agreement_Policy::can_edit_financial_fields( $agreement_id ) ) ) {
+            return false;
+        }
+
         if ( ! class_exists( 'Olama_Reg_Billing_Fees' ) ) {
             return false;
         }

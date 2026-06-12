@@ -52,6 +52,13 @@ $tiles = [
         'desc'  => __( 'الإجماليات والتقرير السنوي', 'olama-registration' ),
         'always'=> true,
     ],
+    'statement'   => [
+        'icon'  => 'dashicons-media-spreadsheet',
+        'color' => '#8b5cf6',
+        'label' => __( 'ظƒط´ظپ ط§ظ„ط­ط³ط§ط¨', 'olama-registration' ),
+        'desc'  => __( 'ط­ط±ظƒط© ط§ظ„ظپظˆط§طھظٹط± ظˆط§ظ„ط¯ظپط¹ط§طھ ظˆط§ظ„ط¥ط´ط¹ط§ط±ط§طھ', 'olama-registration' ),
+        'always'=> true,
+    ],
     'history'     => [
         'icon'  => 'dashicons-backup',
         'color' => '#646970',

@@ -75,8 +75,121 @@ class Olama_Reg_Cash_Bank_Movement {
         ] );
     }
 
-    public static function record_transfer( int $from_account_id, int $to_account_id, float $amount ): int|\WP_Error {
-        return new \WP_Error( 'not_implemented', __( 'Cash/bank transfers are scheduled for the transfer workflow phase.', 'olama-registration' ) );
+    public static function record_transfer( int $from_account_id, int $to_account_id, float $amount, array $meta = [] ): int|\WP_Error {
+        global $wpdb;
+
+        $policy = Olama_Reg_Payment_Policy::can_transfer_between_accounts( $from_account_id, $to_account_id );
+        if ( is_wp_error( $policy ) ) {
+            return $policy;
+        }
+
+        $from_account = self::get_account( $from_account_id );
+        $to_account   = self::get_account( $to_account_id );
+
+        if ( ! $from_account || ! $to_account ) {
+            return new \WP_Error( 'invalid_account', __( 'Please choose two active financial accounts.', 'olama-registration' ) );
+        }
+
+        if ( $from_account_id === $to_account_id ) {
+            return new \WP_Error( 'same_account_transfer', __( 'Source and destination accounts must be different.', 'olama-registration' ) );
+        }
+
+        $amount = round( abs( $amount ), 2 );
+        if ( $amount <= 0 ) {
+            return new \WP_Error( 'invalid_transfer_amount', __( 'Transfer amount must be greater than zero.', 'olama-registration' ) );
+        }
+
+        $current_balance = self::get_account_balance( $from_account_id );
+        if ( $current_balance < $amount ) {
+            return new \WP_Error( 'insufficient_funds', __( 'The source account does not have enough balance for this transfer.', 'olama-registration' ) );
+        }
+
+        self::maybe_create_transfer_table();
+
+        $transfer_date = sanitize_text_field( $meta['transfer_date'] ?? current_time( 'Y-m-d' ) );
+        if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $transfer_date ) ) {
+            $transfer_date = current_time( 'Y-m-d' );
+        }
+
+        $payload = [
+            'transfer_no'      => self::generate_transfer_no(),
+            'from_account_id'  => $from_account_id,
+            'to_account_id'    => $to_account_id,
+            'amount'           => $amount,
+            'transfer_date'    => $transfer_date,
+            'reference'        => sanitize_text_field( $meta['reference'] ?? '' ) ?: null,
+            'notes'            => sanitize_textarea_field( $meta['notes'] ?? '' ) ?: null,
+            'status'           => 'posted',
+            'created_by'       => get_current_user_id(),
+        ];
+
+        $wpdb->query( 'START TRANSACTION' );
+        $inserted = $wpdb->insert( self::t( 'olama_account_transfers' ), $payload );
+        if ( ! $inserted ) {
+            $wpdb->query( 'ROLLBACK' );
+            return new \WP_Error( 'db_error', $wpdb->last_error );
+        }
+
+        $transfer_id = (int) $wpdb->insert_id;
+        $notes = self::transfer_note( (object) $payload, $from_account, $to_account );
+
+        $out = self::record_movement( [
+            'account_id'    => $from_account_id,
+            'movement_type' => 'transfer_out',
+            'source_type'   => 'account_transfer',
+            'source_id'     => $transfer_id,
+            'direction'     => 'out',
+            'amount'        => $amount,
+            'movement_date' => $transfer_date,
+            'created_by'    => get_current_user_id(),
+            'notes'         => $notes,
+        ] );
+        if ( is_wp_error( $out ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return $out;
+        }
+
+        $in = self::record_movement( [
+            'account_id'    => $to_account_id,
+            'movement_type' => 'transfer_in',
+            'source_type'   => 'account_transfer',
+            'source_id'     => $transfer_id,
+            'direction'     => 'in',
+            'amount'        => $amount,
+            'movement_date' => $transfer_date,
+            'created_by'    => get_current_user_id(),
+            'notes'         => $notes,
+        ] );
+        if ( is_wp_error( $in ) ) {
+            $wpdb->query( 'ROLLBACK' );
+            return $in;
+        }
+
+        $wpdb->query( 'COMMIT' );
+
+        return $transfer_id;
+    }
+
+    public static function get_transfers( int $limit = 20 ): array {
+        global $wpdb;
+
+        self::maybe_create_transfer_table();
+
+        $limit = max( 1, min( 100, $limit ) );
+        return $wpdb->get_results(
+            "SELECT t.*,
+                    fa.account_code AS from_account_code,
+                    fa.account_name AS from_account_name,
+                    ta.account_code AS to_account_code,
+                    ta.account_name AS to_account_name,
+                    u.display_name AS created_by_name
+             FROM " . self::t( 'olama_account_transfers' ) . " t
+             LEFT JOIN " . self::t( 'olama_financial_accounts' ) . " fa ON fa.id = t.from_account_id
+             LEFT JOIN " . self::t( 'olama_financial_accounts' ) . " ta ON ta.id = t.to_account_id
+             LEFT JOIN {$wpdb->users} u ON u.ID = t.created_by
+             ORDER BY t.transfer_date DESC, t.id DESC
+             LIMIT {$limit}"
+        ) ?: [];
     }
 
     public static function get_account_balance( int $account_id, ?string $date_to = null ): float {
@@ -209,12 +322,94 @@ class Olama_Reg_Cash_Bank_Movement {
         ) ) ?: null;
     }
 
+    private static function get_account( int $account_id ): ?object {
+        global $wpdb;
+
+        return $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM " . self::t( 'olama_financial_accounts' ) . " WHERE id = %d AND is_active = 1",
+            $account_id
+        ) ) ?: null;
+    }
+
     private static function payment_note( object $payment ): string {
         $receipt_no = method_exists( 'Olama_Reg_Billing_Payment', 'get_receipt_number' )
             ? Olama_Reg_Billing_Payment::get_receipt_number( $payment )
             : '#' . (int) $payment->id;
 
         return sprintf( 'Receipt %s / invoice %d', $receipt_no, (int) $payment->invoice_id );
+    }
+
+    private static function transfer_note( object $transfer, object $from_account, object $to_account ): string {
+        return sprintf(
+            'Internal transfer %s from %s to %s',
+            (string) ( $transfer->transfer_no ?? '' ),
+            (string) ( $from_account->account_code ?? '' ),
+            (string) ( $to_account->account_code ?? '' )
+        );
+    }
+
+    private static function maybe_create_transfer_table(): void {
+        global $wpdb;
+
+        static $ready = false;
+        if ( $ready ) {
+            return;
+        }
+
+        $table = self::t( 'olama_account_transfers' );
+        $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+        if ( $exists === $table ) {
+            $ready = true;
+            return;
+        }
+
+        $charset = $wpdb->get_charset_collate();
+        $sql = "CREATE TABLE {$table} (
+            id bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            transfer_no varchar(50) NOT NULL,
+            from_account_id bigint(20) UNSIGNED NOT NULL,
+            to_account_id bigint(20) UNSIGNED NOT NULL,
+            amount decimal(12,2) NOT NULL DEFAULT 0.00,
+            transfer_date date DEFAULT NULL,
+            reference varchar(190) DEFAULT NULL,
+            status varchar(30) NOT NULL DEFAULT 'posted',
+            notes text DEFAULT NULL,
+            created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY transfer_no (transfer_no),
+            KEY from_account_id (from_account_id),
+            KEY to_account_id (to_account_id),
+            KEY transfer_date (transfer_date)
+        ) {$charset};";
+
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        dbDelta( $sql );
+        $ready = true;
+    }
+
+    private static function generate_transfer_no(): string {
+        global $wpdb;
+
+        self::maybe_create_transfer_table();
+
+        $year = current_time( 'Y' );
+        $base = 'TRF-' . $year . '-';
+        $latest = (string) $wpdb->get_var( $wpdb->prepare(
+            "SELECT transfer_no
+             FROM " . self::t( 'olama_account_transfers' ) . "
+             WHERE transfer_no LIKE %s
+             ORDER BY transfer_no DESC
+             LIMIT 1",
+            $wpdb->esc_like( $base ) . '%'
+        ) );
+
+        $next = 1;
+        if ( preg_match( '/^' . preg_quote( $base, '/' ) . '(\d+)$/', $latest, $matches ) ) {
+            $next = (int) $matches[1] + 1;
+        }
+
+        return $base . str_pad( (string) $next, 5, '0', STR_PAD_LEFT );
     }
 
     private static function acquire_number_lock(): bool {

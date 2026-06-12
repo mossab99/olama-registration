@@ -1082,7 +1082,7 @@
     // ── TileShortcuts: keyboard 1–8 to open tile panels ──────────────────
     var TileShortcuts = {
 
-        tileIds: ['profile','agreements','invoices','payments','children','financial','history','settlements'],
+        tileIds: ['profile','agreements','invoices','payments','children','financial','statement','history','settlements'],
 
         init: function () {
             var self = this;
@@ -1405,15 +1405,15 @@
         });
 
         $(document).on('osHub:agreementSaved', function () {
-            refreshDashboardTiles(['agreements', 'invoices', 'financial', 'history']);
+            refreshDashboardTiles(['agreements', 'invoices', 'financial', 'statement', 'history']);
         });
 
         $(document).on('osHub:invoiceSaved', function () {
-            refreshDashboardTiles(['invoices', 'financial', 'history']);
+            refreshDashboardTiles(['invoices', 'financial', 'statement', 'history']);
         });
 
         $(document).on('osHub:paymentSaved', function () {
-            refreshDashboardTiles(['payments', 'invoices', 'financial', 'history']);
+            refreshDashboardTiles(['payments', 'invoices', 'financial', 'statement', 'history']);
         });
 
         // Intercept Invoice Quick Action click to open modal inline on customer hub page
@@ -2109,7 +2109,7 @@
 
                         $('#olama-reg-custom-payment-modal').fadeOut(200);
                         hubNotice(res.data.message);
-                        refreshDashboardTiles(['invoices', 'payments', 'financial', 'history']);
+                        refreshDashboardTiles(['invoices', 'payments', 'financial', 'statement', 'history']);
                     } else {
                         $msg.html('<div class="notice notice-error inline" style="padding:10px;"><p>' + (res.data?.message || 'حدث خطأ.') + '</p></div>').fadeIn();
                     }

@@ -34,6 +34,7 @@ class Olama_Reg_Activator {
         self::create_customers_table( $wpdb, $charset );
         self::create_customer_children_table( $wpdb, $charset );
         self::create_agreements_tables( $wpdb, $charset );
+        self::create_agreement_amendment_tables( $wpdb, $charset );
         self::upgrade_invoices_table( $wpdb );
         self::upgrade_payments_table( $wpdb );
         self::upgrade_installments_table( $wpdb );
@@ -52,6 +53,13 @@ class Olama_Reg_Activator {
             'olama_manage_cheques',
             'olama_transfer_cash_bank',
             'olama_view_cash_reports',
+            'olama_edit_agreement_admin_fields',
+            'olama_create_agreement_amendment',
+            'olama_approve_agreement_amendment',
+            'olama_post_agreement_amendment',
+            'olama_reschedule_agreement_installments',
+            'olama_cancel_financial_agreement',
+            'olama_view_agreement_audit',
         ];
     }
 
@@ -814,6 +822,103 @@ class Olama_Reg_Activator {
             $wpdb->query( "ALTER TABLE {$wpdb->prefix}olama_agreement_fees ADD COLUMN `child_id` VARCHAR(50) DEFAULT NULL AFTER `agreement_id`" );
         } else {
             $wpdb->query( "ALTER TABLE {$wpdb->prefix}olama_agreement_fees MODIFY COLUMN `child_id` VARCHAR(50) DEFAULT NULL" );
+        }
+    }
+
+    private static function create_agreement_amendment_tables( $wpdb, string $charset ): void {
+        $sql_amendments = "CREATE TABLE {$wpdb->prefix}olama_agreement_amendments (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            agreement_id BIGINT UNSIGNED NOT NULL,
+            invoice_id BIGINT UNSIGNED DEFAULT NULL,
+            amendment_no VARCHAR(50) NOT NULL,
+            amendment_type VARCHAR(50) NOT NULL,
+            status VARCHAR(30) NOT NULL DEFAULT 'draft',
+            effective_date DATE NOT NULL,
+            old_total DECIMAL(12,3) NOT NULL DEFAULT 0,
+            new_total DECIMAL(12,3) NOT NULL DEFAULT 0,
+            difference_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL,
+            admin_notes TEXT DEFAULT NULL,
+            before_snapshot LONGTEXT DEFAULT NULL,
+            after_snapshot LONGTEXT DEFAULT NULL,
+            credit_adjustment_id BIGINT UNSIGNED DEFAULT NULL,
+            debit_adjustment_id BIGINT UNSIGNED DEFAULT NULL,
+            created_by BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            approved_by BIGINT UNSIGNED DEFAULT NULL,
+            posted_by BIGINT UNSIGNED DEFAULT NULL,
+            cancelled_by BIGINT UNSIGNED DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            approved_at DATETIME DEFAULT NULL,
+            posted_at DATETIME DEFAULT NULL,
+            cancelled_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY amendment_no (amendment_no),
+            KEY agreement_id (agreement_id),
+            KEY invoice_id (invoice_id),
+            KEY status (status),
+            KEY amendment_type (amendment_type)
+        ) {$charset};";
+
+        $sql_lines = "CREATE TABLE {$wpdb->prefix}olama_agreement_amendment_lines (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            amendment_id BIGINT UNSIGNED NOT NULL,
+            agreement_id BIGINT UNSIGNED NOT NULL,
+            invoice_id BIGINT UNSIGNED DEFAULT NULL,
+            line_type VARCHAR(50) NOT NULL,
+            related_fee_id BIGINT UNSIGNED DEFAULT NULL,
+            student_id VARCHAR(50) DEFAULT NULL,
+            description VARCHAR(255) NOT NULL,
+            old_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            new_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            difference_amount DECIMAL(12,3) NOT NULL DEFAULT 0,
+            before_state LONGTEXT DEFAULT NULL,
+            after_state LONGTEXT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY (id),
+            KEY amendment_id (amendment_id),
+            KEY agreement_id (agreement_id),
+            KEY invoice_id (invoice_id),
+            KEY related_fee_id (related_fee_id),
+            KEY line_type (line_type)
+        ) {$charset};";
+
+        dbDelta( $sql_amendments );
+        dbDelta( $sql_lines );
+
+        $amendments_table = $wpdb->prefix . 'olama_agreement_amendments';
+        $existing = $wpdb->get_col( "DESCRIBE {$amendments_table}", 0 );
+        $columns = [
+            'effective_date'      => "ALTER TABLE {$amendments_table} ADD COLUMN `effective_date` DATE NOT NULL AFTER `status`",
+            'old_total'           => "ALTER TABLE {$amendments_table} ADD COLUMN `old_total` DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER `effective_date`",
+            'new_total'           => "ALTER TABLE {$amendments_table} ADD COLUMN `new_total` DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER `old_total`",
+            'difference_amount'   => "ALTER TABLE {$amendments_table} ADD COLUMN `difference_amount` DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER `new_total`",
+            'admin_notes'         => "ALTER TABLE {$amendments_table} ADD COLUMN `admin_notes` TEXT DEFAULT NULL AFTER `reason`",
+            'posted_by'           => "ALTER TABLE {$amendments_table} ADD COLUMN `posted_by` BIGINT UNSIGNED DEFAULT NULL AFTER `approved_by`",
+            'posted_at'           => "ALTER TABLE {$amendments_table} ADD COLUMN `posted_at` DATETIME DEFAULT NULL AFTER `approved_at`",
+            'credit_adjustment_id' => "ALTER TABLE {$amendments_table} ADD COLUMN `credit_adjustment_id` BIGINT UNSIGNED DEFAULT NULL AFTER `after_snapshot`",
+            'debit_adjustment_id' => "ALTER TABLE {$amendments_table} ADD COLUMN `debit_adjustment_id` BIGINT UNSIGNED DEFAULT NULL AFTER `credit_adjustment_id`",
+        ];
+        foreach ( $columns as $column => $sql ) {
+            if ( ! in_array( $column, (array) $existing, true ) ) {
+                $wpdb->query( $sql );
+            }
+        }
+
+        $lines_table = $wpdb->prefix . 'olama_agreement_amendment_lines';
+        $existing_lines = $wpdb->get_col( "DESCRIBE {$lines_table}", 0 );
+        $line_columns = [
+            'agreement_id'      => "ALTER TABLE {$lines_table} ADD COLUMN `agreement_id` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `amendment_id`",
+            'invoice_id'        => "ALTER TABLE {$lines_table} ADD COLUMN `invoice_id` BIGINT UNSIGNED DEFAULT NULL AFTER `agreement_id`",
+            'related_fee_id'    => "ALTER TABLE {$lines_table} ADD COLUMN `related_fee_id` BIGINT UNSIGNED DEFAULT NULL AFTER `line_type`",
+            'student_id'        => "ALTER TABLE {$lines_table} ADD COLUMN `student_id` VARCHAR(50) DEFAULT NULL AFTER `related_fee_id`",
+            'old_amount'        => "ALTER TABLE {$lines_table} ADD COLUMN `old_amount` DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER `description`",
+            'new_amount'        => "ALTER TABLE {$lines_table} ADD COLUMN `new_amount` DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER `old_amount`",
+            'difference_amount' => "ALTER TABLE {$lines_table} ADD COLUMN `difference_amount` DECIMAL(12,3) NOT NULL DEFAULT 0 AFTER `new_amount`",
+        ];
+        foreach ( $line_columns as $column => $sql ) {
+            if ( ! in_array( $column, (array) $existing_lines, true ) ) {
+                $wpdb->query( $sql );
+            }
         }
     }
 }

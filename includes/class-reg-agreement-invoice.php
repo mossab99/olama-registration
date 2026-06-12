@@ -35,12 +35,31 @@ class Olama_Reg_Agreement_Invoice {
             return new \WP_Error( 'not_found', __( 'العقد غير موجود.', 'olama-registration' ) );
         }
 
+        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) ) {
+            $allowed = Olama_Reg_Agreement_Policy::can_reschedule_installments( $agreement_id );
+            if ( is_wp_error( $allowed ) ) {
+                return $allowed;
+            }
+
+            if ( $invoice_id <= 0 ) {
+                $invoice_id = Olama_Reg_Agreement_Policy::get_linked_invoice_id( $agreement_id );
+            }
+        } else {
         $paid_total = (float) $wpdb->get_var( $wpdb->prepare(
             "SELECT COALESCE(SUM(amount_paid), 0) FROM " . self::t( 'olama_invoices' ) . " WHERE agreement_id = %d AND status != 'cancelled'",
             $agreement_id
         ) );
         if ( $paid_total > 0 ) {
             return new \WP_Error( 'schedule_locked', __( 'لا يمكن تعديل توزيع الاستحقاق بعد تسجيل مدفوعات على الفاتورة.', 'olama-registration' ) );
+        }
+
+        }
+
+        if ( $invoice_id <= 0 ) {
+            $invoice_id = (int) $wpdb->get_var( $wpdb->prepare(
+                "SELECT id FROM " . self::t( 'olama_invoices' ) . " WHERE agreement_id = %d AND status != 'cancelled' ORDER BY id ASC LIMIT 1",
+                $agreement_id
+            ) );
         }
 
         $clean = [];
@@ -218,7 +237,9 @@ class Olama_Reg_Agreement_Invoice {
         $wpdb->update(
             self::t( 'olama_invoice_installments' ),
             [ 'invoice_id' => (int) $invoice_id ],
-            [ 'agreement_id' => $agreement_id ]
+            [ 'agreement_id' => $agreement_id ],
+            [ '%d' ],
+            [ '%d' ]
         );
 
         $fees = Olama_Reg_Agreement_Fees::get_by_agreement( $agreement_id );
@@ -312,6 +333,13 @@ class Olama_Reg_Agreement_Invoice {
 
     public static function cancel_agreement( int $agreement_id ): bool|\WP_Error {
         global $wpdb;
+
+        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) ) {
+            $allowed = Olama_Reg_Agreement_Policy::can_cancel_agreement( $agreement_id );
+            if ( is_wp_error( $allowed ) ) {
+                return $allowed;
+            }
+        }
 
         $invoice = $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM " . self::t( 'olama_invoices' ) . " WHERE agreement_id = %d AND status != 'cancelled' ORDER BY id ASC LIMIT 1",

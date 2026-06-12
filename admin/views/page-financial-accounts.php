@@ -35,12 +35,29 @@ if ( $_SERVER['REQUEST_METHOD'] === 'POST' ) {
                 (int) $result['movements']
             );
         }
+    } elseif ( $action === 'transfer_between_accounts' ) {
+        $result = Olama_Reg_Cash_Bank_Movement::record_transfer(
+            absint( $_POST['from_account_id'] ?? 0 ),
+            absint( $_POST['to_account_id'] ?? 0 ),
+            (float) ( $_POST['amount'] ?? 0 ),
+            [
+                'transfer_date' => sanitize_text_field( $_POST['transfer_date'] ?? '' ),
+                'reference'     => sanitize_text_field( $_POST['reference'] ?? '' ),
+                'notes'         => sanitize_textarea_field( $_POST['notes'] ?? '' ),
+            ]
+        );
+        if ( is_wp_error( $result ) ) {
+            $error = $result->get_error_message();
+        } else {
+            $notice = __( 'تم تسجيل التحويل الداخلي بين الحسابات بنجاح.', 'olama-registration' );
+        }
     }
 }
 
 $accounts = Olama_Reg_Financial_Account::all();
 $type_labels = Olama_Reg_Financial_Account::type_labels();
 $repair_preview = Olama_Reg_Receipt_Repair::preview();
+$recent_transfers = Olama_Reg_Cash_Bank_Movement::get_transfers( 12 );
 $money = static function ( $amount ): string {
     return number_format( (float) $amount, 2 );
 };
@@ -101,6 +118,90 @@ $money = static function ( $amount ): string {
                 </button>
             </div>
         </form>
+    </div>
+
+    <div class="olama-reg-section">
+        <h3 class="olama-reg-section-title"><span class="dashicons dashicons-randomize"></span> <?php esc_html_e( 'تحويل بين الحسابات', 'olama-registration' ); ?></h3>
+        <form method="post" class="olama-reg-grid olama-reg-grid--compact">
+            <?php wp_nonce_field( 'olama_financial_accounts_action', 'olama_financial_accounts_nonce' ); ?>
+            <input type="hidden" name="financial_action" value="transfer_between_accounts">
+            <div class="olama-reg-field">
+                <label><?php esc_html_e( 'من حساب', 'olama-registration' ); ?></label>
+                <select name="from_account_id" required>
+                    <option value=""><?php esc_html_e( 'اختر الحساب المصدر', 'olama-registration' ); ?></option>
+                    <?php foreach ( $accounts as $account ) : ?>
+                        <?php if ( ! (int) $account->is_active ) continue; ?>
+                        <option value="<?php echo esc_attr( $account->id ); ?>">
+                            <?php echo esc_html( $account->account_name . ' (' . $account->account_code . ')' ); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="olama-reg-field">
+                <label><?php esc_html_e( 'إلى حساب', 'olama-registration' ); ?></label>
+                <select name="to_account_id" required>
+                    <option value=""><?php esc_html_e( 'اختر الحساب المستهدف', 'olama-registration' ); ?></option>
+                    <?php foreach ( $accounts as $account ) : ?>
+                        <?php if ( ! (int) $account->is_active ) continue; ?>
+                        <option value="<?php echo esc_attr( $account->id ); ?>">
+                            <?php echo esc_html( $account->account_name . ' (' . $account->account_code . ')' ); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="olama-reg-field">
+                <label><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></label>
+                <input type="number" name="amount" step="0.01" min="0.01" required>
+            </div>
+            <div class="olama-reg-field">
+                <label><?php esc_html_e( 'تاريخ التحويل', 'olama-registration' ); ?></label>
+                <input type="date" name="transfer_date" value="<?php echo esc_attr( current_time( 'Y-m-d' ) ); ?>" required>
+            </div>
+            <div class="olama-reg-field">
+                <label><?php esc_html_e( 'المرجع', 'olama-registration' ); ?></label>
+                <input type="text" name="reference" placeholder="<?php esc_attr_e( 'رقم الإيداع أو مرجع البنك', 'olama-registration' ); ?>">
+            </div>
+            <div class="olama-reg-field">
+                <label><?php esc_html_e( 'ملاحظات', 'olama-registration' ); ?></label>
+                <input type="text" name="notes" placeholder="<?php esc_attr_e( 'مثال: إيداع حصيلة الصندوق في البنك', 'olama-registration' ); ?>">
+            </div>
+            <div class="olama-reg-field" style="justify-content:flex-end;">
+                <button type="submit" class="olama-reg-btn olama-reg-btn--secondary">
+                    <span class="dashicons dashicons-randomize"></span> <?php esc_html_e( 'تنفيذ التحويل', 'olama-registration' ); ?>
+                </button>
+            </div>
+        </form>
+
+        <div class="olama-reg-table-wrap" style="margin-top:18px;">
+            <table class="olama-reg-fin-table">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e( 'رقم التحويل', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'التاريخ', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'من حساب', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'إلى حساب', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'المبلغ', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'المرجع', 'olama-registration' ); ?></th>
+                        <th><?php esc_html_e( 'أنشأها', 'olama-registration' ); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ( empty( $recent_transfers ) ) : ?>
+                        <tr><td colspan="7" class="olama-reg-empty-state"><?php esc_html_e( 'لا توجد تحويلات داخلية مسجلة بعد.', 'olama-registration' ); ?></td></tr>
+                    <?php else : foreach ( $recent_transfers as $transfer ) : ?>
+                        <tr>
+                            <td><strong><?php echo esc_html( $transfer->transfer_no ); ?></strong></td>
+                            <td><?php echo esc_html( $transfer->transfer_date ); ?></td>
+                            <td><?php echo esc_html( ( $transfer->from_account_name ?? '' ) . ' (' . ( $transfer->from_account_code ?? '' ) . ')' ); ?></td>
+                            <td><?php echo esc_html( ( $transfer->to_account_name ?? '' ) . ' (' . ( $transfer->to_account_code ?? '' ) . ')' ); ?></td>
+                            <td><strong><?php echo esc_html( $money( $transfer->amount ) ); ?></strong></td>
+                            <td><?php echo esc_html( $transfer->reference ?: '—' ); ?></td>
+                            <td><?php echo esc_html( $transfer->created_by_name ?: '—' ); ?></td>
+                        </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div class="olama-reg-section">

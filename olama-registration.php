@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
-define( 'OLAMA_REG_VERSION',             '1.3.1' );
+define( 'OLAMA_REG_VERSION',             '1.3.2' );
 define( 'OLAMA_REG_MIN_SCHOOL_VERSION',  '2.3.9' );
 define( 'OLAMA_REG_PATH',               plugin_dir_path( __FILE__ ) );
 define( 'OLAMA_REG_URL',                plugin_dir_url( __FILE__ ) );
@@ -60,6 +60,8 @@ function olama_reg_init() {
     
     // Agreements
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-policy.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-amendment.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-fees.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-clauses.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-clause-bank.php';

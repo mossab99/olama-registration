@@ -1318,6 +1318,121 @@
 }
 
 /* ── 30. Print Stylesheet ───────────────────────────────────────────── */
+.olama-reg-modal.os-agr-amendment-modal {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 99999 !important;
+    overflow-y: auto !important;
+    background: rgba(26, 26, 46, 0.45) !important;
+    backdrop-filter: blur(4px) !important;
+    padding: 36px 12px !important;
+    box-sizing: border-box !important;
+}
+
+.olama-reg-modal .os-agr-amendment-dialog {
+    width: min(96vw, 820px) !important;
+    margin: 0 auto !important;
+}
+
+.olama-reg-modal .os-agr-amendment-body {
+    padding: 22px 24px !important;
+}
+
+.olama-reg-modal .os-agr-amendment-body .olama-reg-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 16px !important;
+}
+
+.olama-reg-modal .os-agr-amendment-body .olama-reg-field label {
+    display: block !important;
+    margin-bottom: 6px !important;
+    font-weight: 800 !important;
+    color: var(--reg-muted) !important;
+}
+
+.olama-reg-modal .os-agr-amendment-body input,
+.olama-reg-modal .os-agr-amendment-body select,
+.olama-reg-modal .os-agr-amendment-body textarea {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 40px !important;
+    box-sizing: border-box !important;
+    background: #fafbfc !important;
+    border: 1.5px solid #d1d9e6 !important;
+    border-radius: var(--reg-radius-sm) !important;
+    padding: 8px 12px !important;
+    text-align: right !important;
+    font-family: var(--reg-font) !important;
+}
+
+.olama-reg-modal .os-agr-amendment-body textarea {
+    min-height: 88px !important;
+    resize: vertical !important;
+}
+
+.os-agr-amendment-confirm {
+    margin: 16px 0 0 !important;
+    padding: 12px 14px !important;
+    background: #fff8eb !important;
+    border-right: 4px solid var(--reg-primary) !important;
+}
+
+.os-agr-amendment-footer {
+    display: flex !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    flex-wrap: wrap !important;
+    padding: 16px 24px !important;
+    border-top: 1px solid var(--reg-border) !important;
+    background: #f8fafc !important;
+}
+
+.os-agr-amendments-wrap {
+    margin-top: 20px !important;
+}
+
+.os-agr-amendments-actions {
+    display: flex !important;
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+}
+
+.os-agr-amendments-table th,
+.os-agr-amendments-table td {
+    vertical-align: middle !important;
+}
+
+.os-hub-embedded-form {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.os-hub-embedded-form .os-nav-tabs {
+    margin-top: 0 !important;
+}
+
+.os-hub-embedded-form .olama-reg-section:first-child {
+    margin-top: 0 !important;
+}
+
+@media (max-width: 782px) {
+    .olama-reg-modal.os-agr-amendment-modal {
+        padding: 14px 8px !important;
+    }
+
+    .olama-reg-modal .os-agr-amendment-body .olama-reg-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .os-agr-amendment-footer .button,
+    .os-agr-amendment-footer .olama-reg-btn {
+        width: 100% !important;
+        justify-content: center !important;
+    }
+}
+
 @media print {
     #adminmenu, #adminmenumain, #wpadminbar, #wpfooter,
     .olama-reg-tabs, .olama-reg-form-actions,

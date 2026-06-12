@@ -509,6 +509,200 @@ class Olama_Reg_Billing_Reports {
         ];
     }
 
+    public static function get_family_statement_report( array $filters = [] ): array {
+        global $wpdb;
+
+        $entity_type = sanitize_key( $filters['entity_type'] ?? 'family' );
+        if ( ! in_array( $entity_type, [ 'family', 'external' ], true ) ) {
+            $entity_type = 'family';
+        }
+
+        $uid       = sanitize_text_field( $filters['uid'] ?? '' );
+        $year_id   = absint( $filters['year_id'] ?? 0 );
+        $date_from = self::sanitize_report_date( $filters['date_from'] ?? '' );
+        $date_to   = self::sanitize_report_date( $filters['date_to'] ?? '' );
+
+        $entity = [
+            'type' => $entity_type,
+            'uid'  => $uid,
+            'name' => '',
+        ];
+
+        $customer_id = 0;
+        if ( $uid !== '' ) {
+            if ( $entity_type === 'family' ) {
+                $entity_row = $wpdb->get_row(
+                    $wpdb->prepare(
+                        "SELECT family_uid, family_name
+                         FROM " . self::t( 'olama_families' ) . "
+                         WHERE family_uid = %s
+                         LIMIT 1",
+                        $uid
+                    )
+                );
+                if ( $entity_row ) {
+                    $entity['name'] = (string) $entity_row->family_name;
+                }
+            } else {
+                $entity_row = $wpdb->get_row(
+                    $wpdb->prepare(
+                        "SELECT id, customer_uid, customer_name
+                         FROM " . self::t( 'olama_customers' ) . "
+                         WHERE customer_uid = %s
+                         LIMIT 1",
+                        $uid
+                    )
+                );
+                if ( $entity_row ) {
+                    $customer_id    = (int) $entity_row->id;
+                    $entity['name'] = (string) $entity_row->customer_name;
+                }
+            }
+        }
+
+        $conditions = [ "i.status != 'cancelled'" ];
+        $params     = [];
+
+        if ( $uid !== '' ) {
+            if ( $entity_type === 'external' ) {
+                $conditions[] = 'i.ext_customer_id = %d';
+                $params[]     = $customer_id > 0 ? $customer_id : -1;
+            } else {
+                $conditions[] = 'i.family_uid = %s';
+                $params[]     = $uid;
+            }
+        }
+
+        if ( $year_id > 0 ) {
+            $conditions[] = 'i.academic_year_id = %d';
+            $params[]     = $year_id;
+        }
+
+        $where_sql = implode( ' AND ', $conditions );
+
+        $invoice_sql = "SELECT
+                i.issue_date AS movement_date,
+                i.created_at AS created_at,
+                'invoice' AS entry_type,
+                i.invoice_number AS reference_no,
+                COALESCE(i.notes, '') AS details,
+                CAST(i.total AS DECIMAL(18,2)) AS debit_amount,
+                0.00 AS credit_amount,
+                i.id AS sort_id
+            FROM " . self::t( 'olama_invoices' ) . " i
+            WHERE {$where_sql}";
+
+        $adjustment_sql = "SELECT
+                DATE(adj.created_at) AS movement_date,
+                adj.created_at AS created_at,
+                adj.type AS entry_type,
+                CONCAT(COALESCE(i.invoice_number, '#'), ' / ', COALESCE(adj.adjustment_no, CONCAT('#', adj.id))) AS reference_no,
+                COALESCE(adj.reason, adj.notes, '') AS details,
+                CASE WHEN adj.type = 'debit' THEN CAST(adj.amount AS DECIMAL(18,2)) ELSE 0.00 END AS debit_amount,
+                CASE WHEN adj.type = 'credit' THEN CAST(adj.amount AS DECIMAL(18,2)) ELSE 0.00 END AS credit_amount,
+                adj.id AS sort_id
+            FROM " . self::t( 'olama_invoice_adjustments' ) . " adj
+            INNER JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = adj.invoice_id
+            WHERE adj.status = 'issued' AND {$where_sql}";
+
+        $payment_sql = "SELECT
+                p.payment_date AS movement_date,
+                p.created_at AS created_at,
+                CASE
+                    WHEN p.status = 'reversed' OR p.method = 'reversal' OR p.amount < 0 THEN 'payment_reversal'
+                    ELSE 'payment'
+                END AS entry_type,
+                COALESCE(p.payment_no, CONCAT('#', p.id)) AS reference_no,
+                COALESCE(p.notes, p.reference, '') AS details,
+                CASE
+                    WHEN p.status = 'reversed' OR p.method = 'reversal' OR p.amount < 0 THEN ABS(CAST(p.amount AS DECIMAL(18,2)))
+                    ELSE 0.00
+                END AS debit_amount,
+                CASE
+                    WHEN p.status = 'reversed' OR p.method = 'reversal' OR p.amount < 0 THEN 0.00
+                    ELSE ABS(CAST(p.amount AS DECIMAL(18,2)))
+                END AS credit_amount,
+                p.id AS sort_id
+            FROM " . self::t( 'olama_payments' ) . " p
+            INNER JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id
+            WHERE {$where_sql}
+              AND COALESCE(p.status, 'posted') NOT IN ('cancelled', 'failed')";
+
+        $union_sql = "{$invoice_sql} UNION ALL {$adjustment_sql} UNION ALL {$payment_sql}";
+        $outer_sql = "SELECT *
+            FROM ({$union_sql}) statement_rows";
+
+        $range_conditions = [];
+        $range_params     = [];
+        if ( $date_from ) {
+            $range_conditions[] = 'movement_date >= %s';
+            $range_params[]     = $date_from;
+        }
+        if ( $date_to ) {
+            $range_conditions[] = 'movement_date <= %s';
+            $range_params[]     = $date_to;
+        }
+        if ( $range_conditions ) {
+            $outer_sql .= ' WHERE ' . implode( ' AND ', $range_conditions );
+        }
+        $outer_sql .= ' ORDER BY movement_date ASC, created_at ASC, sort_id ASC';
+
+        $query_params = array_merge( $params, $params, $params, $range_params );
+        $rows = $query_params
+            ? ( $wpdb->get_results( $wpdb->prepare( $outer_sql, ...$query_params ) ) ?: [] )
+            : ( $wpdb->get_results( $outer_sql ) ?: [] );
+
+        $opening_sql = "SELECT
+                COALESCE(SUM(debit_amount), 0) AS total_debit,
+                COALESCE(SUM(credit_amount), 0) AS total_credit
+            FROM ({$union_sql}) statement_opening";
+        $opening_params = array_merge( $params, $params, $params );
+        if ( $date_from ) {
+            $opening_sql .= ' WHERE movement_date < %s';
+            $opening_params[] = $date_from;
+        }
+
+        $opening_row = $opening_params
+            ? $wpdb->get_row( $wpdb->prepare( $opening_sql, ...$opening_params ) )
+            : $wpdb->get_row( $opening_sql );
+
+        $opening_balance = round(
+            (float) ( $opening_row->total_debit ?? 0 ) - (float) ( $opening_row->total_credit ?? 0 ),
+            2
+        );
+
+        $running_balance = $opening_balance;
+        $total_debit     = 0.0;
+        $total_credit    = 0.0;
+
+        foreach ( $rows as $row ) {
+            $row->debit_amount  = round( (float) $row->debit_amount, 2 );
+            $row->credit_amount = round( (float) $row->credit_amount, 2 );
+            $total_debit       += $row->debit_amount;
+            $total_credit      += $row->credit_amount;
+            $running_balance   += $row->debit_amount - $row->credit_amount;
+            $row->running_balance = round( $running_balance, 2 );
+        }
+
+        return [
+            'entity'  => $entity,
+            'rows'    => $rows,
+            'summary' => [
+                'opening_balance' => $opening_balance,
+                'total_debit'     => round( $total_debit, 2 ),
+                'total_credit'    => round( $total_credit, 2 ),
+                'closing_balance' => round( $running_balance, 2 ),
+            ],
+            'filters' => [
+                'entity_type' => $entity_type,
+                'uid'         => $uid,
+                'year_id'     => $year_id,
+                'date_from'   => $date_from,
+                'date_to'     => $date_to,
+            ],
+        ];
+    }
+
     private static function sanitize_report_date( string $date ): string {
         $date = sanitize_text_field( $date );
         return preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date ) ? $date : '';

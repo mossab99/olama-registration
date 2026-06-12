@@ -68,6 +68,13 @@ class Olama_Reg_Ajax
             'olama_reg_agr_reorder_clauses',
             'olama_reg_agr_save_due_schedule',
             'olama_reg_agr_generate_due_schedule',
+            'olama_reg_agr_create_amendment',
+            'olama_reg_agr_approve_amendment',
+            'olama_reg_agr_reject_amendment',
+            'olama_reg_agr_cancel_amendment',
+            'olama_reg_agr_post_amendment',
+            'olama_reg_agr_get_amendments',
+            'olama_reg_agr_preview_amendment',
             'olama_reg_agr_complete',
             'olama_reg_agr_generate_invoice',
             'olama_reg_agr_get_unpaid_fees',
@@ -108,6 +115,13 @@ class Olama_Reg_Ajax
             !current_user_can('olama_manage_cheques') &&
             !current_user_can('olama_view_cash_reports') &&
             !current_user_can('olama_manage_financial_accounts')
+            && !current_user_can('olama_edit_agreement_admin_fields')
+            && !current_user_can('olama_create_agreement_amendment')
+            && !current_user_can('olama_approve_agreement_amendment')
+            && !current_user_can('olama_post_agreement_amendment')
+            && !current_user_can('olama_reschedule_agreement_installments')
+            && !current_user_can('olama_cancel_financial_agreement')
+            && !current_user_can('olama_view_agreement_audit')
         ) {
             wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
         }
@@ -1191,7 +1205,39 @@ class Olama_Reg_Ajax
         if ($id > 0) {
             $old = Olama_Reg_Agreement::get($id);
             $old_template_id = $old ? $old->template_id : null;
-            $old_participant_count = $old ? count($old->participant_ids_array) : 0;
+            if ($old && class_exists('Olama_Reg_Agreement_Policy')) {
+                $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($id);
+                if (is_wp_error($financial_edit)) {
+                    $old_participants = array_map('strval', (array) ($old->participant_ids_array ?? []));
+                    $new_participants = array_map('strval', (array) $participant_ids);
+                    sort($old_participants);
+                    sort($new_participants);
+
+                    $has_financial_change =
+                        (string) $data['payer_type'] !== (string) $old->payer_type
+                        || (string) $data['payer_id'] !== (string) $old->payer_id
+                        || $new_participants !== $old_participants
+                        || (string) $data['activity_type'] !== (string) $old->activity_type
+                        || (string) $data['start_date'] !== (string) $old->start_date
+                        || (string) ($data['end_date'] ?? '') !== (string) ($old->end_date ?? '')
+                        || (int) ($data['template_id'] ?? 0) !== (int) ($old->template_id ?? 0);
+
+                    if ($has_financial_change) {
+                        wp_send_json_error(['message' => $financial_edit->get_error_message()]);
+                    }
+
+                    $data['payer_type'] = $old->payer_type;
+                    $data['payer_id'] = $old->payer_id;
+                    $data['participant_type'] = $old->participant_type;
+                    $data['participant_id'] = $old->participant_id;
+                    $data['participant_ids'] = $old->participant_ids_array ?? [];
+                    $data['activity_type'] = $old->activity_type;
+                    $data['academic_year_id'] = $old->academic_year_id;
+                    $data['start_date'] = $old->start_date;
+                    $data['end_date'] = $old->end_date;
+                    $data['template_id'] = $old->template_id;
+                }
+            }
             if ($old && in_array($old->status, ['completed', 'cancelled'], true)) {
                 $data['status'] = $old->status;
             }
@@ -1267,6 +1313,19 @@ class Olama_Reg_Ajax
             ];
         }
 
+        $financial_status = 'open';
+        $lock_reasons = [];
+        $can_edit_financial_fields = true;
+        $can_reschedule_installments = true;
+        if (class_exists('Olama_Reg_Agreement_Policy')) {
+            $financial_status = Olama_Reg_Agreement_Policy::get_financial_status($id);
+            $lock_reasons = Olama_Reg_Agreement_Policy::get_lock_reasons($id);
+            $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($id);
+            $schedule_edit = Olama_Reg_Agreement_Policy::can_reschedule_installments($id);
+            $can_edit_financial_fields = !is_wp_error($financial_edit);
+            $can_reschedule_installments = !is_wp_error($schedule_edit);
+        }
+
         wp_send_json_success([
             'agreement' => [
                 'id' => $agreement->id,
@@ -1280,6 +1339,10 @@ class Olama_Reg_Ajax
                 'notes' => $agreement->notes,
                 'template_id' => $agreement->template_id,
                 'total_amount' => $agreement->total_amount,
+                'financial_status' => $financial_status,
+                'can_edit_financial_fields' => $can_edit_financial_fields,
+                'can_reschedule_installments' => $can_reschedule_installments,
+                'lock_reasons' => $lock_reasons,
             ],
             'fees' => $fees_data,
             'clauses' => $clauses_data,
@@ -1359,6 +1422,20 @@ class Olama_Reg_Ajax
         $id = (int) ($_POST['id'] ?? 0);
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
 
+        if ($id > 0) {
+            $existing_fee = Olama_Reg_Agreement_Fees::get($id);
+            if ($existing_fee) {
+                $agreement_id = (int) $existing_fee->agreement_id;
+            }
+        }
+
+        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+            $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($agreement_id);
+            if (is_wp_error($financial_edit)) {
+                wp_send_json_error(['message' => $financial_edit->get_error_message()]);
+            }
+        }
+
         $data = [
             'child_id' => (isset($_POST['child_id']) && $_POST['child_id'] !== '') ? sanitize_text_field($_POST['child_id']) : null,
             'fee_category' => sanitize_text_field($_POST['fee_category'] ?? ''),
@@ -1402,6 +1479,20 @@ class Olama_Reg_Ajax
         $id = (int) ($_POST['id'] ?? 0);
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
 
+        if ($id > 0) {
+            $existing_fee = Olama_Reg_Agreement_Fees::get($id);
+            if ($existing_fee) {
+                $agreement_id = (int) $existing_fee->agreement_id;
+            }
+        }
+
+        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+            $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($agreement_id);
+            if (is_wp_error($financial_edit)) {
+                wp_send_json_error(['message' => $financial_edit->get_error_message()]);
+            }
+        }
+
         if (Olama_Reg_Agreement_Fees::delete($id)) {
             Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
             wp_send_json_success(['message' => __('تم حذف الرسم.', 'olama-registration'), 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
@@ -1439,6 +1530,19 @@ class Olama_Reg_Ajax
         $this->guard();
         $id = (int) ($_POST['id'] ?? 0);
 
+        global $wpdb;
+        $agreement_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT agreement_id FROM {$wpdb->prefix}olama_agreement_clauses WHERE id = %d",
+            $id
+        ));
+
+        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+            $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($agreement_id);
+            if (is_wp_error($financial_edit)) {
+                wp_send_json_error(['message' => $financial_edit->get_error_message()]);
+            }
+        }
+
         if (Olama_Reg_Agreement_Clauses::delete($id)) {
             wp_send_json_success(['message' => __('تم الحذف.', 'olama-registration')]);
         }
@@ -1460,9 +1564,20 @@ class Olama_Reg_Ajax
     {
         $this->guard();
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $agreement = Olama_Reg_Agreement::get($agreement_id);
+        if ($agreement && $agreement->status === 'completed' && class_exists('Olama_Reg_Agreement_Policy') && Olama_Reg_Agreement_Policy::is_financially_locked($agreement_id)) {
+            wp_send_json_error(['message' => __('لا يمكن إعادة إكمال عقد مقفل مالياً. استخدم مسار تعديل العقد.', 'olama-registration')]);
+        }
         $lines = json_decode(stripslashes($_POST['lines'] ?? '[]'), true);
         if (!is_array($lines)) {
             $lines = [];
+        }
+
+        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+            $schedule_edit = Olama_Reg_Agreement_Policy::can_reschedule_installments($agreement_id);
+            if (is_wp_error($schedule_edit)) {
+                wp_send_json_error(['message' => $schedule_edit->get_error_message()]);
+            }
         }
 
         $result = Olama_Reg_Agreement_Invoice::save_due_schedule($agreement_id, $lines);
@@ -1482,6 +1597,13 @@ class Olama_Reg_Ajax
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
         $count = max(1, absint($_POST['count'] ?? 0));
 
+        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+            $schedule_edit = Olama_Reg_Agreement_Policy::can_reschedule_installments($agreement_id);
+            if (is_wp_error($schedule_edit)) {
+                wp_send_json_error(['message' => $schedule_edit->get_error_message()]);
+            }
+        }
+
         $result = Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id, $count);
         if (is_wp_error($result)) {
             wp_send_json_error(['message' => $result->get_error_message()]);
@@ -1491,6 +1613,119 @@ class Olama_Reg_Ajax
             'message' => __('تم إنشاء توزيع الاستحقاق المقترح.', 'olama-registration'),
             'schedule' => Olama_Reg_Agreement_Invoice::get_due_schedule($agreement_id),
         ]);
+    }
+
+    public function ajax_agr_create_amendment(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_create_agreement_amendment')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+
+        if (!class_exists('Olama_Reg_Agreement_Amendment')) {
+            wp_send_json_error(['message' => __('نظام تعديلات العقود غير محمل.', 'olama-registration')]);
+        }
+
+        $payload = [
+            'amendment_type' => sanitize_key($_POST['amendment_type'] ?? 'correction_error'),
+            'effective_date' => sanitize_text_field($_POST['effective_date'] ?? current_time('Y-m-d')),
+            'reason' => sanitize_text_field($_POST['reason'] ?? ''),
+            'admin_notes' => sanitize_textarea_field($_POST['admin_notes'] ?? $_POST['notes'] ?? ''),
+        ];
+        if (isset($_POST['new_total']) && $_POST['new_total'] !== '') {
+            $payload['new_total'] = (float) $_POST['new_total'];
+        }
+
+        $result = Olama_Reg_Agreement_Amendment::create($agreement_id, $payload);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        $amendment = Olama_Reg_Agreement_Amendment::get((int) $result);
+        wp_send_json_success([
+            'message' => __('تم إنشاء مسودة تعديل العقد.', 'olama-registration'),
+            'amendment' => $amendment,
+        ]);
+    }
+
+    public function ajax_agr_approve_amendment(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_approve_agreement_amendment')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $id = (int) ($_POST['amendment_id'] ?? 0);
+        $result = Olama_Reg_Agreement_Amendment::approve($id);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        wp_send_json_success(['message' => __('تم اعتماد تعديل العقد.', 'olama-registration'), 'amendment' => Olama_Reg_Agreement_Amendment::get($id)]);
+    }
+
+    public function ajax_agr_reject_amendment(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_approve_agreement_amendment')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $id = (int) ($_POST['amendment_id'] ?? 0);
+        $result = Olama_Reg_Agreement_Amendment::reject($id, sanitize_textarea_field($_POST['reason'] ?? ''));
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        wp_send_json_success(['message' => __('تم رفض تعديل العقد.', 'olama-registration'), 'amendment' => Olama_Reg_Agreement_Amendment::get($id)]);
+    }
+
+    public function ajax_agr_cancel_amendment(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_cancel_financial_agreement')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $id = (int) ($_POST['amendment_id'] ?? 0);
+        $result = Olama_Reg_Agreement_Amendment::cancel($id, sanitize_textarea_field($_POST['reason'] ?? ''));
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        wp_send_json_success(['message' => __('تم إلغاء تعديل العقد.', 'olama-registration'), 'amendment' => Olama_Reg_Agreement_Amendment::get($id)]);
+    }
+
+    public function ajax_agr_post_amendment(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_post_agreement_amendment')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $id = (int) ($_POST['amendment_id'] ?? 0);
+        $result = Olama_Reg_Agreement_Amendment::post($id);
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+        wp_send_json_success(['message' => __('تم ترحيل تعديل العقد.', 'olama-registration'), 'amendment' => Olama_Reg_Agreement_Amendment::get($id)]);
+    }
+
+    public function ajax_agr_get_amendments(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_view_agreement_audit') && !current_user_can('olama_create_agreement_amendment')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        wp_send_json_success(['amendments' => Olama_Reg_Agreement_Amendment::get_by_agreement($agreement_id)]);
+    }
+
+    public function ajax_agr_preview_amendment(): void
+    {
+        $this->guard();
+        if (!current_user_can('manage_options') && !current_user_can('olama_create_agreement_amendment')) {
+            wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
+        }
+        $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $new_total = (float) ($_POST['new_total'] ?? 0);
+        $preview = Olama_Reg_Agreement_Amendment::calculate_difference($agreement_id, $new_total);
+        wp_send_json_success(['preview' => $preview]);
     }
 
     public function ajax_agr_complete(): void
@@ -1856,6 +2091,7 @@ class Olama_Reg_Ajax
 
             // Financial summary (just 1 record flag — shown as null badge)
             $financial = null;
+            $statement = $invoices + $payments;
 
         } else {
             // External customer — resolve internal id from UID
@@ -1898,6 +2134,7 @@ class Olama_Reg_Ajax
 
             $history      = 0; // Phase 5 will query audit for external
             $financial    = null;
+            $statement    = $invoices + $payments;
             $settlements  = null; // Not applicable for external customers
         }
 
@@ -1909,6 +2146,7 @@ class Olama_Reg_Ajax
                 'payments'    => $payments,
                 'children'    => $children,
                 'financial'   => $financial,
+                'statement'   => $statement,
                 'history'     => $history,
                 'settlements' => $settlements,
             ],
@@ -1985,6 +2223,7 @@ class Olama_Reg_Ajax
             'payments'    => ['olama_manage_registration_payments', 'olama_record_payments', 'olama_reverse_payments'],
             'children'    => ['olama_manage_registration_families', 'olama_manage_registration_students'],
             'financial'   => ['olama_manage_registration_reports', 'olama_manage_registration_invoices', 'olama_manage_registration_payments'],
+            'statement'   => ['olama_manage_registration_reports', 'olama_manage_registration_invoices', 'olama_manage_registration_payments'],
             'history'     => ['olama_manage_registration_reports'],
             'settlements' => ['olama_manage_registration_payments'],
         ];
@@ -2000,6 +2239,7 @@ class Olama_Reg_Ajax
             'payments'    => [$this, 'hub_tile_payments'],
             'children'    => [$this, 'hub_tile_children'],
             'financial'   => [$this, 'hub_tile_financial'],
+            'statement'   => [$this, 'hub_tile_statement'],
             'history'     => [$this, 'hub_tile_history'],
             'settlements' => [$this, 'hub_tile_settlements'],
         ];
@@ -2799,6 +3039,79 @@ class Olama_Reg_Ajax
     }
 
     // ── Tile: History & Audit ─────────────────────────────────────────────────
+
+    private function hub_tile_statement(string $uid, string $type, int $year): array
+    {
+        $report = Olama_Reg_Billing_Reports::get_family_statement_report([
+            'entity_type' => $type === 'external' ? 'external' : 'family',
+            'uid'         => $uid,
+            'year_id'     => $year,
+        ]);
+
+        $rows    = array_slice($report['rows'] ?? [], -40);
+        $summary = $report['summary'] ?? [];
+        $entity  = $report['entity'] ?? ['uid' => $uid, 'name' => ''];
+
+        $labels = [
+            'invoice'          => __('فاتورة', 'olama-registration'),
+            'payment'          => __('دفعة', 'olama-registration'),
+            'payment_reversal' => __('عكس دفعة', 'olama-registration'),
+            'credit'           => __('إشعار دائن', 'olama-registration'),
+            'debit'            => __('إشعار مدين', 'olama-registration'),
+        ];
+
+        $html  = '<div class="os-hub-financial-summary os-hub-statement-summary">';
+        $html .= '<div class="os-hub-fin-cards">';
+        $html .= $this->hub_fin_card(__('الرصيد الافتتاحي', 'olama-registration'), (float) ($summary['opening_balance'] ?? 0), 'os-hub-badge--blue');
+        $html .= $this->hub_fin_card(__('إجمالي المدين', 'olama-registration'), (float) ($summary['total_debit'] ?? 0), 'os-hub-badge--red');
+        $html .= $this->hub_fin_card(__('إجمالي الدائن', 'olama-registration'), (float) ($summary['total_credit'] ?? 0), 'os-hub-badge--green');
+        $html .= $this->hub_fin_card(__('الرصيد الختامي', 'olama-registration'), (float) ($summary['closing_balance'] ?? 0), ((float) ($summary['closing_balance'] ?? 0) > 0 ? 'os-hub-badge--red' : 'os-hub-badge--green'));
+        $html .= '</div>';
+
+        if (!empty($entity['name'])) {
+            $html .= '<div class="os-hub-inline-note" style="margin:12px 0 16px; color:#475569;">';
+            $html .= esc_html($entity['name']) . ' <span dir="ltr">(' . esc_html($entity['uid']) . ')</span>';
+            $html .= '</div>';
+        }
+
+        $html .= '<div class="os-hub-table-wrap"><table class="widefat striped">';
+        $html .= '<thead><tr><th>' . esc_html__('التاريخ', 'olama-registration') . '</th><th>' . esc_html__('النوع', 'olama-registration') . '</th><th>' . esc_html__('المرجع', 'olama-registration') . '</th><th>' . esc_html__('البيان', 'olama-registration') . '</th><th>' . esc_html__('مدين', 'olama-registration') . '</th><th>' . esc_html__('دائن', 'olama-registration') . '</th><th>' . esc_html__('الرصيد', 'olama-registration') . '</th></tr></thead><tbody>';
+
+        if (empty($rows)) {
+            $html .= '<tr><td colspan="7" class="os-hub-empty-state">' . esc_html__('لا توجد حركات على كشف الحساب حالياً.', 'olama-registration') . '</td></tr>';
+        } else {
+            foreach ($rows as $row) {
+                $html .= '<tr>';
+                $html .= '<td>' . esc_html($row->movement_date ?: '—') . '</td>';
+                $html .= '<td>' . esc_html($labels[$row->entry_type] ?? $row->entry_type) . '</td>';
+                $html .= '<td><strong>' . esc_html($row->reference_no ?: '—') . '</strong></td>';
+                $html .= '<td>' . esc_html($row->details ?: '—') . '</td>';
+                $html .= '<td style="color:#c62828;" dir="ltr">' . ($row->debit_amount > 0 ? esc_html(number_format((float) $row->debit_amount, 2)) : '—') . '</td>';
+                $html .= '<td class="olama-reg-text--success" dir="ltr">' . ($row->credit_amount > 0 ? esc_html(number_format((float) $row->credit_amount, 2)) : '—') . '</td>';
+                $html .= '<td dir="ltr"><strong>' . esc_html(number_format((float) $row->running_balance, 2)) . '</strong></td>';
+                $html .= '</tr>';
+            }
+        }
+
+        $html .= '</tbody></table></div>';
+        $report_url = add_query_arg([
+            'page'        => 'olama-registration-reports',
+            'report_tab'  => 'family_statement',
+            'year_id'     => $year,
+            'entity_type' => $type === 'external' ? 'external' : 'family',
+            'uid'         => $uid,
+        ], admin_url('admin.php'));
+        $html .= '<div class="os-hub-tile-footer"><a href="' . esc_url($report_url) . '" class="button button-small"><span class="dashicons dashicons-visibility" aria-hidden="true"></span> ' . esc_html__('عرض الكشف الكامل', 'olama-registration') . '</a></div>';
+        $html .= '</div>';
+
+        return [
+            'html' => $html,
+            'meta' => [
+                'row_count'       => count($report['rows'] ?? []),
+                'closing_balance' => (float) ($summary['closing_balance'] ?? 0),
+            ],
+        ];
+    }
 
     private function hub_tile_history(string $uid, string $type, int $year): array
     {

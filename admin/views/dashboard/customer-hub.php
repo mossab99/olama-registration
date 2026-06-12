@@ -837,7 +837,7 @@ include OLAMA_REG_PATH . 'admin/views/partial-customer-modal.php';
         
         <div class="olama-reg-modal-body">
             <!-- Header metrics -->
-            <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 20px;">
+            <div class="olama-reg-metrics-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom: 20px;">
                 <div class="olama-reg-metric-card olama-reg-metric-card--primary" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                     <div class="olama-reg-metric-title"><?php esc_html_e( 'قيمة الفاتورة', 'olama-registration' ); ?></div>
                     <div id="drawer-total-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
@@ -849,6 +849,14 @@ include OLAMA_REG_PATH . 'admin/views/partial-customer-modal.php';
                 <div class="olama-reg-metric-card olama-reg-metric-card--success" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                     <div class="olama-reg-metric-title"><?php esc_html_e( 'المجموع المدفوع', 'olama-registration' ); ?></div>
                     <div id="drawer-paid-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0;">0.00</div>
+                </div>
+                <div class="olama-reg-metric-card" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                    <div class="olama-reg-metric-title"><?php esc_html_e( 'الإشعار الدائن', 'olama-registration' ); ?></div>
+                    <div id="drawer-credit-notes-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0; color:#1d4ed8;">0.00</div>
+                </div>
+                <div class="olama-reg-metric-card" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
+                    <div class="olama-reg-metric-title"><?php esc_html_e( 'الإشعار المدين', 'olama-registration' ); ?></div>
+                    <div id="drawer-debit-notes-val" class="olama-reg-metric-value" style="font-size:22px; margin-top:0; color:#b45309;">0.00</div>
                 </div>
                 <div class="olama-reg-metric-card olama-reg-metric-card--warning" style="padding:15px; flex-direction:column; align-items:center; gap:8px;">
                     <div class="olama-reg-metric-title"><?php esc_html_e( 'المتبقي المستحق', 'olama-registration' ); ?></div>
@@ -914,6 +922,7 @@ include OLAMA_REG_PATH . 'admin/views/partial-customer-modal.php';
                                 <th style="width:90px;"><?php esc_html_e( 'رقم السند', 'olama-registration' ); ?></th>
                                 <th><?php esc_html_e( 'تاريخ الدفع', 'olama-registration' ); ?></th>
                                 <th><?php esc_html_e( 'طريقة الدفع', 'olama-registration' ); ?></th>
+                                <th><?php esc_html_e( 'حالة الدفعة', 'olama-registration' ); ?></th>
                                 <th><?php esc_html_e( 'المبلغ المدفوع', 'olama-registration' ); ?></th>
                                 <th><?php esc_html_e( 'المرجع', 'olama-registration' ); ?></th>
                             </tr>

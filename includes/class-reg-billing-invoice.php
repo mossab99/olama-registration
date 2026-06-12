@@ -319,6 +319,32 @@ class Olama_Reg_Billing_Invoice
             $id
         )) ?: [];
 
+        if (self::needs_payment_sync($inv)) {
+            self::recalculate_totals($id);
+            if (!empty($inv->installments)) {
+                Olama_Reg_Billing_Payment::reallocate_all_installments($id);
+            }
+
+            $inv = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM " . self::t('olama_invoices') . " WHERE id = %d",
+                $id
+            ));
+
+            if (!$inv) {
+                return null;
+            }
+
+            $inv->items = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM " . self::t('olama_invoice_items') . " WHERE invoice_id = %d ORDER BY id ASC",
+                $id
+            )) ?: [];
+
+            $inv->installments = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM " . self::t('olama_invoice_installments') . " WHERE invoice_id = %d ORDER BY installment_no ASC",
+                $id
+            )) ?: [];
+        }
+
         $adjustment_totals = self::get_adjustment_totals($id);
         $inv->debit_notes_total = $adjustment_totals['debit'];
         $inv->credit_notes_total = $adjustment_totals['credit'];
@@ -1029,6 +1055,37 @@ class Olama_Reg_Billing_Invoice
         $debit = (float) ($invoice->debit_notes_total ?? 0);
         $credit = (float) ($invoice->credit_notes_total ?? 0);
         return round(max(0.0, (float) ($invoice->total ?? 0) + $debit - $credit), 2);
+    }
+
+    private static function needs_payment_sync(object $invoice): bool
+    {
+        global $wpdb;
+
+        $invoice_id = (int) ($invoice->id ?? 0);
+        if ($invoice_id <= 0) {
+            return false;
+        }
+
+        $posted_total = (float) $wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(SUM(amount), 0)
+             FROM " . self::t('olama_payments') . "
+             WHERE invoice_id = %d
+               AND (status IS NULL OR status = '' OR status IN ('posted','reversed'))",
+            $invoice_id
+        ));
+
+        if (abs(round((float) ($invoice->amount_paid ?? 0), 2) - round($posted_total, 2)) > 0.009) {
+            return true;
+        }
+
+        $installment_paid = (float) $wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(SUM(amount_paid), 0)
+             FROM " . self::t('olama_invoice_installments') . "
+             WHERE invoice_id = %d",
+            $invoice_id
+        ));
+
+        return abs(round($installment_paid, 2) - round(max(0.0, $posted_total), 2)) > 0.009;
     }
 
     private static function is_overdue(object $invoice): bool

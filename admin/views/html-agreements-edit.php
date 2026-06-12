@@ -7,11 +7,19 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+global $wpdb;
+
 $id = (int) ($_GET['id'] ?? 0);
 $is_new = empty($id);
+$is_hub_embedded = sanitize_key($_GET['embedded'] ?? '') === 'hub';
 $agreement = null;
 $is_context_locked = false;
 $has_financial_impact = false;
+$can_edit_financial_fields = true;
+$can_reschedule_installments = true;
+$can_create_amendment = false;
+$financial_status = 'open';
+$lock_reasons = [];
 $academic_year_end_date = class_exists('Olama_Reg_Agreement_Invoice') ? Olama_Reg_Agreement_Invoice::get_active_academic_year_end_date() : '';
 
 if (!$is_new) {
@@ -19,11 +27,25 @@ if (!$is_new) {
     if (!$agreement) {
         wp_die(__('العقد غير موجود.', 'olama-registration'));
     }
-    global $wpdb;
-    $has_financial_impact = (int) $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-        $id
-    )) > 0;
+    if (class_exists('Olama_Reg_Agreement_Policy')) {
+        $financial_status = Olama_Reg_Agreement_Policy::get_financial_status($id);
+        $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($id);
+        $schedule_edit = Olama_Reg_Agreement_Policy::can_reschedule_installments($id);
+        $amendment_create = Olama_Reg_Agreement_Policy::can_create_amendment($id);
+        $can_edit_financial_fields = !is_wp_error($financial_edit);
+        $can_reschedule_installments = !is_wp_error($schedule_edit);
+        $can_create_amendment = !is_wp_error($amendment_create);
+        $has_financial_impact = !$can_edit_financial_fields;
+        $lock_reasons = Olama_Reg_Agreement_Policy::get_lock_reasons($id);
+    } else {
+        global $wpdb;
+        $has_financial_impact = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+            $id
+        )) > 0;
+        $can_edit_financial_fields = !$has_financial_impact;
+        $can_reschedule_installments = !$has_financial_impact;
+    }
     if ($has_financial_impact) {
         $is_context_locked = true;
     }
@@ -103,7 +125,8 @@ if ($agreement && $agreement->payer_id) {
 <script>
 window.payerChildren = <?php echo $payer_children_json; ?>;
 </script>
-<div class="olama-reg-wrap os-wrap" id="os-agreement-app" data-id="<?php echo esc_attr($agreement->id); ?>">
+<div class="olama-reg-wrap os-wrap<?php echo $is_hub_embedded ? ' os-hub-embedded-form' : ''; ?>" id="os-agreement-app" data-id="<?php echo esc_attr($agreement->id); ?>" data-can-edit-financial="<?php echo esc_attr($can_edit_financial_fields ? '1' : '0'); ?>" data-can-reschedule="<?php echo esc_attr($can_reschedule_installments ? '1' : '0'); ?>" data-can-create-amendment="<?php echo esc_attr($can_create_amendment ? '1' : '0'); ?>" data-financial-status="<?php echo esc_attr($financial_status); ?>" data-embedded="<?php echo esc_attr($is_hub_embedded ? 'hub' : 'page'); ?>">
+    <?php if (!$is_hub_embedded): ?>
     <div class="olama-reg-page-header">
         <div style="display:flex; align-items:center; gap:15px;">
             <h1 class="wp-heading-inline" style="margin:0;">
@@ -119,6 +142,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
             <span class="dashicons dashicons-arrow-right-alt2" style="margin-top:4px;"></span> <?php esc_html_e('العودة للقائمة', 'olama-registration'); ?>
         </a>
     </div>
+    <?php endif; ?>
 
     <nav class="nav-tab-wrapper wp-clearfix os-nav-tabs" style="margin-bottom: 20px;">
         <a href="#tab-header"
@@ -136,6 +160,24 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                 <input type="hidden" name="template_id" value="<?php echo esc_attr($agreement->template_id); ?>">
                 
                 <h3 class="olama-reg-section-title"><?php esc_html_e('البيانات الأساسية', 'olama-registration'); ?></h3>
+                <?php if (!$can_edit_financial_fields): ?>
+                    <div class="notice notice-warning inline" style="padding:10px 14px; margin:0 0 14px;">
+                        <p style="margin:0 0 8px;"><strong><?php esc_html_e('العقد مقفل مالياً للتعديل المباشر.', 'olama-registration'); ?></strong></p>
+                        <?php if (!empty($lock_reasons)): ?>
+                            <ul style="margin:0 18px 0 0; list-style:disc;">
+                                <?php foreach ($lock_reasons as $reason): ?>
+                                    <li><?php echo esc_html($reason); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+                        <?php if ($can_create_amendment && (current_user_can('manage_options') || current_user_can('olama_create_agreement_amendment'))): ?>
+                            <p style="margin:12px 0 0;">
+                                <button type="button" class="button button-primary" id="os-agr-create-amendment"><?php esc_html_e('تعديل مالي على العقد', 'olama-registration'); ?></button>
+                            </p>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+
                 <div class="olama-reg-grid">
                     <div class="olama-reg-field olama-reg-field--required">
                         <label><?php esc_html_e('نوع الجهة الدافعة', 'olama-registration'); ?></label>
@@ -226,19 +268,15 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
 
                     <div class="olama-reg-field" style="grid-column: 1 / -1;">
                         <label><?php esc_html_e('ملاحظات', 'olama-registration'); ?></label>
-                        <textarea name="notes" rows="4" style="width: 100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;" <?php disabled($has_financial_impact); ?>><?php echo esc_textarea($agreement->notes); ?></textarea>
-                        <?php if ($has_financial_impact): ?>
-                            <input type="hidden" name="notes" value="<?php echo esc_attr($agreement->notes); ?>">
-                        <?php endif; ?>
+                        <textarea name="notes" rows="4" style="width: 100%; border:1.5px solid #E0C090; border-radius:6px; padding:8px; font-family:inherit;"><?php echo esc_textarea($agreement->notes); ?></textarea>
                     </div>
                 </div>
                 
                 <div class="olama-reg-form-actions" style="margin-top: 20px;">
-                    <?php if (!$has_financial_impact): ?>
                         <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="os-btn-save-header">
                             <span class="dashicons dashicons-saved"></span> <?php esc_html_e('حفظ البيانات', 'olama-registration'); ?>
                         </button>
-                    <?php else: ?>
+                    <?php if (false): ?>
                         <div class="notice notice-warning inline" style="padding:10px; margin:0; width:100%;">
                             <p><?php esc_html_e('العقد مرتبط بمدفوعات/فواتير نشطة. لا يمكن تعديل البيانات الأساسية؛ يسمح فقط بإضافة بنود رسوم جديدة.', 'olama-registration'); ?></p>
                         </div>
@@ -455,7 +493,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                             $paid = (float) $line->amount_paid;
                             $remaining = max(0, $amount - $paid);
                             $due_total += $amount;
-                            $line_locked = $has_financial_impact && $paid > 0;
+                            $line_locked = !$can_reschedule_installments || $paid > 0;
                             ?>
                             <tr>
                                 <td class="os-agr-due-no"><?php echo esc_html($line->installment_no); ?></td>
@@ -495,7 +533,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                     <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
                         <label style="display:flex; align-items:center; gap:8px; font-weight:700;">
                             <span><?php esc_html_e('عدد الأقساط', 'olama-registration'); ?></span>
-                            <input type="number" id="os-agr-due-count" min="1" max="24" value="<?php echo esc_attr( count( $due_schedule ) ?: Olama_Reg_Agreement_Invoice::DEFAULT_INSTALLMENTS ); ?>" style="width:90px;">
+                            <input type="number" id="os-agr-due-count" min="1" max="24" value="<?php echo esc_attr( count( $due_schedule ) ?: Olama_Reg_Agreement_Invoice::DEFAULT_INSTALLMENTS ); ?>" style="width:90px;" <?php disabled(!$can_reschedule_installments); ?>>
                         </label>
                         <button type="button" class="olama-reg-btn olama-reg-btn--secondary"
                             id="os-agr-add-fee-row"><span class="dashicons dashicons-plus" style="margin-top:4px;"></span> <?php esc_html_e('إضافة بند رسوم', 'olama-registration'); ?></button>
@@ -635,6 +673,119 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
         </div>
     </div>
 </div>
+
+<?php if (!$is_new): ?>
+    <div id="os-agr-amendment-modal" class="olama-reg-modal olama-reg-wrap os-agr-amendment-modal" style="display:none;">
+        <div class="olama-reg-modal-dialog os-agr-amendment-dialog">
+            <div class="olama-reg-modal-header">
+                <h2 class="olama-reg-modal-title"><?php esc_html_e('تعديل مالي على العقد', 'olama-registration'); ?></h2>
+                <button type="button" class="olama-reg-modal-close" id="os-agr-close-amendment-modal">&times;</button>
+            </div>
+            <form id="os-agr-amendment-form" style="margin:0;">
+                <div class="olama-reg-modal-body os-agr-amendment-body">
+                    <div class="olama-reg-grid">
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e('نوع التعديل', 'olama-registration'); ?></label>
+                            <select name="amendment_type" id="os-agr-amendment-type" style="width:100%;">
+                                <option value="correction_error"><?php esc_html_e('تصحيح خطأ', 'olama-registration'); ?></option>
+                                <option value="discount_change"><?php esc_html_e('تعديل خصم', 'olama-registration'); ?></option>
+                                <option value="increase_amount"><?php esc_html_e('زيادة مبلغ', 'olama-registration'); ?></option>
+                                <option value="decrease_amount"><?php esc_html_e('خفض مبلغ', 'olama-registration'); ?></option>
+                            </select>
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e('تاريخ السريان', 'olama-registration'); ?></label>
+                            <input type="text" name="effective_date" id="os-agr-amendment-date" class="os-datepicker" value="<?php echo esc_attr(current_time('Y-m-d')); ?>">
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e('القيمة القديمة', 'olama-registration'); ?></label>
+                            <input type="text" id="os-agr-amendment-old" readonly>
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e('القيمة الجديدة', 'olama-registration'); ?></label>
+                            <input type="number" step="0.001" name="new_total" id="os-agr-amendment-new" value="">
+                        </div>
+                        <div class="olama-reg-field">
+                            <label><?php esc_html_e('الفرق', 'olama-registration'); ?></label>
+                            <input type="text" id="os-agr-amendment-diff" readonly>
+                        </div>
+                    </div>
+                    <div class="olama-reg-field" style="margin-top:14px;">
+                        <label><?php esc_html_e('سبب التعديل', 'olama-registration'); ?></label>
+                        <textarea name="reason" id="os-agr-amendment-reason" rows="4" style="width:100%;"></textarea>
+                    </div>
+                    <div class="olama-reg-field" style="margin-top:14px;">
+                        <label><?php esc_html_e('ملاحظات داخلية', 'olama-registration'); ?></label>
+                        <textarea name="admin_notes" id="os-agr-amendment-notes" rows="3" style="width:100%;"></textarea>
+                    </div>
+                    <div class="notice notice-warning inline os-agr-amendment-confirm">
+                        <p style="margin:0;"><?php esc_html_e('أفهم أن هذا التعديل سيؤثر على الرصيد المالي للعقد وسيتم تسجيله في سجل التدقيق ولا يمكن حذفه بعد الترحيل.', 'olama-registration'); ?></p>
+                    </div>
+                </div>
+                <div class="os-agr-amendment-footer">
+                    <button type="button" class="button" id="os-agr-preview-amendment"><?php esc_html_e('معاينة الأثر', 'olama-registration'); ?></button>
+                    <button type="submit" class="olama-reg-btn olama-reg-btn--primary" id="os-agr-save-amendment"><?php esc_html_e('حفظ المسودة', 'olama-registration'); ?></button>
+                </div>
+            </form>
+        </div>
+    </div>
+<?php endif; ?>
+
+<?php if (!$is_new): ?>
+    <?php $amendments = class_exists('Olama_Reg_Agreement_Amendment') ? Olama_Reg_Agreement_Amendment::get_by_agreement($id) : []; ?>
+    <div class="olama-reg-wrap os-wrap os-agr-amendments-wrap">
+    <div class="olama-reg-section os-agr-amendments-section">
+        <h3 class="olama-reg-section-title"><?php esc_html_e('سجل تعديلات العقد', 'olama-registration'); ?></h3>
+        <div class="olama-reg-table-wrap">
+            <table class="olama-reg-fin-table os-agr-amendments-table">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('رقم التعديل', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('النوع', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('الحالة', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('تاريخ السريان', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('القديم', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('الجديد', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('الفرق', 'olama-registration'); ?></th>
+                        <th><?php esc_html_e('الإجراءات', 'olama-registration'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (!empty($amendments)): ?>
+                        <?php foreach ($amendments as $amendment): ?>
+                            <tr data-amendment-id="<?php echo esc_attr($amendment->id); ?>">
+                                <td><strong><?php echo esc_html($amendment->amendment_no); ?></strong></td>
+                                <td><?php echo esc_html($amendment->amendment_type); ?></td>
+                                <td><?php echo esc_html($amendment->status); ?></td>
+                                <td><?php echo esc_html($amendment->effective_date); ?></td>
+                                <td><?php echo esc_html(number_format((float) $amendment->old_total, 3)); ?></td>
+                                <td><?php echo esc_html(number_format((float) $amendment->new_total, 3)); ?></td>
+                                <td><?php echo esc_html(number_format((float) $amendment->difference_amount, 3)); ?></td>
+                                <td class="os-agr-amendments-actions">
+                                    <?php if ($amendment->status === 'draft' && (current_user_can('manage_options') || current_user_can('olama_approve_agreement_amendment'))): ?>
+                                        <button type="button" class="button button-small os-agr-approve-amendment"><?php esc_html_e('اعتماد', 'olama-registration'); ?></button>
+                                    <?php endif; ?>
+                                    <?php if ($amendment->status === 'approved' && (current_user_can('manage_options') || current_user_can('olama_post_agreement_amendment'))): ?>
+                                        <button type="button" class="button button-small button-primary os-agr-post-amendment"><?php esc_html_e('ترحيل', 'olama-registration'); ?></button>
+                                    <?php endif; ?>
+                                    <?php if (in_array($amendment->status, ['draft', 'approved', 'pending_approval'], true) && (current_user_can('manage_options') || current_user_can('olama_approve_agreement_amendment'))): ?>
+                                        <button type="button" class="button button-small os-agr-reject-amendment"><?php esc_html_e('رفض', 'olama-registration'); ?></button>
+                                    <?php endif; ?>
+                                    <?php if ($amendment->status !== 'posted' && (current_user_can('manage_options') || current_user_can('olama_cancel_financial_agreement'))): ?>
+                                        <button type="button" class="button button-small os-agr-cancel-amendment"><?php esc_html_e('إلغاء', 'olama-registration'); ?></button>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="8"><?php esc_html_e('لا توجد تعديلات مسجلة بعد.', 'olama-registration'); ?></td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    </div>
+<?php endif; ?>
 
 <?php if (!$is_new): ?>
     <!-- Invoice Generation Modal -->
