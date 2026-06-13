@@ -2412,16 +2412,13 @@ class Olama_Reg_Ajax
             $payer_id = $c ? (string) $c->id : $uid;
         }
 
-        $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT a.id, a.agreement_number, a.activity_type, a.status,
-                    a.start_date, a.end_date, a.total_amount
-             FROM {$wpdb->prefix}olama_agreements a
-             WHERE a.payer_type = %s AND a.payer_id = %s
-             ORDER BY a.id DESC",
-            $payer_type, $payer_id
-        ));
+        $args = [
+            'payer_type' => $payer_type,
+            'payer_id'   => $payer_id,
+        ];
+        $agreements = Olama_Reg_Agreement::get_list($args);
 
-        if (! $rows) {
+        if (!$agreements) {
             $html = $this->hub_empty_state(
                 __('لا توجد عقود مسجلة', 'olama-registration'),
                 'dashicons-media-document'
@@ -2429,111 +2426,31 @@ class Olama_Reg_Ajax
             return ['html' => $html];
         }
 
-        $html  = '<table class="os-hub-data-table widefat fixed striped">';
-        $html .= '<thead><tr>';
-        $html .= '<th>' . __('رقم العقد', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الطلاب المشتركين', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('طبيعة العقد', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الفواتير المرتبطة', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('اجمالي العقد', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('المبلغ المحصل', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('المبلغ المتبقي', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الإجراءات', 'olama-registration') . '</th>';
-        $html .= '</tr></thead><tbody>';
+        foreach ($agreements as $agr) {
+            $agr->invoices = $wpdb->get_results($wpdb->prepare(
+                "SELECT id, invoice_number, status, balance FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
+                $agr->id
+            )) ?: [];
 
-        foreach ($rows as $r) {
-            $agreement = Olama_Reg_Agreement::get($r->id);
-            if (!$agreement) continue;
-
-            $status_map = [
-                'draft'     => ['label' => __('مسودة', 'olama-registration'),    'cls' => 'os-hub-badge--gray'],
-                'active'    => ['label' => __('نشط', 'olama-registration'),      'cls' => 'os-hub-badge--green'],
-                'completed' => ['label' => __('مكتمل', 'olama-registration'),    'cls' => 'os-hub-badge--blue'],
-                'cancelled' => ['label' => __('ملغى', 'olama-registration'),     'cls' => 'os-hub-badge--red'],
-            ];
-            $s = $status_map[$r->status] ?? ['label' => esc_html($r->status), 'cls' => 'os-hub-badge--gray'];
-
-            // Linked invoices
-            $invoices = $wpdb->get_results($wpdb->prepare(
-                "SELECT id, invoice_number, status, balance FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d",
-                $r->id
-            ));
-            $invoice_links = [];
-            if (!empty($invoices)) {
-                foreach ($invoices as $inv) {
-                    $payment_id = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$wpdb->prefix}olama_payments WHERE invoice_id = %d LIMIT 1", $inv->id));
-                    if ($payment_id) {
-                        $url = admin_url('admin.php?page=olama-registration-payments&action=print_receipt&id=' . $payment_id);
-                        $invoice_links[] = '<a href="' . esc_url($url) . '" target="_blank">' . esc_html($inv->invoice_number) . '</a>';
-                    } else {
-                        $invoice_links[] = esc_html($inv->invoice_number);
-                    }
-                }
-            }
-            $invoices_str = !empty($invoice_links) ? implode('<br>', $invoice_links) : '—';
-
-            // Collected and remaining
-            $collected = (float) $wpdb->get_var($wpdb->prepare(
+            $agr->collected_amount = (float) $wpdb->get_var($wpdb->prepare(
                 "SELECT SUM(amount_paid) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-                $r->id
+                $agr->id
             ));
-            $remaining = max(0, (float)$r->total_amount - $collected);
-
-            $print_url = admin_url('admin.php?page=olama-registration-agreements&action=print&id=' . $r->id);
-
-            // Actions list
-            $actions_html = '<a href="#" class="button button-small os-hub-edit-agreement" data-id="' . esc_attr($r->id) . '" style="margin-left: 4px;">' . __('تعديل', 'olama-registration') . '</a>';
-            $actions_html .= '<a href="' . esc_url($print_url) . '" target="_blank" class="button button-small" style="margin-left: 4px;">' . __('طباعة', 'olama-registration') . '</a>';
-
-            // View / Pay Invoice buttons section on a new line (ALWAYS shown if linked invoices exist)
-            if (!empty($invoices)) {
-                $actions_html .= '<div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #cbd5e1; display: flex; flex-direction: column; gap: 4px;">';
-                foreach ($invoices as $inv) {
-                    // View Invoice button (always)
-                    $actions_html .= '<button type="button" class="button button-small olama-reg-view-invoice-btn" data-id="' . esc_attr($inv->id) . '" title="' . esc_attr__('عرض الفاتورة', 'olama-registration') . '" style="background:#0284c7; border-color:#0284c7; color:#fff; display: block; width: 100%; text-align: center; justify-content: center; font-size: 11px; margin-bottom: 2px;">' . sprintf(__('عرض %s', 'olama-registration'), $inv->invoice_number) . '</button>';
-                    
-                    // Pay button (only if unpaid/partially paid)
-                    if ((float)$inv->balance > 0 && $inv->status !== 'cancelled' && $inv->status !== 'draft') {
-                        $actions_html .= '<button type="button" class="button button-small os-hub-pay-invoice-btn" data-id="' . esc_attr($inv->id) . '" title="' . esc_attr__('دفع الفاتورة', 'olama-registration') . '" style="background:#16a34a; border-color:#16a34a; color:#fff; display: block; width: 100%; text-align: center; justify-content: center; font-size: 11px; margin-bottom: 4px;">' . sprintf(__('دفع %s', 'olama-registration'), $inv->invoice_number) . '</button>';
-                    }
-                }
-                $actions_html .= '</div>';
-            }
-
-            $has_invoices = (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-                $r->id
-            )) > 0;
-
-            if (!$has_invoices) {
-                $cancel_url = admin_url('admin.php?page=olama-registration-agreements&action=cancel&id=' . $r->id . '&redirect_to=hub');
-                $actions_html .= '<a href="' . esc_url($cancel_url) . '" class="button button-small" style="color:#d63638; text-decoration:none;" onclick="return confirm(\'' . esc_attr__('هل أنت متأكد من إلغاء وحذف هذا العقد؟', 'olama-registration') . '\');">' . __('إلغاء', 'olama-registration') . '</a>';
-            }
-
-            $html .= '<tr>';
-            $html .= '<td><code>' . esc_html($r->agreement_number) . '</code></td>';
-            $html .= '<td><strong>' . esc_html($agreement->participant_name) . '</strong></td>';
-            $html .= '<td>' . esc_html($r->activity_type) . '</td>';
-            $html .= '<td><span class="os-hub-badge ' . $s['cls'] . '">' . $s['label'] . '</span></td>';
-            $html .= '<td>' . $invoices_str . '</td>';
-            $html .= '<td dir="ltr">' . number_format((float)$r->total_amount, 3) . ' <small>JD</small></td>';
-            $html .= '<td dir="ltr" style="color:#16a34a; font-weight:700;">' . number_format($collected, 3) . ' <small>JD</small></td>';
-            $remaining_color = $remaining > 0 ? '#e8920a' : '#16a34a';
-            $html .= '<td dir="ltr" style="color:' . $remaining_color . '; font-weight:700;">' . number_format($remaining, 3) . ' <small>JD</small></td>';
-            $html .= '<td>' . $actions_html . '</td>';
-            $html .= '</tr>';
+            $agr->remaining_amount = max(0, (float)$agr->total_amount - $agr->collected_amount);
         }
 
-        $html .= '</tbody></table>';
+        ob_start();
+        $is_hub = true;
+        include OLAMA_REG_PATH . 'admin/views/partial-agreements-table.php';
+        $html = ob_get_clean();
 
         return [
             'html' => $html,
-            'meta' => ['count' => count($rows)],
+            'meta' => ['count' => count($agreements)],
         ];
     }
 
-    // ── Tile: Invoices ────────────────────────────────────────────────────────
+        // ── Tile: Invoices ────────────────────────────────────────────────────────
 
     private function hub_tile_invoices(string $uid, string $type, int $year): array
     {
@@ -2557,114 +2474,117 @@ class Olama_Reg_Ajax
             $args[] = $year;
         }
 
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT i.id, i.invoice_number, i.status, i.subtotal, i.discount, i.amount_paid, i.balance, i.notes,
-                        s.student_name, y.year_name
-                 FROM {$wpdb->prefix}olama_invoices i
-                 LEFT JOIN {$wpdb->prefix}olama_students s ON s.student_uid = i.student_uid
-                 LEFT JOIN {$wpdb->prefix}olama_academic_years y ON y.id = i.academic_year_id
-                 WHERE {$where}
-                 ORDER BY i.id DESC
-                 LIMIT 50",
-                $args
-            )
-        );
+        $query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_name,
+                         ft.template_name AS fee_template_name,
+                         ft.subject_type AS fee_subject_type,
+                         ft.subject_value AS fee_subject_value,
+                         a.agreement_number,
+                         s.student_name AS direct_student_name,
+                         ec.child_name AS direct_child_name
+                  FROM " . $wpdb->prefix . "olama_invoices i
+                  LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = i.family_uid
+                  LEFT JOIN " . $wpdb->prefix . "olama_fee_templates ft ON ft.id = i.fee_template_id
+                  LEFT JOIN " . $wpdb->prefix . "olama_agreements a ON a.id = i.agreement_id
+                  LEFT JOIN " . $wpdb->prefix . "olama_students s ON s.student_uid = i.student_uid
+                  LEFT JOIN " . $wpdb->prefix . "olama_customer_children ec ON ec.id = i.ext_child_id
+                  WHERE {$where}
+                  ORDER BY i.issue_date DESC, i.id DESC
+                  LIMIT 50";
+
+        $invoices = $wpdb->get_results($wpdb->prepare($query, ...$args)) ?: [];
+
+        foreach ($invoices as $invoice_row) {
+            if (empty($invoice_row->fee_template_name) && !empty($invoice_row->agreement_id)) {
+                $templates = $wpdb->get_results($wpdb->prepare(
+                    "SELECT DISTINCT ft.template_name, ft.subject_type, ft.subject_value
+                     FROM {$wpdb->prefix}olama_agreement_fees af
+                     LEFT JOIN {$wpdb->prefix}olama_fee_templates ft ON ft.id = CAST(af.fee_category AS UNSIGNED)
+                     WHERE af.agreement_id = %d
+                       AND af.fee_category REGEXP '^[0-9]+'
+                       AND ft.id IS NOT NULL
+                     ORDER BY ft.template_name ASC",
+                    (int) $invoice_row->agreement_id
+                )) ?: [];
+
+                if (!empty($templates)) {
+                    $invoice_row->fee_template_name = implode('، ', wp_list_pluck($templates, 'template_name'));
+                    $invoice_row->fee_subject_type  = $templates[0]->subject_type ?? 'agreement';
+                    $invoice_row->fee_subject_value = $templates[0]->subject_value ?? '';
+                }
+            }
+
+            $covered_children = [];
+            if (!empty($invoice_row->agreement_id)) {
+                $agreement = $wpdb->get_row($wpdb->prepare(
+                    "SELECT payer_type, participant_type FROM {$wpdb->prefix}olama_agreements WHERE id = %d",
+                    (int) $invoice_row->agreement_id
+                ));
+
+                if ($agreement && $agreement->payer_type === 'family') {
+                    $covered_children = $wpdb->get_col($wpdb->prepare(
+                        "SELECT DISTINCT s.student_name
+                         FROM {$wpdb->prefix}olama_agreement_fees af
+                         LEFT JOIN {$wpdb->prefix}olama_students s
+                            ON s.student_uid = af.child_id
+                            OR s.id = CAST(af.child_id AS UNSIGNED)
+                         WHERE af.agreement_id = %d
+                           AND af.child_id IS NOT NULL
+                           AND af.child_id != ''
+                           AND s.student_name IS NOT NULL
+                         ORDER BY s.student_name ASC",
+                        (int) $invoice_row->agreement_id
+                    )) ?: [];
+                } else {
+                    $covered_children = $wpdb->get_col($wpdb->prepare(
+                        "SELECT DISTINCT ch.child_name
+                         FROM {$wpdb->prefix}olama_agreement_fees af
+                         LEFT JOIN {$wpdb->prefix}olama_customer_children ch
+                            ON ch.id = CAST(af.child_id AS UNSIGNED)
+                            OR ch.child_uid = af.child_id
+                         WHERE af.agreement_id = %d
+                           AND af.child_id IS NOT NULL
+                           AND af.child_id != ''
+                           AND ch.child_name IS NOT NULL
+                         ORDER BY ch.child_name ASC",
+                        (int) $invoice_row->agreement_id
+                    )) ?: [];
+                }
+            } elseif (!empty($invoice_row->direct_student_name)) {
+                $covered_children[] = $invoice_row->direct_student_name;
+            } elseif (!empty($invoice_row->direct_child_name)) {
+                $covered_children[] = $invoice_row->direct_child_name;
+            }
+
+            $invoice_row->covered_children_names = array_values(array_unique(array_filter(array_map(static function ($name) {
+                $parts = preg_split('/\s+/u', trim((string) $name));
+                return $parts[0] ?? '';
+            }, $covered_children))));
+        }
 
         $new_invoice_url = admin_url('admin.php?page=olama-registration-invoices&action=new&type=' . $type . '&uid=' . $uid);
 
-        if (! $rows) {
+        if (!$invoices) {
             $html = $this->hub_empty_state(
                 __('لا توجد فواتير مسجلة', 'olama-registration') . ($wpdb->last_error ? (' (خطأ قاعدة البيانات: ' . esc_html($wpdb->last_error) . ')') : ''),
                 'dashicons-media-text'
             );
             $html .= '<div class="os-hub-tile-footer"><a href="' . esc_url($new_invoice_url) . '" class="button button-primary">' . __('إصدار فاتورة جديدة', 'olama-registration') . '</a></div>';
-            return ['html' => $html];
+            return [
+                'html' => $html,
+                'meta' => ['count' => 0, 'balance' => 0],
+            ];
         }
-
-        $status_map = [
-            'issued'    => ['label' => __('صادرة', 'olama-registration'),   'cls' => 'os-hub-badge--blue'],
-            'partially_paid' => ['label' => __('مدفوعة جزئياً', 'olama-registration'), 'cls' => 'os-hub-badge--orange'],
-            'paid'      => ['label' => __('مدفوعة', 'olama-registration'),  'cls' => 'os-hub-badge--green'],
-            'overdue'   => ['label' => __('متأخرة', 'olama-registration'),   'cls' => 'os-hub-badge--red'],
-            'cancelled' => ['label' => __('ملغاة', 'olama-registration'),   'cls' => 'os-hub-badge--gray'],
-        ];
 
         $total_balance = 0;
-        $html  = '<table class="os-hub-data-table widefat fixed striped">';
-        $html .= '<thead><tr>';
-        $html .= '<th>' . __('رقم الفاتورة', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الطالب المستهدف', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('العام الدراسي', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('طبيعة الخدمة', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('أصل الفاتورة', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الخصم الممنوح', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('المدفوع', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الرصيد', 'olama-registration') . '</th>';
-        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
-        $html .= '<th style="width:180px;">' . __('الإجراءات', 'olama-registration') . '</th>';
-        $html .= '</tr></thead><tbody>';
-
-        foreach ($rows as $r) {
-            $s  = $status_map[$r->status] ?? ['label' => esc_html($r->status), 'cls' => 'os-hub-badge--gray'];
-            $total_balance += (float) $r->balance;
-
-            $print_url = admin_url('admin.php?page=olama-registration-invoices&action=print&id=' . $r->id);
-            $student_disp = $r->student_name ? esc_html($r->student_name) : '—';
-            $year_disp = $r->year_name ? esc_html($r->year_name) : '—';
-            
-            $service_disp = '—';
-            if (!empty($r->notes)) {
-                $clean_notes = trim($r->notes);
-                if (preg_match('/^(?:طبيعة الخدمة|رسوم خدمة|رسوم خدمة إضافية):\s*(.+)$/mu', $clean_notes, $matches)) {
-                    $service_disp = esc_html(trim($matches[1]));
-                } else {
-                    $first_line = explode("\n", $clean_notes)[0];
-                    if (strpos($first_line, 'طبيعة الخدمة:') !== false) {
-                        $service_disp = esc_html(trim(str_replace('طبيعة الخدمة:', '', $first_line)));
-                    } elseif (strpos($first_line, 'رسوم خدمة:') !== false) {
-                        $service_disp = esc_html(trim(str_replace('رسوم خدمة:', '', $first_line)));
-                    } elseif (strpos($first_line, 'رسوم خدمة إضافية:') !== false) {
-                        $service_disp = esc_html(trim(str_replace('رسوم خدمة إضافية:', '', $first_line)));
-                    }
-                }
-            }
-
-            $html .= '<tr>';
-            $html .= '<td><code>' . esc_html($r->invoice_number) . '</code></td>';
-            $html .= '<td>' . $student_disp . '</td>';
-            $html .= '<td>' . $year_disp . '</td>';
-            $html .= '<td>' . $service_disp . '</td>';
-            $html .= '<td dir="ltr">' . number_format((float)$r->subtotal, 2) . '</td>';
-            $html .= '<td dir="ltr" style="color:#ef4444;">' . number_format((float)$r->discount, 2) . '</td>';
-            $html .= '<td dir="ltr" style="color:#16a34a; font-weight:700;">' . number_format((float)$r->amount_paid, 2) . '</td>';
-            $html .= '<td dir="ltr"><strong>' . number_format((float)$r->balance, 2) . '</strong></td>';
-            $html .= '<td><span class="os-hub-badge ' . $s['cls'] . '">' . $s['label'] . '</span></td>';
-            $html .= '<td>';
-            
-            // Display (عرض)
-            if (!($type === 'customer' && $r->status === 'partial')) {
-                $html .= '<button type="button" class="button button-small olama-reg-view-invoice-btn" data-id="' . esc_attr($r->id) . '" title="عرض تفاصيل الفاتورة">' . __('عرض', 'olama-registration') . '</button> ';
-            }
-            
-            // Pay (دفع)
-            if ((float)$r->balance > 0 && $r->status !== 'cancelled' && $r->status !== 'draft') {
-                $html .= '<button type="button" class="button button-small button-primary os-hub-pay-invoice-btn" data-id="' . esc_attr($r->id) . '" title="' . esc_attr__('دفع الفاتورة', 'olama-registration') . '" style="background:#16a34a; border-color:#16a34a; color:#fff; margin-left: 2px;">' . __('دفع', 'olama-registration') . '</button> ';
-            }
-            
-            // Print (طباعة)
-            $html .= '<a href="' . esc_url($print_url) . '" target="_blank" class="button button-small" title="طباعة الفاتورة">' . __('طباعة', 'olama-registration') . '</a> ';
-            
-            // Cancel (إلغاء)
-            if ($r->status !== 'cancelled' && (float)$r->amount_paid == 0) {
-                $html .= '<button type="button" class="button button-small olama-reg-cancel-invoice-btn" data-id="' . esc_attr($r->id) . '" title="إلغاء الفاتورة" style="color:#dc2626;">' . __('إلغاء', 'olama-registration') . '</button>';
-            }
-            
-            $html .= '</td>';
-            $html .= '</tr>';
+        foreach ($invoices as $inv) {
+            $total_balance += (float) $inv->balance;
         }
 
-        $html .= '</tbody></table>';
+        ob_start();
+        $is_hub = true;
+        include OLAMA_REG_PATH . 'admin/views/partial-invoices-table.php';
+        $html = ob_get_clean();
+
         $html .= '<div class="os-hub-tile-footer">';
         $html .= '<strong>' . __('إجمالي الرصيد المستحق: ', 'olama-registration') . '</strong>';
         $html .= '<span dir="ltr">' . number_format($total_balance, 2) . ' <small>د.أ</small></span>';
@@ -2672,11 +2592,11 @@ class Olama_Reg_Ajax
 
         return [
             'html' => $html,
-            'meta' => ['count' => count($rows), 'balance' => $total_balance],
+            'meta' => ['count' => count($invoices), 'balance' => $total_balance],
         ];
     }
 
-    // ── Tile: Payments ────────────────────────────────────────────────────────
+        // ── Tile: Payments ────────────────────────────────────────────────────────
 
     private function hub_tile_payments(string $uid, string $type, int $year): array
     {

@@ -205,6 +205,43 @@ class Olama_Reg_Agreement_Amendment {
             return new \WP_Error( 'agreement_update_failed', __( 'تعذر تحديث إجمالي العقد بعد الترحيل.', 'olama-registration' ) );
         }
 
+        if ( $diff != 0 ) {
+            $first_child_id = $wpdb->get_var( $wpdb->prepare(
+                "SELECT child_id FROM " . $wpdb->prefix . "olama_agreement_fees WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != '' LIMIT 1",
+                (int) $amendment->agreement_id
+            ) );
+
+            $fee_category = 'amendment';
+            $label = sprintf( __( 'تعديل مالي #%s: %s', 'olama-registration' ), $amendment->amendment_no, $amendment->reason );
+
+            $inserted_fee = $wpdb->insert(
+                $wpdb->prefix . 'olama_agreement_fees',
+                [
+                    'agreement_id' => (int) $amendment->agreement_id,
+                    'child_id'     => $first_child_id ?: null,
+                    'fee_category' => $fee_category,
+                    'label'        => $label,
+                    'amount'       => $diff,
+                    'discount'     => 0,
+                    'net_amount'   => $diff,
+                    'due_date'     => $amendment->effective_date,
+                    'invoice_id'   => $invoice_id ?: null,
+                    'paid_status'  => 'invoiced',
+                    'sort_order'   => 99,
+                ],
+                [ '%d', '%s', '%s', '%s', '%f', '%f', '%f', '%s', '%d', '%s', '%d' ]
+            );
+
+            if ( false === $inserted_fee ) {
+                $wpdb->query( 'ROLLBACK' );
+                return new \WP_Error( 'fee_insert_failed', __( 'تعذر إضافة بند التعديل المالي لرسوم العقد.', 'olama-registration' ) );
+            }
+
+            if ( class_exists( 'Olama_Reg_Agreement' ) ) {
+                Olama_Reg_Agreement::recalculate_total( (int) $amendment->agreement_id );
+            }
+        }
+
         $updates = [
             'status'    => 'posted',
             'posted_by' => get_current_user_id(),
@@ -456,5 +493,78 @@ class Olama_Reg_Agreement_Amendment {
         }
 
         return [ 'value' => $normalized ];
+    }
+
+    public static function sync_posted_amendment_fees( int $agreement_id ): void {
+        global $wpdb;
+
+        $amendments = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM " . self::t( 'olama_agreement_amendments' ) . "
+             WHERE agreement_id = %d AND status = 'posted'",
+            $agreement_id
+        ) );
+
+        if ( empty( $amendments ) ) {
+            return;
+        }
+
+        $fees_table = $wpdb->prefix . 'olama_agreement_fees';
+
+        $existing_fees = $wpdb->get_results( $wpdb->prepare(
+            "SELECT id, label FROM {$fees_table}
+             WHERE agreement_id = %d AND fee_category = 'amendment'",
+            $agreement_id
+        ) );
+
+        $existing_labels = wp_list_pluck( $existing_fees, 'label' );
+        $needs_recalculate = false;
+
+        foreach ( $amendments as $amendment ) {
+            $found = false;
+            foreach ( $existing_labels as $label ) {
+                if ( strpos( (string) $label, $amendment->amendment_no ) !== false ) {
+                    $found = true;
+                    break;
+                }
+            }
+
+            if ( ! $found ) {
+                $diff = round( (float) $amendment->difference_amount, 3 );
+                if ( $diff != 0 ) {
+                    $first_child_id = $wpdb->get_var( $wpdb->prepare(
+                        "SELECT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != '' LIMIT 1",
+                        $agreement_id
+                    ) );
+
+                    $label = sprintf( __( 'تعديل مالي #%s: %s', 'olama-registration' ), $amendment->amendment_no, $amendment->reason );
+
+                    $inserted = $wpdb->insert(
+                        $fees_table,
+                        [
+                            'agreement_id' => $agreement_id,
+                            'child_id'     => $first_child_id ?: null,
+                            'fee_category' => 'amendment',
+                            'label'        => $label,
+                            'amount'       => $diff,
+                            'discount'     => 0,
+                            'net_amount'   => $diff,
+                            'due_date'     => $amendment->effective_date,
+                            'invoice_id'   => $amendment->invoice_id ?: null,
+                            'paid_status'  => 'invoiced',
+                            'sort_order'   => 99,
+                        ],
+                        [ '%d', '%s', '%s', '%s', '%f', '%f', '%f', '%s', '%d', '%s', '%d' ]
+                    );
+
+                    if ( $inserted ) {
+                        $needs_recalculate = true;
+                    }
+                }
+            }
+        }
+
+        if ( $needs_recalculate && class_exists( 'Olama_Reg_Agreement' ) ) {
+            Olama_Reg_Agreement::recalculate_total( $agreement_id );
+        }
     }
 }

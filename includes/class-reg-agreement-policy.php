@@ -283,7 +283,6 @@ class Olama_Reg_Agreement_Policy {
             self::has_payments( $agreement_id )
             || self::has_payment_allocations( $agreement_id )
             || self::has_paid_installments( $agreement_id )
-            || self::has_active_adjustments( $agreement_id )
             || self::has_closed_cash_session( $agreement_id )
         ) {
             return new \WP_Error(

@@ -162,7 +162,7 @@ class Olama_Reg_Cash_Session {
         }
 
         $account_id = (int) ( $payment->account_id ?: Olama_Reg_Cash_Bank_Movement::get_default_account_id( 'cash' ) );
-        $session = self::get_open_session( $account_id, (int) $payment->received_by, $payment->payment_date ?: current_time( 'Y-m-d' ) );
+        $session = self::get_open_session( $account_id, (int) $payment->received_by );
 
         if ( ! $session ) {
             if ( get_option( 'olama_require_cash_session', '0' ) === '1' ) {
@@ -251,7 +251,17 @@ class Olama_Reg_Cash_Session {
     public static function get_open_session( int $account_id, int $cashier_id, ?string $date = null ): ?object {
         global $wpdb;
 
-        $date = self::sanitize_date( $date ?: current_time( 'Y-m-d' ) );
+        if ( $date === null ) {
+            return $wpdb->get_row( $wpdb->prepare(
+                "SELECT * FROM " . self::t( 'olama_cash_sessions' ) . "
+                 WHERE account_id = %d AND cashier_id = %d AND status = 'open'
+                 ORDER BY id DESC LIMIT 1",
+                $account_id,
+                $cashier_id
+            ) ) ?: null;
+        }
+
+        $date = self::sanitize_date( $date );
         return $wpdb->get_row( $wpdb->prepare(
             "SELECT * FROM " . self::t( 'olama_cash_sessions' ) . "
              WHERE account_id = %d AND cashier_id = %d AND session_date = %s AND status = 'open'

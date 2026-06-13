@@ -87,6 +87,10 @@ class Olama_Reg_Agreement {
         global $wpdb;
         $table = $wpdb->prefix . 'olama_agreements';
 
+        if ( class_exists( 'Olama_Reg_Agreement_Amendment' ) ) {
+            Olama_Reg_Agreement_Amendment::sync_posted_amendment_fees( $id );
+        }
+
         $row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id = %d", $id ) );
         
         if ( $row ) {
