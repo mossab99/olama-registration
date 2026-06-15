@@ -12,11 +12,11 @@ class Olama_Reg_Agreement_Fees {
     /**
      * Add a fee row
      */
-    public static function add( int $agreement_id, array $data ): int|false {
+    public static function add( int $agreement_id, array $data, bool $skip_lock_check = false ): int|false {
         global $wpdb;
         $table = $wpdb->prefix . 'olama_agreement_fees';
 
-        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) && is_wp_error( Olama_Reg_Agreement_Policy::can_edit_financial_fields( $agreement_id ) ) ) {
+        if ( ! $skip_lock_check && class_exists( 'Olama_Reg_Agreement_Policy' ) && is_wp_error( Olama_Reg_Agreement_Policy::can_edit_financial_fields( $agreement_id ) ) ) {
             return false;
         }
 

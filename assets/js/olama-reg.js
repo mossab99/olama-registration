@@ -2972,10 +2972,14 @@
             });
     });
 
+    $(document).on('click', '#os-btn-save-fees-tab, #os-btn-save-header-bottom', function () {
+        $('#os-form-agreement-header').trigger('submit');
+    });
+
     $(document).on('submit', '#os-form-agreement-header', function (e) {
         e.preventDefault();
         const $agreementForm = $(this);
-        const $btn = $('#os-btn-save-header');
+        const $btn = $('#os-btn-save-header, #os-btn-save-header-bottom, #os-btn-save-fees-tab').filter(':visible').first();
         const formData = {};
         $agreementForm.serializeArray().forEach(item => {
             if (item.name.endsWith('[]')) {
@@ -2986,6 +2990,16 @@
                 formData[item.name] = item.value;
             }
         });
+
+        // Collect clauses
+        const clauses = [];
+        $('#os-agr-clauses-list li').each(function () {
+            const text = $(this).find('.os-agr-clause-text').val().trim();
+            if (text) {
+                clauses.push(text);
+            }
+        });
+        formData.clauses = clauses;
 
         ajax('olama_reg_agr_save_header', formData, $btn)
             .done(res => {
@@ -3023,12 +3037,12 @@
                         jQuery('#os-agr-add-clause').data('agr-id', res.data.id).attr('data-agr-id', res.data.id);
                         
                         if (isHubEmbedded) {
-                            jQuery('.os-nav-tabs .nav-tab[href="#tab-fees"], .os-nav-tabs .nav-tab[href="#tab-clauses"]').removeClass('os-disabled');
+                            jQuery('.os-nav-tabs .nav-tab[href="#tab-fees"]').removeClass('os-disabled');
                             jQuery('.os-nav-tabs .nav-tab[href="#tab-fees"]').trigger('click');
                             jQuery(document).trigger('osHub:agreementSaved', [res.data]);
                         } else {
                             // Enable tabs in modal
-                            jQuery('#modal-tab-link-fees, #modal-tab-link-clauses').removeClass('os-disabled');
+                            jQuery('#modal-tab-link-fees').removeClass('os-disabled');
 
                             // Go to Fees tab
                             jQuery('#modal-tab-link-fees').trigger('click');
@@ -3075,11 +3089,11 @@
 
     $(function () {
         if (!canEditAgreementFinancials()) {
-            $('#os-agr-add-fee-row, .os-agr-save-fee, .os-agr-delete-fee').prop('disabled', true);
+            $('.os-agr-save-fee, .os-agr-delete-fee').prop('disabled', true);
             if (canCreateAgreementAmendment() && $('#os-agr-create-amendment').length === 0) {
                 const $notice = $('#os-agreement-app .notice-warning.inline').first();
                 if ($notice.length) {
-                    $notice.append('<p style="margin:12px 0 0;"><button type="button" class="button button-primary" id="os-agr-create-amendment">تعديل مالي على العقد</button></p>');
+                    $notice.append('<p style="margin:12px 0 0;"><button type="button" class="button button-primary" id="os-agr-create-amendment" data-action="add-fee">تعديل مالي على العقد</button></p>');
                 }
             }
         }
@@ -3089,13 +3103,50 @@
     });
 
     $(document).on('click', '#os-agr-create-amendment', function () {
-        const currentTotal = parseMoney($('#os-agr-total-label').text()) || parseMoney($('#os-agr-due-net').text());
-        $('#os-agr-amendment-old').val(currentTotal.toFixed(3));
-        $('#os-agr-amendment-new').val(currentTotal.toFixed(3));
-        $('#os-agr-amendment-diff').val('0.000');
-        $('#os-agr-amendment-reason, #os-agr-amendment-notes').val('');
-        $('#os-agr-amendment-modal').fadeIn(150);
-        initDatepickers($('#os-agr-amendment-modal'));
+        const reason = prompt(olamaReg.i18n.amendmentReasonPrompt || 'أدخل سبب التعديل المالي:');
+        if (!reason || !String(reason).trim()) {
+            showNotice(olamaReg.i18n.amendmentReasonRequired || 'سبب التعديل مطلوب.', true);
+            return;
+        }
+
+        // Navigate to fees tab
+        $('.os-nav-tabs .nav-tab[href="#tab-fees"]').trigger('click');
+
+        // Enable fee amendment mode
+        window.osAgreementFeeAmendmentMode = {
+            active: true,
+            reason: String(reason).trim(),
+        };
+
+        // Show banner
+        const $banner = $('#os-agr-fee-amendment-banner');
+        if ($banner.length) {
+            $banner.show();
+            $('#os-agr-fee-amendment-reason').val(window.osAgreementFeeAmendmentMode.reason);
+        }
+
+        // Enable add fee button and save buttons for new rows
+        $('#os-agr-add-fee-row').prop('disabled', false);
+        $('.os-agr-save-fee').prop('disabled', false);
+        
+        // Enable due schedule buttons when in amendment mode
+        $('#os-agr-due-count, #os-agr-add-due-row, #os-agr-regenerate-due, #os-agr-save-due, .os-agr-delete-due').prop('disabled', false);
+
+        showNotice(olamaReg.i18n.amendmentActivated || 'تم تفعيل وضع التعديل المالي. يمكنك إضافة بند رسوم جديد.');
+    });
+
+    $(document).on('click', '#os-agr-fee-amendment-cancel', function () {
+        window.osAgreementFeeAmendmentMode = { active: false, reason: '' };
+        $('#os-agr-fee-amendment-banner').hide();
+        $('#os-agr-fee-amendment-reason').val('');
+        if (!canEditAgreementFinancials()) {
+            $('#os-agr-add-fee-row').prop('disabled', true);
+            $('.os-agr-save-fee').prop('disabled', true);
+        }
+        if (!canRescheduleAgreementInstallments()) {
+            $('#os-agr-due-count, #os-agr-add-due-row, #os-agr-regenerate-due, #os-agr-save-due, .os-agr-delete-due').prop('disabled', true);
+        }
+        showNotice(olamaReg.i18n.amendmentCancelled || 'تم إلغاء وضع التعديل المالي.');
     });
 
     $(document).on('click', '#os-agr-close-amendment-modal', function () {
@@ -3249,7 +3300,7 @@
     });
 
     $(document).on('click', '#os-agr-add-fee-row', function () {
-        if (!canEditAgreementFinancials()) {
+        if (!canEditAgreementFinancials() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
             showAgreementLockNotice('financial');
             return;
         }
@@ -3266,6 +3317,10 @@
 
         $('#os-agr-fees-table tbody').append($template);
         syncAgreementFeeTemplateOptions($template);
+        // Enable save button for new rows when in amendment mode
+        if (window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active) {
+            $template.find('.os-agr-save-fee').prop('disabled', false);
+        }
         const $feeSelect = $template.find('.os-agr-fee-template-select');
         if (!$feeSelect.val()) {
             const firstValue = $feeSelect.find('option:not(:disabled):not([hidden])').filter(function () {
@@ -3316,7 +3371,7 @@
     });
 
     $(document).on('click', '.os-agr-save-fee', function () {
-        if (!canEditAgreementFinancials()) {
+        if (!canEditAgreementFinancials() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
             showAgreementLockNotice('financial');
             return;
         }
@@ -3334,6 +3389,15 @@
             due_date: $tr.find('[name="due_date"]').val(),
         };
 
+        // If in fee amendment mode, pass amendment data for new fees only
+        if (window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active) {
+            const feeId = $tr.attr('data-fee-id');
+            if (!feeId || feeId === '0') {
+                data.amendment_reason = window.osAgreementFeeAmendmentMode.reason;
+                data.amendment_type = 'add_fee';
+            }
+        }
+
         ajax('olama_reg_agr_save_fee', data, $btn)
             .done(res => {
                 if (res.success) {
@@ -3349,9 +3413,17 @@
                         });
                         $('#os-agr-per-child-total').text(perChild.toFixed(3));
                     }
+                    // Reload page if amendment was created so user sees it in the log
+                    if (data.amendment_reason) {
+                        setTimeout(() => window.location.reload(), 1200);
+                    }
                 } else {
                     showNotice(res.data?.message || R.strings.error, true);
                 }
+            })
+            .fail((xhr, status, error) => {
+                console.error('Save fee failed:', status, error, xhr.responseText);
+                showNotice(R.strings.error + ' (HTTP ' + xhr.status + ')', true);
             });
     });
 
@@ -3396,10 +3468,17 @@
         $('#os-agr-clauses-list').sortable({
             update: function () {
                 const orderedIds = [];
+                let hasTemp = false;
                 $(this).find('li').each(function () {
+                    const cid = String($(this).attr('data-clause-id') || '');
+                    if (cid.startsWith('temp-')) {
+                        hasTemp = true;
+                    }
                     orderedIds.push($(this).data('clause-id'));
                 });
-                ajax('olama_reg_agr_reorder_clauses', { ordered_ids: orderedIds });
+                if (!hasTemp) {
+                    ajax('olama_reg_agr_reorder_clauses', { ordered_ids: orderedIds });
+                }
             }
         });
     }
@@ -3434,7 +3513,7 @@
     function renderAgreementDueSchedule(schedule) {
         const $tbody = $('#os-agr-due-table tbody');
         $tbody.empty();
-        const scheduleLocked = !canRescheduleAgreementInstallments();
+        const scheduleLocked = !canRescheduleAgreementInstallments() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active);
         (schedule || []).forEach(function (line) {
             const amount = parseMoney(line.amount_due || 0);
             const paid = parseMoney(line.amount_paid || 0);
@@ -3461,7 +3540,7 @@
     $(document).on('input change', '.os-agr-due-date, .os-agr-due-amount', updateAgreementDueTotals);
 
     $(document).on('click', '#os-agr-add-due-row', function () {
-        if (!canRescheduleAgreementInstallments()) {
+        if (!canRescheduleAgreementInstallments() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
             showAgreementLockNotice('schedule');
             return;
         }
@@ -3482,7 +3561,7 @@
     });
 
     $(document).on('click', '.os-agr-delete-due', function () {
-        if (!canRescheduleAgreementInstallments()) {
+        if (!canRescheduleAgreementInstallments() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
             showAgreementLockNotice('schedule');
             return;
         }
@@ -3495,16 +3574,21 @@
     });
 
     $(document).on('click', '#os-agr-save-due', function () {
-        if (!canRescheduleAgreementInstallments()) {
+        if (!canRescheduleAgreementInstallments() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
             showAgreementLockNotice('schedule');
             return;
         }
         const $btn = $(this);
         const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
-        ajax('olama_reg_agr_save_due_schedule', {
+        const payload = {
             agreement_id: agrId,
             lines: JSON.stringify(collectAgreementDueLines())
-        }, $btn).done(function (res) {
+        };
+        if (window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active) {
+            payload.amendment_reason = window.osAgreementFeeAmendmentMode.reason;
+            payload.amendment_type = 'reschedule';
+        }
+        ajax('olama_reg_agr_save_due_schedule', payload, $btn).done(function (res) {
             if (res.success) {
                 showNotice(res.data.message);
                 renderAgreementDueSchedule(res.data.schedule);
@@ -3515,14 +3599,19 @@
     });
 
     $(document).on('click', '#os-agr-regenerate-due', function () {
-        if (!canRescheduleAgreementInstallments()) {
+        if (!canRescheduleAgreementInstallments() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
             showAgreementLockNotice('schedule');
             return;
         }
         const $btn = $(this);
         const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
         const count = parseInt($('#os-agr-due-count').val(), 10) || 8;
-        ajax('olama_reg_agr_generate_due_schedule', { agreement_id: agrId, count }, $btn).done(function (res) {
+        const payload = { agreement_id: agrId, count };
+        if (window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active) {
+            payload.amendment_reason = window.osAgreementFeeAmendmentMode.reason;
+            payload.amendment_type = 'reschedule';
+        }
+        ajax('olama_reg_agr_generate_due_schedule', payload, $btn).done(function (res) {
             if (res.success) {
                 showNotice(res.data.message);
                 renderAgreementDueSchedule(res.data.schedule);
@@ -3572,22 +3661,44 @@
 
     $(document).on('click', '#os-agr-add-clause', function () {
         const $btn = $(this);
-        const agrId = $btn.data('agr-id');
+        const agrId = $btn.data('agr-id') || $btn.attr('data-agr-id');
         const text = $('#os-agr-new-clause').val().trim();
 
         if (!text) return;
+
+        if (!agrId || agrId === '0' || agrId === 0) {
+            $('#os-agr-new-clause').val('');
+            const tempId = 'temp-' + Date.now() + Math.random().toString(36).substr(2, 5);
+            const li = `
+            <li data-clause-id="${tempId}"
+                style="background:#fff; border:1px solid #e0c090; border-radius:6px; padding:15px; margin-bottom:10px; cursor:move; box-shadow:0 2px 5px rgba(0,0,0,0.02);">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <span class="dashicons dashicons-menu" style="color:#ccc; margin-left:10px; cursor:grab; margin-top:5px;"></span>
+                    <textarea class="os-agr-clause-text" style="flex-grow:1; margin-left:15px; border:1px solid #eee; border-radius:4px; padding:8px;" rows="2">${text}</textarea>
+                    <div style="display:flex; flex-direction:column; gap:5px;">
+                        <button type="button" class="olama-reg-btn olama-reg-btn--primary os-agr-save-clause" style="padding:2px 10px; font-size:12px; min-height:28px;">حفظ</button>
+                        <button type="button" class="button button-small os-agr-delete-clause" style="color:#c62828; border-color:#ffcdd2; background:#fff;">X</button>
+                    </div>
+                </div>
+            </li>`;
+            $('#os-agr-clauses-list').append(li);
+            return;
+        }
 
         ajax('olama_reg_agr_add_clause', { agreement_id: agrId, clause_text: text }, $btn)
             .done(res => {
                 if (res.success) {
                     $('#os-agr-new-clause').val('');
                     const li = `
-                    <li data-clause-id="${res.data.id}" style="background:#fff; border:1px solid #ccd0d4; padding:10px; margin-bottom:5px; cursor:move;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <span class="dashicons dashicons-menu" style="color:#ccc; margin-left:10px;"></span>
-                            <textarea class="os-agr-clause-text" style="flex-grow:1; margin-left:10px;" rows="2">${text}</textarea>
-                            <button type="button" class="button button-small os-agr-save-clause" style="margin-right:5px;">حفظ</button>
-                            <button type="button" class="button button-small os-agr-delete-clause" style="color:red; margin-right:5px;">X</button>
+                    <li data-clause-id="${res.data.id}"
+                        style="background:#fff; border:1px solid #e0c090; border-radius:6px; padding:15px; margin-bottom:10px; cursor:move; box-shadow:0 2px 5px rgba(0,0,0,0.02);">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                            <span class="dashicons dashicons-menu" style="color:#ccc; margin-left:10px; cursor:grab; margin-top:5px;"></span>
+                            <textarea class="os-agr-clause-text" style="flex-grow:1; margin-left:15px; border:1px solid #eee; border-radius:4px; padding:8px;" rows="2">${text}</textarea>
+                            <div style="display:flex; flex-direction:column; gap:5px;">
+                                <button type="button" class="olama-reg-btn olama-reg-btn--primary os-agr-save-clause" style="padding:2px 10px; font-size:12px; min-height:28px;">حفظ</button>
+                                <button type="button" class="button button-small os-agr-delete-clause" style="color:#c62828; border-color:#ffcdd2; background:#fff;">X</button>
+                            </div>
                         </div>
                     </li>`;
                     $('#os-agr-clauses-list').append(li);
@@ -3603,6 +3714,11 @@
         const id = $li.data('clause-id');
         const text = $li.find('.os-agr-clause-text').val().trim();
 
+        if (String(id).startsWith('temp-')) {
+            showNotice('تم حفظ التعديل محلياً');
+            return;
+        }
+
         ajax('olama_reg_agr_save_clause', { id, clause_text: text }, $btn)
             .done(res => {
                 if (res.success) {
@@ -3617,6 +3733,11 @@
         if (!confirm(R.strings.confirmDelete)) return;
         const $li = $(this).closest('li');
         const id = $li.data('clause-id');
+
+        if (String(id).startsWith('temp-')) {
+            $li.remove();
+            return;
+        }
 
         ajax('olama_reg_agr_delete_clause', { id })
             .done(res => {

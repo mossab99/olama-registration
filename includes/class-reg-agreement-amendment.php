@@ -55,7 +55,7 @@ class Olama_Reg_Agreement_Amendment {
             return new \WP_Error( 'reason_required', __( 'سبب التعديل مطلوب.', 'olama-registration' ) );
         }
 
-        $old_total = round( (float) $agreement->total_amount, 3 );
+        $old_total = isset( $data['old_total'] ) ? round( (float) $data['old_total'], 3 ) : round( (float) $agreement->total_amount, 3 );
         $new_total = isset( $data['new_total'] ) ? round( (float) $data['new_total'], 3 ) : $old_total;
         $diff = round( $new_total - $old_total, 3 );
         $invoice_id = class_exists( 'Olama_Reg_Agreement_Policy' ) ? Olama_Reg_Agreement_Policy::get_linked_invoice_id( $agreement_id ) : self::get_invoice_id( $agreement_id );
@@ -173,6 +173,7 @@ class Olama_Reg_Agreement_Amendment {
 
         $amendment->invoice_id = $invoice_id;
         $diff = round( (float) $amendment->difference_amount, 3 );
+        $amendment_type = (string) $amendment->amendment_type;
         $wpdb->query( 'START TRANSACTION' );
 
         $adjustment_id = 0;
@@ -206,39 +207,56 @@ class Olama_Reg_Agreement_Amendment {
         }
 
         if ( $diff != 0 ) {
-            $first_child_id = $wpdb->get_var( $wpdb->prepare(
-                "SELECT child_id FROM " . $wpdb->prefix . "olama_agreement_fees WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != '' LIMIT 1",
-                (int) $amendment->agreement_id
-            ) );
+            // For add_fee amendments, the fee is already added; just link it to invoice and mark as invoiced
+            if ( $amendment_type === 'add_fee' ) {
+                $lines = self::get_lines( $amendment_id );
+                foreach ( $lines as $line ) {
+                    if ( $line->line_type === 'add_fee' && ! empty( $line->related_fee_id ) ) {
+                        $wpdb->update(
+                            $wpdb->prefix . 'olama_agreement_fees',
+                            [
+                                'invoice_id'  => $invoice_id,
+                                'paid_status' => 'invoiced',
+                            ],
+                            [ 'id' => (int) $line->related_fee_id ]
+                        );
+                    }
+                }
+            } else {
+                $first_child_id = $wpdb->get_var( $wpdb->prepare(
+                    "SELECT child_id FROM " . $wpdb->prefix . "olama_agreement_fees WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != '' LIMIT 1",
+                    (int) $amendment->agreement_id
+                ) );
 
-            $fee_category = 'amendment';
-            $label = sprintf( __( 'تعديل مالي #%s: %s', 'olama-registration' ), $amendment->amendment_no, $amendment->reason );
+                $fee_category = 'amendment';
+                $label = sprintf( __( 'تعديل مالي #%s: %s', 'olama-registration' ), $amendment->amendment_no, $amendment->reason );
 
-            $inserted_fee = $wpdb->insert(
-                $wpdb->prefix . 'olama_agreement_fees',
-                [
-                    'agreement_id' => (int) $amendment->agreement_id,
-                    'child_id'     => $first_child_id ?: null,
-                    'fee_category' => $fee_category,
-                    'label'        => $label,
-                    'amount'       => $diff,
-                    'discount'     => 0,
-                    'net_amount'   => $diff,
-                    'due_date'     => $amendment->effective_date,
-                    'invoice_id'   => $invoice_id ?: null,
-                    'paid_status'  => 'invoiced',
-                    'sort_order'   => 99,
-                ],
-                [ '%d', '%s', '%s', '%s', '%f', '%f', '%f', '%s', '%d', '%s', '%d' ]
-            );
+                $inserted_fee = $wpdb->insert(
+                    $wpdb->prefix . 'olama_agreement_fees',
+                    [
+                        'agreement_id' => (int) $amendment->agreement_id,
+                        'child_id'     => $first_child_id ?: null,
+                        'fee_category' => $fee_category,
+                        'label'        => $label,
+                        'amount'       => $diff,
+                        'discount'     => 0,
+                        'net_amount'   => $diff,
+                        'due_date'     => $amendment->effective_date,
+                        'invoice_id'   => $invoice_id ?: null,
+                        'paid_status'  => 'invoiced',
+                        'sort_order'   => 99,
+                    ],
+                    [ '%d', '%s', '%s', '%s', '%f', '%f', '%f', '%s', '%d', '%s', '%d' ]
+                );
 
-            if ( false === $inserted_fee ) {
-                $wpdb->query( 'ROLLBACK' );
-                return new \WP_Error( 'fee_insert_failed', __( 'تعذر إضافة بند التعديل المالي لرسوم العقد.', 'olama-registration' ) );
-            }
+                if ( false === $inserted_fee ) {
+                    $wpdb->query( 'ROLLBACK' );
+                    return new \WP_Error( 'fee_insert_failed', __( 'تعذر إضافة بند التعديل المالي لرسوم العقد.', 'olama-registration' ) );
+                }
 
-            if ( class_exists( 'Olama_Reg_Agreement' ) ) {
-                Olama_Reg_Agreement::recalculate_total( (int) $amendment->agreement_id );
+                if ( class_exists( 'Olama_Reg_Agreement' ) ) {
+                    Olama_Reg_Agreement::recalculate_total( (int) $amendment->agreement_id );
+                }
             }
         }
 
@@ -403,7 +421,7 @@ class Olama_Reg_Agreement_Amendment {
         return (int) $result;
     }
 
-    private static function add_line( int $amendment_id, int $agreement_id, int $invoice_id, array $line ): int|false {
+    public static function add_line( int $amendment_id, int $agreement_id, int $invoice_id, array $line ): int|false {
         global $wpdb;
 
         $old_amount = round( (float) ( $line['old_amount'] ?? 0 ), 3 );

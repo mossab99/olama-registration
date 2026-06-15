@@ -329,7 +329,7 @@ class Olama_Reg_Admin {
             'olama-reg',
             OLAMA_REG_URL . 'assets/css/olama-reg.css',
             [],
-            OLAMA_REG_VERSION
+            filemtime( OLAMA_REG_PATH . 'assets/css/olama-reg.css' )
         );
 
         // Plugin JS
@@ -369,6 +369,12 @@ class Olama_Reg_Admin {
                 'maxStudents'     => __( 'وصل عدد الطلاب للحد الأقصى (99).', 'olama-registration' ),
                 'studentAdded'    => __( 'تم إضافة الطالب بنجاح.', 'olama-registration' ),
                 'familyCreated'   => __( 'تم إنشاء العائلة برقم: ', 'olama-registration' ),
+            ],
+            'i18n'           => [
+                'amendmentReasonPrompt'  => __( 'أدخل سبب التعديل المالي:', 'olama-registration' ),
+                'amendmentReasonRequired'=> __( 'سبب التعديل مطلوب.', 'olama-registration' ),
+                'amendmentActivated'     => __( 'تم تفعيل وضع التعديل المالي. يمكنك إضافة بند رسوم جديد.', 'olama-registration' ),
+                'amendmentCancelled'     => __( 'تم إلغاء وضع التعديل المالي.', 'olama-registration' ),
             ],
         ] );
     }

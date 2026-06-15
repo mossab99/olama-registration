@@ -1263,6 +1263,18 @@ class Olama_Reg_Ajax
                     Olama_Reg_Agreement_Fees::apply_template_fees($id, $data['template_id']);
                 }
                 Olama_Reg_Agreement_Invoice::generate_default_due_schedule($id);
+
+                // Save clauses if passed
+                if ( ! empty( $_POST['clauses'] ) && is_array( $_POST['clauses'] ) ) {
+                    $sort_order = 1;
+                    foreach ( $_POST['clauses'] as $clause_text ) {
+                        $text = sanitize_textarea_field( $clause_text );
+                        if ( ! empty( $text ) ) {
+                            Olama_Reg_Agreement_Clauses::add( $id, $text, $sort_order++ );
+                        }
+                    }
+                }
+
                 $agreement = Olama_Reg_Agreement::get($id);
                 wp_send_json_success([
                     'message'          => __('تم إنشاء العقد.', 'olama-registration'),
@@ -1421,6 +1433,7 @@ class Olama_Reg_Ajax
         $this->guard();
         $id = (int) ($_POST['id'] ?? 0);
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $is_fee_amendment = !empty($_POST['amendment_reason']) && $id === 0;
 
         if ($id > 0) {
             $existing_fee = Olama_Reg_Agreement_Fees::get($id);
@@ -1431,7 +1444,7 @@ class Olama_Reg_Ajax
 
         if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
             $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($agreement_id);
-            if (is_wp_error($financial_edit)) {
+            if (is_wp_error($financial_edit) && !$is_fee_amendment) {
                 wp_send_json_error(['message' => $financial_edit->get_error_message()]);
             }
         }
@@ -1464,10 +1477,54 @@ class Olama_Reg_Ajax
             }
         } else {
             $data['agreement_id'] = $agreement_id;
-            $new_id = Olama_Reg_Agreement_Fees::add($agreement_id, $data);
+            $new_id = Olama_Reg_Agreement_Fees::add($agreement_id, $data, $is_fee_amendment);
             if ($new_id) {
                 Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
-                wp_send_json_success(['message' => __('تمت إضافة الرسم.', 'olama-registration'), 'id' => $new_id, 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
+
+                // If this is a fee amendment, create and auto-post an amendment
+                if ($is_fee_amendment && class_exists('Olama_Reg_Agreement_Amendment')) {
+                    $amendment_reason = sanitize_text_field($_POST['amendment_reason'] ?? '');
+                    $amendment_type = sanitize_key($_POST['amendment_type'] ?? 'add_fee');
+                    $agreement = Olama_Reg_Agreement::get($agreement_id);
+                    $fee_net = round((float) $data['amount'] - (float) $data['discount'], 3);
+                    $old_total = $agreement ? round((float) $agreement->total_amount - $fee_net, 3) : 0;
+                    $new_total = $agreement ? round((float) $agreement->total_amount, 3) : 0;
+                    $diff = $fee_net;
+
+                    $amendment_payload = [
+                        'amendment_type' => $amendment_type,
+                        'effective_date' => current_time('Y-m-d'),
+                        'reason' => $amendment_reason,
+                        'old_total' => $old_total,
+                        'new_total' => $new_total,
+                    ];
+                    $amendment_id = Olama_Reg_Agreement_Amendment::create($agreement_id, $amendment_payload);
+                    if (!is_wp_error($amendment_id)) {
+                        // Add the fee as a line in the amendment
+                        $invoice_id = class_exists('Olama_Reg_Agreement_Policy') ? Olama_Reg_Agreement_Policy::get_linked_invoice_id($agreement_id) : 0;
+                        Olama_Reg_Agreement_Amendment::add_line($amendment_id, $agreement_id, $invoice_id, [
+                            'line_type' => 'add_fee',
+                            'related_fee_id' => $new_id,
+                            'description' => $data['label'] ?: __('بند رسوم جديد', 'olama-registration'),
+                            'old_amount' => 0,
+                            'new_amount' => $diff,
+                            'difference_amount' => $diff,
+                            'after_state' => [
+                                'fee_id' => $new_id,
+                                'fee_category' => $data['fee_category'],
+                                'label' => $data['label'],
+                                'amount' => $data['amount'],
+                                'discount' => $data['discount'],
+                            ],
+                        ]);
+                        // Auto-approve
+                        Olama_Reg_Agreement_Amendment::approve($amendment_id);
+                        // Auto-post
+                        Olama_Reg_Agreement_Amendment::post($amendment_id);
+                    }
+                }
+
+                wp_send_json_success(['message' => __('تمت إضافة الرسم وترحيل التعديل.', 'olama-registration'), 'id' => $new_id, 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
             }
         }
         wp_send_json_error(['message' => __('حدث خطأ أثناء حفظ الرسم.', 'olama-registration')]);
@@ -1564,8 +1621,9 @@ class Olama_Reg_Ajax
     {
         $this->guard();
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $is_amendment_reschedule = !empty($_POST['amendment_reason']);
         $agreement = Olama_Reg_Agreement::get($agreement_id);
-        if ($agreement && $agreement->status === 'completed' && class_exists('Olama_Reg_Agreement_Policy') && Olama_Reg_Agreement_Policy::is_financially_locked($agreement_id)) {
+        if (!$is_amendment_reschedule && $agreement && $agreement->status === 'completed' && class_exists('Olama_Reg_Agreement_Policy') && Olama_Reg_Agreement_Policy::is_financially_locked($agreement_id)) {
             wp_send_json_error(['message' => __('لا يمكن إعادة إكمال عقد مقفل مالياً. استخدم مسار تعديل العقد.', 'olama-registration')]);
         }
         $lines = json_decode(stripslashes($_POST['lines'] ?? '[]'), true);
@@ -1573,14 +1631,14 @@ class Olama_Reg_Ajax
             $lines = [];
         }
 
-        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+        if (!$is_amendment_reschedule && $agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
             $schedule_edit = Olama_Reg_Agreement_Policy::can_reschedule_installments($agreement_id);
             if (is_wp_error($schedule_edit)) {
                 wp_send_json_error(['message' => $schedule_edit->get_error_message()]);
             }
         }
 
-        $result = Olama_Reg_Agreement_Invoice::save_due_schedule($agreement_id, $lines);
+        $result = Olama_Reg_Agreement_Invoice::save_due_schedule($agreement_id, $lines, 0, $is_amendment_reschedule);
         if (is_wp_error($result)) {
             wp_send_json_error(['message' => $result->get_error_message()]);
         }
@@ -1595,16 +1653,17 @@ class Olama_Reg_Ajax
     {
         $this->guard();
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
+        $is_amendment_reschedule = !empty($_POST['amendment_reason']);
         $count = max(1, absint($_POST['count'] ?? 0));
 
-        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
+        if (!$is_amendment_reschedule && $agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
             $schedule_edit = Olama_Reg_Agreement_Policy::can_reschedule_installments($agreement_id);
             if (is_wp_error($schedule_edit)) {
                 wp_send_json_error(['message' => $schedule_edit->get_error_message()]);
             }
         }
 
-        $result = Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id, $count);
+        $result = Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id, $count, $is_amendment_reschedule);
         if (is_wp_error($result)) {
             wp_send_json_error(['message' => $result->get_error_message()]);
         }

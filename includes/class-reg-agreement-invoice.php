@@ -27,7 +27,7 @@ class Olama_Reg_Agreement_Invoice {
         ) ) ?: [];
     }
 
-    public static function save_due_schedule( int $agreement_id, array $lines, int $invoice_id = 0 ): bool|\WP_Error {
+    public static function save_due_schedule( int $agreement_id, array $lines, int $invoice_id = 0, bool $skip_lock_check = false ): bool|\WP_Error {
         global $wpdb;
 
         $agreement = Olama_Reg_Agreement::get( $agreement_id );
@@ -35,24 +35,25 @@ class Olama_Reg_Agreement_Invoice {
             return new \WP_Error( 'not_found', __( 'العقد غير موجود.', 'olama-registration' ) );
         }
 
-        if ( class_exists( 'Olama_Reg_Agreement_Policy' ) ) {
-            $allowed = Olama_Reg_Agreement_Policy::can_reschedule_installments( $agreement_id );
-            if ( is_wp_error( $allowed ) ) {
-                return $allowed;
-            }
+        if ( ! $skip_lock_check ) {
+            if ( class_exists( 'Olama_Reg_Agreement_Policy' ) ) {
+                $allowed = Olama_Reg_Agreement_Policy::can_reschedule_installments( $agreement_id );
+                if ( is_wp_error( $allowed ) ) {
+                    return $allowed;
+                }
 
-            if ( $invoice_id <= 0 ) {
-                $invoice_id = Olama_Reg_Agreement_Policy::get_linked_invoice_id( $agreement_id );
+                if ( $invoice_id <= 0 ) {
+                    $invoice_id = Olama_Reg_Agreement_Policy::get_linked_invoice_id( $agreement_id );
+                }
+            } else {
+                $paid_total = (float) $wpdb->get_var( $wpdb->prepare(
+                    "SELECT COALESCE(SUM(amount_paid), 0) FROM " . self::t( 'olama_invoices' ) . " WHERE agreement_id = %d AND status != 'cancelled'",
+                    $agreement_id
+                ) );
+                if ( $paid_total > 0 ) {
+                    return new \WP_Error( 'schedule_locked', __( 'لا يمكن تعديل توزيع الاستحقاق بعد تسجيل مدفوعات على الفاتورة.', 'olama-registration' ) );
+                }
             }
-        } else {
-        $paid_total = (float) $wpdb->get_var( $wpdb->prepare(
-            "SELECT COALESCE(SUM(amount_paid), 0) FROM " . self::t( 'olama_invoices' ) . " WHERE agreement_id = %d AND status != 'cancelled'",
-            $agreement_id
-        ) );
-        if ( $paid_total > 0 ) {
-            return new \WP_Error( 'schedule_locked', __( 'لا يمكن تعديل توزيع الاستحقاق بعد تسجيل مدفوعات على الفاتورة.', 'olama-registration' ) );
-        }
-
         }
 
         if ( $invoice_id <= 0 ) {
@@ -105,7 +106,7 @@ class Olama_Reg_Agreement_Invoice {
         return true;
     }
 
-    public static function generate_default_due_schedule( int $agreement_id, int $count = 0 ): bool|\WP_Error {
+    public static function generate_default_due_schedule( int $agreement_id, int $count = 0, bool $skip_lock_check = false ): bool|\WP_Error {
         $agreement = Olama_Reg_Agreement::get( $agreement_id );
         if ( ! $agreement ) {
             return new \WP_Error( 'not_found', __( 'العقد غير موجود.', 'olama-registration' ) );
@@ -154,7 +155,7 @@ class Olama_Reg_Agreement_Invoice {
             ];
         }
 
-        return self::save_due_schedule( $agreement_id, $lines );
+        return self::save_due_schedule( $agreement_id, $lines, 0, $skip_lock_check );
     }
 
     public static function validate_completion( int $agreement_id ): true|\WP_Error {

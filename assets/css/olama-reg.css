@@ -158,6 +158,18 @@
     overflow: hidden !important;
 }
 
+.olama-reg-wrap .olama-reg-btn .dashicons {
+    font-size: 18px !important;
+    width: 18px !important;
+    height: 18px !important;
+    line-height: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+}
+
+
 .olama-reg-wrap .olama-reg-btn--primary {
     background: linear-gradient(135deg, var(--reg-primary) 0%, var(--reg-primary-dark) 100%) !important;
     color: #ffffff !important;
