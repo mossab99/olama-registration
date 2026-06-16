@@ -52,7 +52,10 @@ class Olama_Reg_Agreement {
         $inserted = $wpdb->insert( $table, $insert_data );
 
         if ( $inserted ) {
-            return (int) $wpdb->insert_id;
+            $id = (int) $wpdb->insert_id;
+            $new_agreement = self::get( $id );
+            self::log_audit( $id, 'created', null, $new_agreement );
+            return $id;
         }
 
         return false;
@@ -67,6 +70,8 @@ class Olama_Reg_Agreement {
 
         if ( empty( $data ) ) return true;
 
+        $before = self::get( $id );
+
         // Remove fields that shouldn't be updated here
         unset( $data['id'], $data['agreement_number'], $data['created_at'], $data['created_by'] );
         $data['updated_at'] = current_time( 'mysql' );
@@ -76,6 +81,21 @@ class Olama_Reg_Agreement {
         }
 
         $updated = $wpdb->update( $table, $data, [ 'id' => $id ] );
+        
+        if ( $updated !== false ) {
+            $after = self::get( $id );
+            $action = 'updated';
+            if ( $before && isset( $data['status'] ) && $before->status !== $data['status'] ) {
+                if ( $data['status'] === 'completed' ) {
+                    $action = 'completed';
+                } elseif ( $data['status'] === 'cancelled' ) {
+                    $action = 'cancelled';
+                } else {
+                    $action = 'status_changed';
+                }
+            }
+            self::log_audit( $id, $action, $before, $after );
+        }
         
         return $updated !== false;
     }
@@ -281,5 +301,18 @@ class Olama_Reg_Agreement {
             return $name ? $name : 'Unknown Student';
         }
         return '';
+    }
+
+    public static function log_audit( int $entity_id, string $action, ?object $before, ?object $after ): void {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'olama_billing_audit', [
+            'entity_type'  => 'agreement',
+            'entity_id'    => $entity_id,
+            'action'       => $action,
+            'actor_id'     => get_current_user_id(),
+            'before_state' => $before ? wp_json_encode( $before ) : null,
+            'after_state'  => $after ? wp_json_encode( $after ) : null,
+            'ip_address'   => sanitize_text_field( $_SERVER['REMOTE_ADDR'] ?? '' ),
+        ] );
     }
 }

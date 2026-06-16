@@ -46,6 +46,10 @@ class Olama_Reg_Agreement_Fees {
         if ( $inserted ) {
             $fee_id = (int) $wpdb->insert_id;
             Olama_Reg_Agreement::recalculate_total( $agreement_id );
+            if ( class_exists( 'Olama_Reg_Agreement' ) ) {
+                $inserted_fee = self::get( $fee_id );
+                Olama_Reg_Agreement::log_audit( $agreement_id, 'fee_added', null, $inserted_fee );
+            }
             return $fee_id;
         }
 
@@ -82,6 +86,10 @@ class Olama_Reg_Agreement_Fees {
         
         if ( $updated !== false ) {
             Olama_Reg_Agreement::recalculate_total( (int) $existing->agreement_id );
+            if ( class_exists( 'Olama_Reg_Agreement' ) ) {
+                $after = self::get( $fee_id );
+                Olama_Reg_Agreement::log_audit( (int) $existing->agreement_id, 'fee_updated', $existing, $after );
+            }
             return true;
         }
 
@@ -107,6 +115,9 @@ class Olama_Reg_Agreement_Fees {
         
         if ( $deleted ) {
             Olama_Reg_Agreement::recalculate_total( (int) $existing->agreement_id );
+            if ( class_exists( 'Olama_Reg_Agreement' ) ) {
+                Olama_Reg_Agreement::log_audit( (int) $existing->agreement_id, 'fee_deleted', $existing, null );
+            }
             return true;
         }
 
@@ -194,6 +205,9 @@ class Olama_Reg_Agreement_Fees {
         }
 
         Olama_Reg_Agreement::recalculate_total( $agreement_id );
+        if ( class_exists( 'Olama_Reg_Agreement' ) ) {
+            Olama_Reg_Agreement::log_audit( $agreement_id, 'template_applied', null, (object)[ 'template_id' => $template_id, 'template_name' => $template->template_name ] );
+        }
         return true;
     }
 }

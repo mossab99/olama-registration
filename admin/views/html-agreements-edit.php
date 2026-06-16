@@ -121,11 +121,167 @@ if ($agreement && $agreement->payer_id) {
     }
     $payer_children_json = wp_json_encode($payer_children);
 }
+
+$status_labels = [
+    'draft' => __('مسودة', 'olama-registration'),
+    'completed' => __('مكتمل', 'olama-registration'),
+    'cancelled' => __('ملغي', 'olama-registration'),
+    'open' => __('مفتوح', 'olama-registration'),
+    'invoiced' => __('مفوتر', 'olama-registration'),
+    'unpaid' => __('غير مدفوع', 'olama-registration'),
+    'paid' => __('مدفوع', 'olama-registration'),
+    'partially_paid' => __('مدفوع جزئياً', 'olama-registration'),
+    'partial' => __('مدفوع جزئياً', 'olama-registration'),
+    'issued' => __('مصدر', 'olama-registration'),
+    'posted' => __('مرحل', 'olama-registration'),
+    'approved' => __('معتمد', 'olama-registration'),
+    'pending_approval' => __('بانتظار الاعتماد', 'olama-registration'),
+    'overdue' => __('متأخر', 'olama-registration'),
+    'financially_locked' => __('مقفل مالياً', 'olama-registration'),
+    'cancelled_with_financial_impact' => __('ملغي مع أثر مالي', 'olama-registration'),
+    'correction_error' => __('تصحيح خطأ', 'olama-registration'),
+    'discount_change' => __('تعديل خصم', 'olama-registration'),
+    'increase_amount' => __('زيادة مبلغ', 'olama-registration'),
+    'decrease_amount' => __('خفض مبلغ', 'olama-registration'),
+    'add_fee' => __('إضافة رسم', 'olama-registration'),
+    'cash' => __('نقدي', 'olama-registration'),
+    'cheque' => __('شيك', 'olama-registration'),
+    'bank_transfer' => __('تحويل بنكي', 'olama-registration'),
+    'online' => __('دفع إلكتروني', 'olama-registration'),
+];
+$status_label = static function ($status) use ($status_labels) {
+    $status = (string) $status;
+    return $status_labels[$status] ?? $status;
+};
+$money = static function ($amount, $decimals = 3) {
+    return number_format((float) $amount, $decimals) . ' JD';
+};
+
+$invoice_id = 0;
+$invoice = null;
+$fees = [];
+$templates = [];
+$due_schedule = [];
+$due_total = 0.0;
+$paid_total = 0.0;
+$invoiced_total = 0.0;
+$remaining_total = 0.0;
+$payments = [];
+$amendments = [];
+$activity_rows = [];
+$has_unpaid = false;
+$unpaid_fee_ids = [];
+$total_discount = 0.0;
+$due_schedule_saved = false;
+$can_complete_from_workspace = false;
+$can_pay_from_workspace = false;
+
+if (!$is_new) {
+    $invoice_id = class_exists('Olama_Reg_Agreement_Policy') ? Olama_Reg_Agreement_Policy::get_linked_invoice_id($id) : 0;
+    if ($invoice_id > 0 && class_exists('Olama_Reg_Billing_Invoice')) {
+        $invoice = Olama_Reg_Billing_Invoice::get_invoice($invoice_id);
+    }
+    $fees = class_exists('Olama_Reg_Agreement_Fees') ? Olama_Reg_Agreement_Fees::get_by_agreement($id) : [];
+    $templates = class_exists('Olama_Reg_Billing_Fees') ? Olama_Reg_Billing_Fees::get_agreement_templates($agreement->activity_type) : [];
+    foreach ($fees as $fee_row) {
+        $total_discount += (float) $fee_row->discount;
+        if ($fee_row->paid_status === 'unpaid') {
+            $has_unpaid = true;
+            $unpaid_fee_ids[] = (int) $fee_row->id;
+        }
+    }
+    if (class_exists('Olama_Reg_Agreement_Invoice')) {
+        $due_schedule = Olama_Reg_Agreement_Invoice::get_due_schedule($id);
+        if (empty($due_schedule) && (float) $agreement->total_amount > 0) {
+            Olama_Reg_Agreement_Invoice::generate_default_due_schedule($id);
+            $due_schedule = Olama_Reg_Agreement_Invoice::get_due_schedule($id);
+        }
+    }
+    foreach ($due_schedule as $line) {
+        $due_total += (float) $line->amount_due;
+    }
+    $due_schedule_saved = !empty($due_schedule) && abs(round((float) $agreement->total_amount, 2) - round($due_total, 2)) <= 0.009;
+    if ($invoice) {
+        $invoiced_total = (float) ($invoice->total ?? $invoice->amount_due ?? $agreement->total_amount);
+        $paid_total = (float) ($invoice->amount_paid ?? 0);
+        $remaining_total = (float) ($invoice->balance ?? max(0, $invoiced_total - $paid_total));
+        if (class_exists('Olama_Reg_Billing_Payment')) {
+            $payments = Olama_Reg_Billing_Payment::get_invoice_payments((int) $invoice->id);
+        }
+    } else {
+        $remaining_total = (float) $agreement->total_amount;
+    }
+    $amendments = class_exists('Olama_Reg_Agreement_Amendment') ? Olama_Reg_Agreement_Amendment::get_by_agreement($id) : [];
+    $activity_rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT a.*, u.display_name
+         FROM {$wpdb->prefix}olama_billing_audit a
+         LEFT JOIN {$wpdb->users} u ON u.ID = a.actor_id
+         WHERE (a.entity_type = 'agreement' AND a.entity_id = %d)
+            OR (a.entity_type = 'agreement_amendment' AND (
+                a.entity_id IN (SELECT id FROM {$wpdb->prefix}olama_agreement_amendments WHERE agreement_id = %d)
+                OR a.entity_id = %d
+            ))
+         ORDER BY a.id DESC
+         LIMIT 30",
+        $id, $id, $id
+    )) ?: [];
+
+    $can_complete_from_workspace = $due_schedule_saved && !in_array($agreement->status, ['completed', 'cancelled'], true);
+    $can_pay_from_workspace = $due_schedule_saved && $invoice_id > 0 && $invoice && (float) $invoice->balance > 0;
+}
 ?>
 <script>
 window.payerChildren = <?php echo $payer_children_json; ?>;
 </script>
-<div class="olama-reg-wrap os-wrap<?php echo $is_hub_embedded ? ' os-hub-embedded-form' : ''; ?>" id="os-agreement-app" data-id="<?php echo esc_attr($agreement->id); ?>" data-can-edit-financial="<?php echo esc_attr($can_edit_financial_fields ? '1' : '0'); ?>" data-can-reschedule="<?php echo esc_attr($can_reschedule_installments ? '1' : '0'); ?>" data-can-create-amendment="<?php echo esc_attr($can_create_amendment ? '1' : '0'); ?>" data-financial-status="<?php echo esc_attr($financial_status); ?>" data-embedded="<?php echo esc_attr($is_hub_embedded ? 'hub' : 'page'); ?>">
+<div class="olama-reg-wrap os-wrap<?php echo $is_hub_embedded ? ' os-hub-embedded-form' : ''; ?>" id="os-agreement-app" data-id="<?php echo esc_attr($agreement->id); ?>" data-header-saved="<?php echo esc_attr(!$is_new && (int) $agreement->id > 0 ? '1' : '0'); ?>" data-can-edit-financial="<?php echo esc_attr($can_edit_financial_fields ? '1' : '0'); ?>" data-can-reschedule="<?php echo esc_attr($can_reschedule_installments ? '1' : '0'); ?>" data-can-create-amendment="<?php echo esc_attr($can_create_amendment ? '1' : '0'); ?>" data-financial-status="<?php echo esc_attr($financial_status); ?>" data-due-saved="<?php echo esc_attr($due_schedule_saved ? '1' : '0'); ?>" data-has-invoice="<?php echo esc_attr($invoice_id > 0 ? '1' : '0'); ?>" data-embedded="<?php echo esc_attr($is_hub_embedded ? 'hub' : 'page'); ?>">
+    <?php if (!$is_hub_embedded): ?>
+    <div class="olama-contract-workspace">
+        <div class="olama-contract-hero">
+            <div class="olama-contract-hero__main">
+                <div class="olama-contract-kicker"><?php echo $is_new ? esc_html__('إنشاء عقد جديد', 'olama-registration') : esc_html__('مساحة عمل العقد', 'olama-registration'); ?></div>
+                <h1><?php echo esc_html($agreement->agreement_number); ?> <span><?php esc_html_e('العقد', 'olama-registration'); ?></span></h1>
+                <div class="olama-contract-meta">
+                    <span><?php esc_html_e('الطالب / المشترك:', 'olama-registration'); ?> <strong><?php echo esc_html($agreement->participant_name ?: '-'); ?></strong></span>
+                    <span><?php esc_html_e('ولي الأمر / الجهة الدافعة:', 'olama-registration'); ?> <strong><?php echo esc_html($agreement->payer_name ?: '-'); ?></strong></span>
+                    <span><?php esc_html_e('الفترة:', 'olama-registration'); ?> <strong><?php echo esc_html($agreement->start_date ?: '-'); ?> - <?php echo esc_html($agreement->end_date ?: '-'); ?></strong></span>
+                </div>
+            </div>
+            <div class="olama-contract-hero__badges">
+                <span class="olama-contract-pill olama-contract-pill--success" id="os-agr-status-badge"><?php echo esc_html($status_label($agreement->status)); ?></span>
+                <span class="olama-contract-pill <?php echo $has_financial_impact ? 'olama-contract-pill--locked' : 'olama-contract-pill--open'; ?>">
+                    <?php echo $has_financial_impact ? esc_html__('مقفل مالياً', 'olama-registration') : esc_html__('غير مقفل مالياً', 'olama-registration'); ?>
+                </span>
+            </div>
+        </div>
+        <div class="olama-financial-summary">
+            <div class="olama-summary-card olama-summary-card--orange"><span><?php esc_html_e('إجمالي العقد', 'olama-registration'); ?></span><strong><?php echo esc_html($money($agreement->total_amount)); ?></strong><small><?php esc_html_e('قيمة العقد بعد الخصومات', 'olama-registration'); ?></small></div>
+            <div class="olama-summary-card olama-summary-card--blue"><span><?php esc_html_e('المفوتر', 'olama-registration'); ?></span><strong><?php echo esc_html($money($invoiced_total)); ?></strong><small><?php echo $invoice ? esc_html__('تم إصدار فاتورة للعقد', 'olama-registration') : esc_html__('لا توجد فاتورة مصدرة بعد', 'olama-registration'); ?></small></div>
+            <div class="olama-summary-card olama-summary-card--green"><span><?php esc_html_e('المدفوع', 'olama-registration'); ?></span><strong><?php echo esc_html($money($paid_total)); ?></strong><small><?php echo $paid_total > 0 ? esc_html__('دفعات مسجلة', 'olama-registration') : esc_html__('لا توجد دفعات مسجلة', 'olama-registration'); ?></small></div>
+            <div class="olama-summary-card olama-summary-card--red"><span><?php esc_html_e('المتبقي', 'olama-registration'); ?></span><strong><?php echo esc_html($money($remaining_total)); ?></strong><small><?php esc_html_e('مبلغ مستحق على ولي الأمر', 'olama-registration'); ?></small></div>
+        </div>
+        <div class="olama-contract-actions">
+            <?php if (!$is_new): ?>
+                <?php if ($can_pay_from_workspace): ?>
+                    <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-contract-action-pay olama-reg-pay-invoice-trigger os-agr-pay-requires-saved-due" data-id="<?php echo esc_attr($invoice->id); ?>" data-no="<?php echo esc_attr($invoice->invoice_number); ?>" data-bal="<?php echo esc_attr($invoice->balance); ?>" data-family="<?php echo esc_attr($invoice->family_uid); ?>">
+                        <span class="dashicons dashicons-money-alt"></span> <?php esc_html_e('قبض دفعة', 'olama-registration'); ?>
+                    </button>
+                <?php else: ?>
+                    <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-contract-action-pay os-agr-main-pay-disabled" disabled title="<?php esc_attr_e('يتفعل قبض الدفعة بعد حفظ العقد، حفظ توزيع الاستحقاق، وإنشاء الفاتورة.', 'olama-registration'); ?>">
+                        <span class="dashicons dashicons-money-alt"></span> <?php esc_html_e('قبض دفعة', 'olama-registration'); ?>
+                    </button>
+                <?php endif; ?>
+                <?php if (!in_array($agreement->status, ['completed', 'cancelled'], true)): ?>
+                    <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-contract-action-complete os-agr-main-complete os-agr-complete-agreement-trigger" id="os-agr-complete-agreement" <?php disabled(!$can_complete_from_workspace); ?> title="<?php esc_attr_e('يتفعل بعد حفظ توزيع الاستحقاق المتوازن.', 'olama-registration'); ?>">
+                        <span class="dashicons dashicons-yes-alt"></span> <?php esc_html_e('إكمال العقد وإنشاء الفاتورة', 'olama-registration'); ?>
+                    </button>
+                <?php endif; ?>
+                <a href="<?php echo esc_url(admin_url('admin.php?page=olama-registration-agreements&action=print&id=' . $id)); ?>" target="_blank" class="olama-reg-btn olama-reg-btn--secondary"><span class="dashicons dashicons-printer"></span> <?php esc_html_e('طباعة العقد', 'olama-registration'); ?></a>
+                <button type="button" class="olama-reg-btn olama-reg-btn--secondary" id="os-agr-create-amendment" data-action="add-fee" <?php disabled(!$can_create_amendment); ?>><span class="dashicons dashicons-plus-alt2"></span> <?php esc_html_e('إنشاء تعديل مالي', 'olama-registration'); ?></button>
+            <?php endif; ?>
+            <a href="<?php echo esc_url(admin_url('admin.php?page=olama-registration-agreements')); ?>" class="olama-reg-btn olama-reg-btn--secondary"><span class="dashicons dashicons-arrow-right-alt2"></span> <?php esc_html_e('العودة للقائمة', 'olama-registration'); ?></a>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php if (!$is_hub_embedded): ?>
     <div class="olama-reg-page-header">
         <div style="display:flex; align-items:center; gap:15px;">
@@ -134,7 +290,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
             </h1>
             <span
                 class="olama-reg-badge <?php echo $agreement->status === 'completed' ? 'olama-reg-badge--active' : ($agreement->status === 'draft' ? 'olama-reg-badge--warning' : 'olama-reg-badge--inactive'); ?>"
-                id="os-agr-status-badge">
+                id="os-agr-status-badge-legacy">
                 <?php echo esc_html($agreement->status); ?>
             </span>
         </div>
@@ -144,14 +300,60 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
     </div>
     <?php endif; ?>
 
-    <nav class="nav-tab-wrapper wp-clearfix os-nav-tabs" style="margin-bottom: 20px;">
+    <nav class="nav-tab-wrapper wp-clearfix os-nav-tabs" style="margin-bottom: 20px; display:none;">
         <a href="#tab-header"
             class="nav-tab nav-tab-active"><?php esc_html_e('البيانات الأساسية', 'olama-registration'); ?></a>
         <a href="#tab-fees"
             class="nav-tab <?php echo $is_new ? 'os-disabled' : ''; ?>"><?php esc_html_e('الرسوم', 'olama-registration'); ?></a>
     </nav>
 
+    <nav class="nav-tab-wrapper wp-clearfix os-nav-tabs olama-contract-tabs">
+        <a href="#tab-header" class="nav-tab nav-tab-active"><?php esc_html_e('ملخص العقد', 'olama-registration'); ?></a>
+        <a href="#tab-data" class="nav-tab"><?php esc_html_e('بيانات العقد', 'olama-registration'); ?></a>
+        <a href="#tab-fees" class="nav-tab <?php echo $is_new ? 'os-disabled' : ''; ?>"><?php esc_html_e('الرسوم', 'olama-registration'); ?></a>
+        <a href="#tab-installments" class="nav-tab <?php echo $is_new ? 'os-disabled' : ''; ?>"><?php esc_html_e('الأقساط والاستحقاقات', 'olama-registration'); ?></a>
+        <a href="#tab-payments" class="nav-tab <?php echo $is_new ? 'os-disabled' : ''; ?>"><?php esc_html_e('الدفعات والسندات', 'olama-registration'); ?></a>
+        <a href="#tab-adjustments" class="nav-tab <?php echo $is_new ? 'os-disabled' : ''; ?>"><?php esc_html_e('التعديلات المالية', 'olama-registration'); ?></a>
+        <a href="#tab-activity" class="nav-tab <?php echo $is_new ? 'os-disabled' : ''; ?>"><?php esc_html_e('سجل النشاط', 'olama-registration'); ?></a>
+    </nav>
+
     <div class="os-tab-content active" id="tab-header">
+        <div class="olama-reg-section olama-contract-panel">
+            <?php if ($has_financial_impact): ?>
+                <div class="olama-lock-alert">
+                    <strong><?php esc_html_e('هذا العقد مقفل مالياً للتعديل المباشر.', 'olama-registration'); ?></strong>
+                    <p><?php esc_html_e('توجد فواتير أو دفعات مرتبطة بالعقد. لا يمكن تعديل البنود المالية مباشرة. يمكن إجراء التعديلات من خلال إنشاء تعديل مالي مستقل.', 'olama-registration'); ?></p>
+                </div>
+            <?php endif; ?>
+            <div class="olama-summary-grid">
+                <div>
+                    <h3><?php esc_html_e('معلومات العقد', 'olama-registration'); ?></h3>
+                    <dl class="olama-contract-dl">
+                        <dt><?php esc_html_e('رقم العقد', 'olama-registration'); ?></dt><dd><?php echo esc_html($agreement->agreement_number); ?></dd>
+                        <dt><?php esc_html_e('حالة العقد', 'olama-registration'); ?></dt><dd><?php echo esc_html($status_label($agreement->status)); ?></dd>
+                        <dt><?php esc_html_e('الطالب / المشترك', 'olama-registration'); ?></dt><dd><?php echo esc_html($agreement->participant_name ?: '-'); ?></dd>
+                        <dt><?php esc_html_e('الجهة الدافعة', 'olama-registration'); ?></dt><dd><?php echo esc_html($agreement->payer_name ?: '-'); ?></dd>
+                        <dt><?php esc_html_e('طبيعة العقد', 'olama-registration'); ?></dt><dd><?php echo esc_html($agreement->activity_type ?: '-'); ?></dd>
+                        <dt><?php esc_html_e('الفترة', 'olama-registration'); ?></dt><dd><?php echo esc_html(($agreement->start_date ?: '-') . ' - ' . ($agreement->end_date ?: '-')); ?></dd>
+                    </dl>
+                </div>
+                <div>
+                    <h3><?php esc_html_e('آخر الحركات', 'olama-registration'); ?></h3>
+                    <ol class="olama-activity-mini">
+                        <?php if (!empty($activity_rows)): ?>
+                            <?php foreach (array_slice($activity_rows, 0, 3) as $activity): ?>
+                                <li><strong><?php echo esc_html($activity->action); ?></strong><span><?php echo esc_html($activity->created_at ?? ''); ?></span></li>
+                            <?php endforeach; ?>
+                        <?php elseif (!$is_new): ?>
+                            <li><strong><?php esc_html_e('تم إنشاء العقد', 'olama-registration'); ?></strong><span><?php echo esc_html($agreement->created_at ?? ''); ?></span></li>
+                        <?php endif; ?>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="os-tab-content" id="tab-data" style="display:none;">
         <div class="olama-reg-section">
             <form id="os-form-agreement-header" style="margin:0;">
                 <input type="hidden" name="id" value="<?php echo esc_attr($agreement->id); ?>">
@@ -170,7 +372,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                         <?php endif; ?>
                     <?php if ($can_create_amendment && (current_user_can('manage_options') || current_user_can('olama_create_agreement_amendment'))): ?>
                             <p style="margin:12px 0 0;">
-                                <button type="button" class="button button-primary" id="os-agr-create-amendment" data-action="add-fee"><?php esc_html_e('تعديل مالي على العقد', 'olama-registration'); ?></button>
+                                <button type="button" class="button button-primary" id="os-agr-create-amendment-inline" data-action="add-fee"><?php esc_html_e('تعديل مالي على العقد', 'olama-registration'); ?></button>
                             </p>
                         <?php endif; ?>
                     </div>
@@ -357,7 +559,7 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                             <span class="dashicons dashicons-printer"></span> <?php esc_html_e('طباعة العقد', 'olama-registration'); ?>
                         </a>
                         <?php if ($invoice_id > 0 && $invoice && (float)$invoice->balance > 0): ?>
-                            <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger" id="os-btn-pay-agreement-top"
+                            <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger os-agr-pay-requires-saved-due" id="os-btn-pay-agreement-top"
                                     data-id="<?php echo esc_attr($invoice->id); ?>"
                                     data-no="<?php echo esc_attr($invoice->invoice_number); ?>"
                                     data-bal="<?php echo esc_attr($invoice->balance); ?>"
@@ -493,10 +695,10 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                                             if ($payment_id) {
                                                 echo '<a href="' . esc_url(admin_url('admin.php?page=olama-registration-payments&action=print_receipt&id=' . $payment_id)) . '" target="_blank">' . esc_html__('مدفوع (السند)', 'olama-registration') . '</a>';
                                             } else {
-                                                echo esc_html($fee->paid_status);
+                                                echo esc_html($status_label($fee->paid_status));
                                             }
                                         } else {
-                                            echo esc_html($fee->paid_status); 
+                                            echo esc_html($status_label($fee->paid_status)); 
                                         }
                                         ?>
                                     </td>
@@ -557,17 +759,55 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                     </tfoot>
                 </table>
 
-                <?php
-                $due_schedule = Olama_Reg_Agreement_Invoice::get_due_schedule($id);
-                if (empty($due_schedule) && (float) $agreement->total_amount > 0) {
-                    Olama_Reg_Agreement_Invoice::generate_default_due_schedule($id);
-                    $due_schedule = Olama_Reg_Agreement_Invoice::get_due_schedule($id);
-                }
-                $due_total = 0.0;
-                ?>
+                </div>
+            </div>
+        </div>
+    </div>
 
-                <h3 class="olama-reg-section-title" style="margin-top:25px;"><?php esc_html_e('توزيع الاستحقاق', 'olama-registration'); ?></h3>
+    <div class="os-tab-content" id="tab-installments" style="display:none;">
+        <div class="olama-reg-section olama-contract-panel">
+            <h3 class="olama-reg-section-title"><?php esc_html_e('توزيع الاستحقاق', 'olama-registration'); ?></h3>
+            <div class="olama-installment-summary">
+                <div class="olama-installment-metric olama-installment-metric--blue">
+                    <span class="olama-installment-metric__icon"><span class="dashicons dashicons-clipboard"></span></span>
+                    <div class="olama-installment-metric__body">
+                        <span class="olama-installment-metric__label"><?php esc_html_e('صافي العقد', 'olama-registration'); ?></span>
+                        <span class="olama-installment-metric__value"><?php echo esc_html($money($agreement->total_amount)); ?></span>
+                    </div>
+                </div>
+                <div class="olama-installment-metric olama-installment-metric--green">
+                    <span class="olama-installment-metric__icon"><span class="dashicons dashicons-yes-alt"></span></span>
+                    <div class="olama-installment-metric__body">
+                        <span class="olama-installment-metric__label"><?php esc_html_e('مجموع الاستحقاقات', 'olama-registration'); ?></span>
+                        <span class="olama-installment-metric__value"><?php echo esc_html($money($due_total)); ?></span>
+                    </div>
+                </div>
+                <div class="olama-installment-metric olama-installment-metric--orange">
+                    <span class="olama-installment-metric__icon"><span class="dashicons dashicons-chart-bar"></span></span>
+                    <div class="olama-installment-metric__body">
+                        <span class="olama-installment-metric__label"><?php esc_html_e('الفرق', 'olama-registration'); ?></span>
+                        <span class="olama-installment-metric__value"><?php echo esc_html($money(((float) $agreement->total_amount) - $due_total)); ?></span>
+                    </div>
+                </div>
+                <div class="olama-installment-metric olama-installment-metric--purple">
+                    <span class="olama-installment-metric__icon"><span class="dashicons dashicons-list-view"></span></span>
+                    <div class="olama-installment-metric__body">
+                        <span class="olama-installment-metric__label"><?php esc_html_e('عدد الأقساط', 'olama-registration'); ?></span>
+                        <span class="olama-installment-metric__value"><?php echo esc_html(count($due_schedule)); ?></span>
+                    </div>
+                </div>
+            </div>
+            <div class="olama-reg-table-wrap olama-installments-table-wrap">
                 <table class="olama-reg-fin-table" id="os-agr-due-table" data-agr-id="<?php echo esc_attr($id); ?>">
+                    <colgroup>
+                        <col class="olama-installments-col-no">
+                        <col class="olama-installments-col-date">
+                        <col class="olama-installments-col-amount">
+                        <col class="olama-installments-col-money">
+                        <col class="olama-installments-col-money">
+                        <col class="olama-installments-col-status">
+                        <col class="olama-installments-col-actions">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th style="width:90px;"><?php esc_html_e('رقم القسط', 'olama-registration'); ?></th>
@@ -580,24 +820,27 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                         </tr>
                     </thead>
                     <tbody>
+                        <?php $due_table_total = 0.0; ?>
                         <?php foreach ($due_schedule as $line): ?>
                             <?php
                             $amount = (float) $line->amount_due;
                             $paid = (float) $line->amount_paid;
                             $remaining = max(0, $amount - $paid);
-                            $due_total += $amount;
+                            $due_table_total += $amount;
                             $line_locked = !$can_reschedule_installments || $paid > 0;
                             ?>
                             <tr>
                                 <td class="os-agr-due-no"><?php echo esc_html($line->installment_no); ?></td>
                                 <td><input type="text" class="os-datepicker os-agr-due-date" value="<?php echo esc_attr($line->due_date); ?>" style="width:100%;" <?php disabled($line_locked); ?>></td>
                                 <td><input type="number" step="0.01" min="0.01" class="os-agr-due-amount" value="<?php echo esc_attr(number_format($amount, 2, '.', '')); ?>" style="width:100%;" <?php disabled($line_locked); ?>></td>
-                                <td><?php echo esc_html(number_format($paid, 2)); ?></td>
-                                <td><?php echo esc_html(number_format($remaining, 2)); ?></td>
-                                <td><?php echo esc_html($line->status); ?></td>
+                                <td><span class="olama-due-paid-badge<?php echo $paid > 0 ? ' olama-due-paid-badge--has-value' : ''; ?>"><?php echo esc_html(number_format($paid, 2)); ?></span></td>
+                                <td><span class="olama-due-remaining-badge<?php echo $remaining > 0 ? ' olama-due-remaining-badge--has-value' : ($remaining == 0 && $paid > 0 ? ' olama-due-remaining-badge--zero' : ''); ?>"><?php echo esc_html(number_format($remaining, 2)); ?></span></td>
+                                <td><span class="olama-installment-status olama-installment-status--<?php echo esc_attr($line->status); ?>"><?php echo esc_html($status_label($line->status)); ?></span></td>
                                 <td>
                                     <?php if (!$line_locked): ?>
-                                        <button type="button" class="button button-small os-agr-delete-due">X</button>
+                                        <button type="button" class="button button-small os-agr-delete-due" aria-label="<?php esc_attr_e('حذف القسط', 'olama-registration'); ?>">
+                                            <span class="dashicons dashicons-trash"></span>
+                                        </button>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -605,32 +848,48 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="7" style="background:#fafafa;">
-                                <strong><?php esc_html_e('صافي العقد', 'olama-registration'); ?>:</strong>
-                                <span id="os-agr-due-net"><?php echo esc_html(number_format((float) $agreement->total_amount, 2)); ?></span>
-                                &nbsp; | &nbsp;
-                                <strong><?php esc_html_e('مجموع الاستحقاقات', 'olama-registration'); ?>:</strong>
-                                <span id="os-agr-due-total"><?php echo esc_html(number_format($due_total, 2)); ?></span>
-                                &nbsp; | &nbsp;
-                                <strong><?php esc_html_e('الفرق', 'olama-registration'); ?>:</strong>
-                                <span id="os-agr-due-diff"><?php echo esc_html(number_format(((float) $agreement->total_amount) - $due_total, 2)); ?></span>
-                                <div id="os-agr-due-warning" style="display:none; color:#b91c1c; margin-top:8px; font-weight:700;">
-                                    <?php esc_html_e('مجموع الاستحقاقات لا يساوي صافي العقد. يرجى تعديل توزيع الاستحقاق قبل الحفظ.', 'olama-registration'); ?>
+                            <td colspan="7">
+                                <div class="olama-installment-tfoot-totals">
+                                    <div class="olama-tfoot-metric olama-tfoot-metric--blue">
+                                        <span class="olama-tfoot-metric__label"><?php esc_html_e('صافي العقد', 'olama-registration'); ?></span>
+                                        <span class="olama-tfoot-metric__value" id="os-agr-due-net"><?php echo esc_html(number_format((float) $agreement->total_amount, 2)); ?></span>
+                                    </div>
+                                    <div class="olama-tfoot-metric olama-tfoot-metric--green">
+                                        <span class="olama-tfoot-metric__label"><?php esc_html_e('مجموع الاستحقاقات', 'olama-registration'); ?></span>
+                                        <span class="olama-tfoot-metric__value" id="os-agr-due-total"><?php echo esc_html(number_format($due_table_total, 2)); ?></span>
+                                    </div>
+                                    <div class="olama-tfoot-metric olama-tfoot-metric--diff">
+                                        <span class="olama-tfoot-metric__label"><?php esc_html_e('الفرق', 'olama-registration'); ?></span>
+                                        <span class="olama-tfoot-metric__value" id="os-agr-due-diff"><?php echo esc_html(number_format(((float) $agreement->total_amount) - $due_table_total, 2)); ?></span>
+                                    </div>
+                                </div>
+                                <div id="os-agr-due-warning" style="display:none; color:#b91c1c; margin-top:10px; font-weight:700; background:#fff1f2; border:1px solid #fecaca; border-radius:8px; padding:10px 14px;">
+                                    <span class="dashicons dashicons-warning" style="vertical-align:middle; margin-inline-end:6px;"></span><?php esc_html_e('مجموع الاستحقاقات لا يساوي صافي العقد. يرجى تعديل توزيع الاستحقاق قبل الحفظ.', 'olama-registration'); ?>
                                 </div>
                             </td>
                         </tr>
                     </tfoot>
                 </table>
 
-                <div style="margin-top: 20px; display:flex; justify-content:space-between; align-items:center; gap:15px; flex-wrap:wrap;">
-                    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-                        <label style="display:flex; align-items:center; gap:8px; font-weight:700;">
+                <div class="olama-installment-actions">
+                    <div class="olama-installment-actions__tools">
+                        <label class="olama-count-label">
+                            <span class="dashicons dashicons-list-view"></span>
                             <span><?php esc_html_e('عدد الأقساط', 'olama-registration'); ?></span>
-                            <input type="number" id="os-agr-due-count" min="1" max="24" value="<?php echo esc_attr( count( $due_schedule ) ?: Olama_Reg_Agreement_Invoice::DEFAULT_INSTALLMENTS ); ?>" style="width:90px;" <?php disabled(!$can_reschedule_installments); ?>>
+                            <input type="number" id="os-agr-due-count" min="1" max="24" value="<?php echo esc_attr( count( $due_schedule ) ?: Olama_Reg_Agreement_Invoice::DEFAULT_INSTALLMENTS ); ?>" <?php disabled(!$can_reschedule_installments); ?>>
                         </label>
-                        <button type="button" class="button" id="os-agr-add-due-row"><?php esc_html_e('إضافة قسط', 'olama-registration'); ?></button>
-                        <button type="button" class="button" id="os-agr-regenerate-due"><?php esc_html_e('توليد التوزيع المقترح', 'olama-registration'); ?></button>
-                        <button type="button" class="button button-primary" id="os-agr-save-due"><?php esc_html_e('حفظ توزيع الاستحقاق', 'olama-registration'); ?></button>
+                        <button type="button" class="olama-iab olama-iab--ghost" id="os-agr-add-due-row">
+                            <span class="dashicons dashicons-plus-alt2"></span>
+                            <?php esc_html_e('إضافة قسط', 'olama-registration'); ?>
+                        </button>
+                        <button type="button" class="olama-iab olama-iab--ghost" id="os-agr-regenerate-due">
+                            <span class="dashicons dashicons-update"></span>
+                            <?php esc_html_e('توليد التوزيع', 'olama-registration'); ?>
+                        </button>
+                        <button type="button" class="olama-iab olama-iab--save" id="os-agr-save-due">
+                            <span class="dashicons dashicons-saved"></span>
+                            <?php esc_html_e('حفظ التوزيع', 'olama-registration'); ?>
+                        </button>
                     </div>
                     <?php
                     $has_unpaid = false;
@@ -643,24 +902,27 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                         }
                     }
                     ?>
-                    <div style="display:flex; gap:10px; align-items:center;">
+                    <div class="olama-installment-actions__final">
                         <?php if (!$is_new): ?>
-                            <a href="<?php echo esc_url(admin_url('admin.php?page=olama-registration-agreements&action=print&id=' . $id)); ?>" target="_blank" class="olama-reg-btn olama-reg-btn--secondary" id="os-btn-print-agreement-bottom">
-                                <span class="dashicons dashicons-printer"></span> <?php esc_html_e('طباعة العقد', 'olama-registration'); ?>
+                            <a href="<?php echo esc_url(admin_url('admin.php?page=olama-registration-agreements&action=print&id=' . $id)); ?>" target="_blank" class="olama-iab olama-iab--print" id="os-btn-print-agreement-bottom">
+                                <span class="dashicons dashicons-printer"></span>
+                                <?php esc_html_e('طباعة العقد', 'olama-registration'); ?>
                             </a>
                             <?php if ($invoice_id > 0 && $invoice && (float)$invoice->balance > 0): ?>
-                                <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger" id="os-btn-pay-agreement-bottom"
+                                <button type="button" class="olama-iab olama-iab--pay olama-reg-pay-invoice-trigger os-agr-pay-requires-saved-due" id="os-btn-pay-agreement-bottom"
                                         data-id="<?php echo esc_attr($invoice->id); ?>"
                                         data-no="<?php echo esc_attr($invoice->invoice_number); ?>"
                                         data-bal="<?php echo esc_attr($invoice->balance); ?>"
                                         data-family="<?php echo esc_attr($invoice->family_uid); ?>">
-                                    <span class="dashicons dashicons-money-alt"></span> <?php esc_html_e('قبض دفعة', 'olama-registration'); ?>
+                                    <span class="dashicons dashicons-money-alt"></span>
+                                    <?php esc_html_e('قبض دفعة', 'olama-registration'); ?>
                                 </button>
                             <?php endif; ?>
                         <?php endif; ?>
                         <?php if ($agreement->status !== 'completed' && $agreement->status !== 'cancelled'): ?>
-                            <button type="button" class="olama-reg-btn olama-reg-btn--primary" id="os-agr-complete-agreement">
-                                <span class="dashicons dashicons-yes-alt"></span> <?php esc_html_e('إكمال العقد وإنشاء الفاتورة', 'olama-registration'); ?>
+                            <button type="button" class="olama-iab olama-iab--complete os-agr-complete-agreement-trigger" id="os-agr-complete-agreement-bottom" <?php disabled(!$can_complete_from_workspace); ?>>
+                                <span class="dashicons dashicons-yes-alt"></span>
+                                <?php esc_html_e('إكمال العقد', 'olama-registration'); ?>
                             </button>
                         <?php endif; ?>
                     </div>
@@ -716,6 +978,189 @@ window.payerChildren = <?php echo $payer_children_json; ?>;
                 </table>
             </div>
             <?php endif; ?>
+        </div>
+    </div>
+
+    <div class="os-tab-content" id="tab-payments" style="display:none;">
+        <div class="olama-reg-section olama-contract-panel">
+            <div class="olama-section-toolbar">
+                <h3 class="olama-reg-section-title"><?php esc_html_e('الدفعات والسندات', 'olama-registration'); ?></h3>
+                <?php if ($invoice_id > 0 && $invoice && (float)$invoice->balance > 0): ?>
+                    <button type="button" class="olama-reg-btn olama-reg-btn--primary olama-reg-pay-invoice-trigger os-agr-pay-requires-saved-due" data-id="<?php echo esc_attr($invoice->id); ?>" data-no="<?php echo esc_attr($invoice->invoice_number); ?>" data-bal="<?php echo esc_attr($invoice->balance); ?>" data-family="<?php echo esc_attr($invoice->family_uid); ?>">
+                        <span class="dashicons dashicons-money-alt"></span> <?php esc_html_e('قبض دفعة جديدة', 'olama-registration'); ?>
+                    </button>
+                <?php endif; ?>
+            </div>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <colgroup>
+                        <col style="width: 17%;">
+                        <col style="width: 17%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 16%;">
+                        <col style="width: 12%;">
+                        <col style="width: 12%;">
+                    </colgroup>
+                    <thead><tr><th><?php esc_html_e('رقم السند', 'olama-registration'); ?></th><th><?php esc_html_e('التاريخ', 'olama-registration'); ?></th><th><?php esc_html_e('طريقة الدفع', 'olama-registration'); ?></th><th><?php esc_html_e('المبلغ', 'olama-registration'); ?></th><th><?php esc_html_e('الصندوق / البنك', 'olama-registration'); ?></th><th><?php esc_html_e('الحالة', 'olama-registration'); ?></th><th><?php esc_html_e('الإجراءات', 'olama-registration'); ?></th></tr></thead>
+                    <tbody>
+                        <?php if (!empty($payments)): ?>
+                            <?php foreach ($payments as $payment): ?>
+                                <tr>
+                                    <td><?php echo esc_html($payment->payment_no ?: ('#' . (int) $payment->id)); ?></td>
+                                    <td><?php echo esc_html($payment->payment_date ?? $payment->created_at ?? ''); ?></td>
+                                    <td><?php echo esc_html($status_label($payment->method ?? '-')); ?></td>
+                                    <td><strong><?php echo esc_html($money($payment->amount)); ?></strong></td>
+                                    <td><?php echo esc_html($payment->account_name ?? '-'); ?></td>
+                                    <td><span class="olama-status-pill olama-status-pill--<?php echo esc_attr($payment->status ?? 'posted'); ?>"><?php echo esc_html($status_label($payment->status ?? 'posted')); ?></span></td>
+                                    <td><a class="button button-small" target="_blank" href="<?php echo esc_url(admin_url('admin.php?page=olama-registration-payments&action=print_receipt&id=' . (int) $payment->id)); ?>"><?php esc_html_e('طباعة سند', 'olama-registration'); ?></a></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="7"><?php esc_html_e('لا توجد دفعات مسجلة على هذا العقد بعد.', 'olama-registration'); ?></td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="os-tab-content" id="tab-adjustments" style="display:none;">
+        <div class="olama-reg-section olama-contract-panel">
+            <div class="olama-section-toolbar">
+                <h3 class="olama-reg-section-title"><?php esc_html_e('التعديلات المالية', 'olama-registration'); ?></h3>
+                <button type="button" class="olama-reg-btn olama-reg-btn--secondary" id="os-agr-create-amendment-legacy" <?php disabled(!$can_create_amendment); ?>>
+                    <span class="dashicons dashicons-plus-alt2"></span> <?php esc_html_e('إنشاء تعديل مالي', 'olama-registration'); ?>
+                </button>
+            </div>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table os-agr-amendments-table">
+                    <colgroup>
+                        <col style="width: 17%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 11%;">
+                        <col style="width: 11%;">
+                        <col style="width: 11%;">
+                        <col style="width: 11%;">
+                        <col style="width: 13%;">
+                    </colgroup>
+                    <thead><tr><th><?php esc_html_e('رقم التعديل', 'olama-registration'); ?></th><th><?php esc_html_e('النوع', 'olama-registration'); ?></th><th><?php esc_html_e('تاريخ السريان', 'olama-registration'); ?></th><th><?php esc_html_e('القديم', 'olama-registration'); ?></th><th><?php esc_html_e('الجديد', 'olama-registration'); ?></th><th><?php esc_html_e('الفرق', 'olama-registration'); ?></th><th><?php esc_html_e('الحالة', 'olama-registration'); ?></th><th><?php esc_html_e('الإجراءات', 'olama-registration'); ?></th></tr></thead>
+                    <tbody>
+                        <?php if (!empty($amendments)): ?>
+                            <?php foreach ($amendments as $amendment): ?>
+                                <tr data-amendment-id="<?php echo esc_attr($amendment->id); ?>">
+                                    <td><strong><?php echo esc_html($amendment->amendment_no); ?></strong></td>
+                                    <td><?php echo esc_html($status_label($amendment->amendment_type)); ?></td>
+                                    <td><?php echo esc_html($amendment->effective_date); ?></td>
+                                    <td><?php echo esc_html($money($amendment->old_total)); ?></td>
+                                    <td><?php echo esc_html($money($amendment->new_total)); ?></td>
+                                    <td><?php echo esc_html($money($amendment->difference_amount)); ?></td>
+                                    <td><span class="olama-status-pill olama-status-pill--<?php echo esc_attr($amendment->status); ?>"><?php echo esc_html($status_label($amendment->status)); ?></span></td>
+                                    <td class="os-agr-amendments-actions">
+                                        <?php if ($amendment->status === 'draft' && (current_user_can('manage_options') || current_user_can('olama_approve_agreement_amendment'))): ?><button type="button" class="button button-small os-agr-approve-amendment"><?php esc_html_e('اعتماد', 'olama-registration'); ?></button><?php endif; ?>
+                                        <?php if ($amendment->status === 'approved' && (current_user_can('manage_options') || current_user_can('olama_post_agreement_amendment'))): ?><button type="button" class="button button-small button-primary os-agr-post-amendment"><?php esc_html_e('ترحيل', 'olama-registration'); ?></button><?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="8"><?php esc_html_e('لا توجد تعديلات مالية مسجلة بعد.', 'olama-registration'); ?></td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div class="olama-lock-alert olama-lock-alert--info"><?php esc_html_e('أمثلة على التعديلات المالية: إضافة بند، تخفيض رسوم، زيادة رسوم، خصم لاحق، تعديل تاريخ استحقاق، أو إلغاء عقد. يتم ربط التنفيذ الكامل بمنطق التعديلات المالية الخلفي عند توفره.', 'olama-registration'); ?></div>
+        </div>
+    </div>
+
+    <div class="os-tab-content" id="tab-activity" style="display:none;">
+        <div class="olama-reg-section olama-contract-panel">
+            <h3 class="olama-reg-section-title"><?php esc_html_e('سجل النشاط والتدقيق', 'olama-registration'); ?></h3>
+            <div class="olama-reg-table-wrap">
+                <table class="olama-reg-fin-table">
+                    <colgroup>
+                        <col style="width: 20%;">
+                        <col style="width: 20%;">
+                        <col style="width: 25%;">
+                        <col style="width: 35%;">
+                    </colgroup>
+                    <thead><tr><th><?php esc_html_e('التاريخ', 'olama-registration'); ?></th><th><?php esc_html_e('المستخدم', 'olama-registration'); ?></th><th><?php esc_html_e('الإجراء', 'olama-registration'); ?></th><th><?php esc_html_e('التفاصيل', 'olama-registration'); ?></th></tr></thead>
+                    <tbody>
+                        <?php if (!empty($activity_rows)): ?>
+                            <?php 
+                            $action_labels = [
+                                'created' => __('إنشاء العقد كمسودة', 'olama-registration'),
+                                'updated' => __('تعديل بيانات العقد', 'olama-registration'),
+                                'completed' => __('تفعيل واعتماد العقد', 'olama-registration'),
+                                'cancelled' => __('إلغاء العقد', 'olama-registration'),
+                                'status_changed' => __('تغيير حالة العقد', 'olama-registration'),
+                                'fee_added' => __('إضافة بند رسوم', 'olama-registration'),
+                                'fee_updated' => __('تعديل بند رسوم', 'olama-registration'),
+                                'fee_deleted' => __('حذف بند رسوم', 'olama-registration'),
+                                'template_applied' => __('تطبيق نموذج الرسوم', 'olama-registration'),
+                                'agreement_amendment_created' => __('إنشاء مسودة تعديل مالي', 'olama-registration'),
+                                'agreement_amendment_approved' => __('اعتماد مسودة التعديل المالي', 'olama-registration'),
+                                'agreement_amendment_posted' => __('ترحيل واعتماد التعديل المالي', 'olama-registration'),
+                                'agreement_amendment_cancelled' => __('إلغاء التعديل المالي', 'olama-registration'),
+                                'agreement_amendment_rejected' => __('رفض التعديل المالي', 'olama-registration'),
+                                'agreement_installments_rescheduled' => __('إعادة توزيع الاستحقاقات', 'olama-registration'),
+                            ];
+                            ?>
+                            <?php foreach ($activity_rows as $activity): ?>
+                                <?php
+                                $act_label = $action_labels[$activity->action] ?? $activity->action;
+                                $details = '';
+                                if (!empty($activity->after_state)) {
+                                    $after = json_decode($activity->after_state, true);
+                                    $before = !empty($activity->before_state) ? json_decode($activity->before_state, true) : null;
+                                    if ($after) {
+                                        if ($activity->action === 'created') {
+                                            $details = sprintf(__('تم إنشاء العقد بقيمة %s', 'olama-registration'), $money($after['total_amount'] ?? 0));
+                                        } elseif ($activity->action === 'completed') {
+                                            $details = __('تم اعتماد العقد وإصدار الفاتورة وتوزيع الاستحقاقات', 'olama-registration');
+                                        } elseif ($activity->action === 'cancelled') {
+                                            $details = __('تم إلغاء العقد وإلغاء الاستحقاقات غير المدفوعة', 'olama-registration');
+                                        } elseif ($activity->action === 'updated') {
+                                            $changes = [];
+                                            if ($before) {
+                                                if (isset($after['total_amount'], $before['total_amount']) && ($after['total_amount'] != $before['total_amount'])) {
+                                                    $changes[] = sprintf(__('القيمة الإجمالية: %s', 'olama-registration'), $money($after['total_amount']));
+                                                }
+                                                if (isset($after['status'], $before['status']) && ($after['status'] !== $before['status'])) {
+                                                    $changes[] = sprintf(__('تغيير الحالة إلى %s', 'olama-registration'), $status_label($after['status']));
+                                                }
+                                            }
+                                            $details = !empty($changes) ? implode('، ', $changes) : __('تعديل الحقول الأساسية أو الملاحظات', 'olama-registration');
+                                        } elseif ($activity->action === 'fee_added') {
+                                            $details = sprintf(__('إضافة بند: %s بقيمة %s', 'olama-registration'), $after['label'] ?? '', $money($after['net_amount'] ?? 0));
+                                        } elseif ($activity->action === 'fee_updated') {
+                                            $details = sprintf(__('تعديل بند: %s بقيمة %s', 'olama-registration'), $after['label'] ?? '', $money($after['net_amount'] ?? 0));
+                                        } elseif ($activity->action === 'fee_deleted') {
+                                            $details = sprintf(__('حذف بند: %s بقيمة %s', 'olama-registration'), $after['label'] ?? $before['label'] ?? '', $money($after['net_amount'] ?? $before['net_amount'] ?? 0));
+                                        } elseif ($activity->action === 'template_applied') {
+                                            $details = sprintf(__('تطبيق النموذج: %s', 'olama-registration'), $after['template_name'] ?? '');
+                                        } elseif (strpos($activity->action, 'amendment') !== false) {
+                                            $details = sprintf(__('رقم التعديل: %s، السبب: %s', 'olama-registration'), $after['amendment_no'] ?? $before['amendment_no'] ?? '', $after['reason'] ?? $before['reason'] ?? '');
+                                        }
+                                    }
+                                }
+                                if (empty($details)) {
+                                    $details = wp_trim_words((string) ($activity->after_state ?? $activity->before_state ?? ''), 22);
+                                }
+                                ?>
+                                <tr>
+                                    <td><?php echo esc_html($activity->created_at ?? ''); ?></td>
+                                    <td><?php echo esc_html($activity->display_name ?? ('#' . (int) $activity->actor_id)); ?></td>
+                                    <td><?php echo esc_html($act_label); ?></td>
+                                    <td><?php echo esc_html($details); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr><td colspan="4"><?php esc_html_e('لا توجد حركات مسجلة بعد.', 'olama-registration'); ?></td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 

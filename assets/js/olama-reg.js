@@ -2976,6 +2976,13 @@
         $('#os-form-agreement-header').trigger('submit');
     });
 
+    $(document).on('input change', '#os-form-agreement-header :input, #os-agr-clauses-list .os-agr-clause-text', function () {
+        $('#os-agreement-app').attr('data-header-saved', '0').data('header-saved', '0');
+        if (typeof syncAgreementWorkspaceActions === 'function') {
+            syncAgreementWorkspaceActions();
+        }
+    });
+
     $(document).on('submit', '#os-form-agreement-header', function (e) {
         e.preventDefault();
         const $agreementForm = $(this);
@@ -3005,6 +3012,10 @@
             .done(res => {
                 if (res.success) {
                     showNotice(res.data.message);
+                    jQuery('#os-agreement-app').attr('data-header-saved', '1').data('header-saved', '1');
+                    if (typeof syncAgreementWorkspaceActions === 'function') {
+                        syncAgreementWorkspaceActions();
+                    }
                     
                     if (res.data.agreement_number) {
                         // 1. Update main page heading if editing
@@ -3102,7 +3113,7 @@
         }
     });
 
-    $(document).on('click', '#os-agr-create-amendment', function () {
+    $(document).on('click', '#os-agr-create-amendment, #os-agr-create-amendment-inline', function () {
         const reason = prompt(olamaReg.i18n.amendmentReasonPrompt || 'أدخل سبب التعديل المالي:');
         if (!reason || !String(reason).trim()) {
             showNotice(olamaReg.i18n.amendmentReasonRequired || 'سبب التعديل مطلوب.', true);
@@ -3508,6 +3519,26 @@
         $('#os-agr-due-total').text(total.toFixed(2));
         $('#os-agr-due-diff').text(diff.toFixed(2));
         $('#os-agr-due-warning').toggle(Math.abs(diff) > 0.009);
+        syncAgreementWorkspaceActions();
+    }
+
+    function markAgreementDueScheduleSaved(isSaved) {
+        $('#os-agreement-app').attr('data-due-saved', isSaved ? '1' : '0').data('due-saved', isSaved ? '1' : '0');
+        syncAgreementWorkspaceActions();
+    }
+
+    function isAgreementDueScheduleSavedAndBalanced() {
+        const headerSaved = String($('#os-agreement-app').attr('data-header-saved') || '0') === '1';
+        const dueSaved = String($('#os-agreement-app').attr('data-due-saved') || '0') === '1';
+        const diff = Math.abs(parseMoney($('#os-agr-due-diff').text()));
+        return headerSaved && dueSaved && diff <= 0.009 && !$('#os-agr-due-warning').is(':visible');
+    }
+
+    function syncAgreementWorkspaceActions() {
+        const ready = isAgreementDueScheduleSavedAndBalanced();
+        const hasInvoice = String($('#os-agreement-app').attr('data-has-invoice') || '0') === '1';
+        $('.os-agr-complete-agreement-trigger').prop('disabled', !ready);
+        $('.os-agr-pay-requires-saved-due').prop('disabled', !(ready && hasInvoice));
     }
 
     function renderAgreementDueSchedule(schedule) {
@@ -3520,7 +3551,7 @@
             const remaining = Math.max(0, amount - paid);
             const rowLocked = scheduleLocked || paid > 0;
             const rowDisabledAttr = rowLocked ? ' disabled' : '';
-            const deleteButton = rowLocked ? '' : '<button type="button" class="button button-small os-agr-delete-due">X</button>';
+            const deleteButton = rowLocked ? '' : '<button type="button" class="button button-small os-agr-delete-due" aria-label="حذف القسط"><span class="dashicons dashicons-trash"></span></button>';
             $tbody.append(`
                 <tr>
                     <td class="os-agr-due-no">${line.installment_no || ''}</td>
@@ -3537,7 +3568,10 @@
         updateAgreementDueTotals();
     }
 
-    $(document).on('input change', '.os-agr-due-date, .os-agr-due-amount', updateAgreementDueTotals);
+    $(document).on('input change', '.os-agr-due-date, .os-agr-due-amount', function () {
+        markAgreementDueScheduleSaved(false);
+        updateAgreementDueTotals();
+    });
 
     $(document).on('click', '#os-agr-add-due-row', function () {
         if (!canRescheduleAgreementInstallments() && !(window.osAgreementFeeAmendmentMode && window.osAgreementFeeAmendmentMode.active)) {
@@ -3553,10 +3587,11 @@
                 <td>0.00</td>
                 <td>0.00</td>
                 <td>unpaid</td>
-                <td><button type="button" class="button button-small os-agr-delete-due">X</button></td>
+                <td><button type="button" class="button button-small os-agr-delete-due" aria-label="حذف القسط"><span class="dashicons dashicons-trash"></span></button></td>
             </tr>
         `);
         initDatepickers($('#os-agr-due-table tbody tr').last());
+        markAgreementDueScheduleSaved(false);
         updateAgreementDueTotals();
     });
 
@@ -3570,6 +3605,7 @@
             $('#os-agr-add-due-row').trigger('click');
             $('#os-agr-due-table tbody tr:last .os-agr-due-amount').val(parseMoney($('#os-agr-due-net').text()).toFixed(2));
         }
+        markAgreementDueScheduleSaved(false);
         updateAgreementDueTotals();
     });
 
@@ -3592,6 +3628,7 @@
             if (res.success) {
                 showNotice(res.data.message);
                 renderAgreementDueSchedule(res.data.schedule);
+                markAgreementDueScheduleSaved(true);
             } else {
                 showNotice(res.data?.message || R.strings.error, true);
             }
@@ -3615,16 +3652,21 @@
             if (res.success) {
                 showNotice(res.data.message);
                 renderAgreementDueSchedule(res.data.schedule);
+                markAgreementDueScheduleSaved(false);
             } else {
                 showNotice(res.data?.message || R.strings.error, true);
             }
         });
     });
 
-    $(document).on('click', '#os-agr-complete-agreement', function () {
+    $(document).on('click', '.os-agr-complete-agreement-trigger', function () {
         const $btn = $(this);
         const agrId = $('#os-agr-due-table').data('agr-id') || $('#os-agr-fees-table').data('agr-id');
         updateAgreementDueTotals();
+        if (!isAgreementDueScheduleSavedAndBalanced()) {
+            showNotice('يرجى حفظ جدول توزيع الاستحقاق قبل إكمال العقد وإنشاء الفاتورة.', true);
+            return;
+        }
         if ($('#os-agr-due-warning').is(':visible')) {
             showNotice('مجموع الاستحقاقات لا يساوي صافي العقد. يرجى تعديل توزيع الاستحقاق قبل الحفظ.', true);
             return;

@@ -11,6 +11,9 @@ class Olama_Reg_Admin {
         add_action( 'admin_menu',             [ $this, 'register_menu' ] );
         add_action( 'admin_enqueue_scripts',  [ $this, 'enqueue_assets' ] );
         add_action( 'admin_init',             [ $this, 'handle_print_actions' ] );
+        add_filter( 'admin_footer_text',      '__return_empty_string' );
+        add_filter( 'update_footer',          '__return_empty_string', 11 );
+
     }
 
     // ── Menu ──────────────────────────────────────────────────────────────────
