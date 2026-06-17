@@ -288,7 +288,8 @@ class Olama_Reg_Admin {
                 'os-hub',
                 OLAMA_REG_URL . 'assets/css/os-hub.css',
                 [ 'olama-reg' ],
-                OLAMA_REG_VERSION
+                // Use file modification time so browser always gets the latest version after edits
+                filemtime( OLAMA_REG_PATH . 'assets/css/os-hub.css' )
             );
             wp_enqueue_script(
                 'os-hub',
