@@ -37,31 +37,8 @@ if ( ! defined( 'ABSPATH' ) ) exit;
             </tr>
         <?php else: ?>
             <?php foreach ( $invoices as $inv ):
-                $badge_class = 'olama-reg-badge--inactive';
-                $status_lbl  = __( 'مسودة', 'olama-registration' );
-                switch ( $inv->status ) {
-                    case 'issued':
-                        $badge_class = 'olama-reg-badge--info';
-                        $status_lbl  = __( 'صادرة', 'olama-registration' );
-                        break;
-                    case 'partial':
-                    case 'partially_paid':
-                        $badge_class = 'olama-reg-badge--warning';
-                        $status_lbl  = __( 'جزئية', 'olama-registration' );
-                        break;
-                    case 'paid':
-                        $badge_class = 'olama-reg-badge--active';
-                        $status_lbl  = __( 'مدفوعة', 'olama-registration' );
-                        break;
-                    case 'overdue':
-                        $badge_class = 'olama-reg-badge--blacklist';
-                        $status_lbl  = __( 'متأخرة', 'olama-registration' );
-                        break;
-                    case 'cancelled':
-                        $badge_class = 'olama-reg-badge--inactive';
-                        $status_lbl  = __( 'ملغاة', 'olama-registration' );
-                        break;
-                }
+                $status_lbl  = Olama_Reg_Status_Labels::label( $inv->status, 'invoice' );
+                $badge_class = 'olama-reg-badge--' . Olama_Reg_Status_Labels::badge_class( $inv->status, 'invoice' );
             ?>
                 <tr>
                     <td><strong style="letter-spacing:0.3px;"><?php echo esc_html( $inv->invoice_number ); ?></strong></td>

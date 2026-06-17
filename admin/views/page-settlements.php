@@ -102,7 +102,7 @@ $receipts = Olama_Reg_Settlement::get_receipts( $args );
                             if ( $receipt->status === 'pending_settlement' ) echo '<span style="color:#d63638;font-weight:bold;">بانتظار التسوية</span>';
                             elseif ( $receipt->status === 'settled' ) echo '<span style="color:#00a32a;font-weight:bold;">تمت التسوية</span>';
                             elseif ( $receipt->status === 'cancelled' ) echo '<span style="color:#8c8f94;">ملغي</span>';
-                            else echo esc_html( $receipt->status );
+                            else echo esc_html( Olama_Reg_Status_Labels::label( $receipt->status, 'settlement' ) );
                             ?>
                         </td>
                         <td>

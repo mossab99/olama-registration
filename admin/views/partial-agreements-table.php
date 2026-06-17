@@ -43,26 +43,8 @@ if ( ! defined( 'ABSPATH' ) ) exit;
             </tr>
         <?php else: ?>
             <?php foreach ( $agreements as $agr ):
-                $badge_class = 'olama-reg-badge--inactive';
-                $status_lbl  = esc_html( $agr->status );
-                switch ( $agr->status ) {
-                    case 'active':
-                        $badge_class = 'olama-reg-badge--active';
-                        $status_lbl  = __( 'نشط', 'olama-registration' );
-                        break;
-                    case 'completed':
-                        $badge_class = 'olama-reg-badge--info';
-                        $status_lbl  = __( 'مكتمل', 'olama-registration' );
-                        break;
-                    case 'cancelled':
-                        $badge_class = 'olama-reg-badge--blacklist';
-                        $status_lbl  = __( 'ملغي', 'olama-registration' );
-                        break;
-                    case 'draft':
-                        $badge_class = 'olama-reg-badge--inactive';
-                        $status_lbl  = __( 'مسودة', 'olama-registration' );
-                        break;
-                }
+                $status_lbl  = Olama_Reg_Status_Labels::label( $agr->status, 'agreement' );
+                $badge_class = 'olama-reg-badge--' . Olama_Reg_Status_Labels::badge_class( $agr->status, 'agreement' );
             ?>
                 <tr>
                     <?php if ( ! isset( $is_hub ) || ! $is_hub ) : ?>
@@ -115,47 +97,43 @@ if ( ! defined( 'ABSPATH' ) ) exit;
                         <td style="color:var(--reg-text-muted);"><?php echo date_i18n( get_option( 'date_format' ), strtotime( $agr->created_at ) ); ?></td>
                     <?php endif; ?>
                     <td style="text-align: center; white-space: nowrap;">
-                        <?php if ( isset( $is_hub ) && $is_hub ) : ?>
-                            <a href="#" class="button button-small os-hub-edit-agreement" data-id="<?php echo esc_attr( $agr->id ); ?>" style="margin-left: 4px;">
-                                <?php esc_html_e( 'تعديل', 'olama-registration' ); ?>
-                            </a>
-                        <?php else : ?>
-                            <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-agreements&action=edit&id=' . $agr->id ) ); ?>" class="button button-small" style="margin-left: 4px;">
-                                <?php esc_html_e( 'تعديل', 'olama-registration' ); ?>
-                            </a>
-                        <?php endif; ?>
+                        <?php
+                        $context_arg = ( isset( $is_hub ) && $is_hub ) ? 'customer_hub' : 'admin';
+                        $allowed_actions = class_exists( 'Olama_Reg_Agreement_Renderer' ) 
+                            ? Olama_Reg_Agreement_Renderer::get_allowed_actions( $agr, $context_arg ) 
+                            : [];
 
-                        <a href="<?php echo esc_url( admin_url( 'admin.php?page=olama-registration-agreements&action=print&id=' . $agr->id ) ); ?>" target="_blank" class="button button-small" style="margin-left: 4px;">
-                            <?php esc_html_e( 'طباعة', 'olama-registration' ); ?>
-                        </a>
-
-                        <?php if ( isset( $is_hub ) && $is_hub && ! empty( $agr->invoices ) ) : ?>
-                            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #cbd5e1; display: flex; flex-direction: column; gap: 4px;">
-                                <?php foreach ( $agr->invoices as $inv ) : ?>
-                                    <button type="button" class="button button-small olama-reg-view-invoice-btn" data-id="<?php echo esc_attr( $inv->id ); ?>" title="<?php esc_attr_e( 'عرض الفاتورة', 'olama-registration' ); ?>" style="background:#0284c7; border-color:#0284c7; color:#fff; display: block; width: 100%; text-align: center; justify-content: center; font-size: 11px; margin-bottom: 2px;">
-                                        <?php echo sprintf( esc_html__( 'عرض %s', 'olama-registration' ), esc_html( $inv->invoice_number ) ); ?>
-                                    </button>
-                                    
-                                    <?php if ( (float)$inv->balance > 0 && $inv->status !== 'cancelled' && $inv->status !== 'draft' ) : ?>
-                                        <button type="button" class="button button-small os-hub-pay-invoice-btn" data-id="<?php echo esc_attr($inv->id); ?>" title="<?php esc_attr_e( 'دفع الفاتورة', 'olama-registration' ); ?>" style="background:#16a34a; border-color:#16a34a; color:#fff; display: block; width: 100%; text-align: center; justify-content: center; font-size: 11px; margin-bottom: 4px;">
-                                            <?php echo sprintf( esc_html__( 'دفع %s', 'olama-registration' ), esc_html( $inv->invoice_number ) ); ?>
-                                        </button>
-                                    <?php endif; ?>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-
-                        <?php if ( $agr->status !== 'cancelled' && empty( $agr->invoices ) ) : ?>
-                            <?php
-                            $cancel_url = admin_url( 'admin.php?page=olama-registration-agreements&action=cancel&id=' . $agr->id );
-                            if ( isset( $is_hub ) && $is_hub ) {
-                                $cancel_url = add_query_arg( 'redirect_to', 'hub', $cancel_url );
+                        foreach ( $allowed_actions as $act_key => $act ) {
+                            if ( $act_key === 'invoices' ) {
+                                ?>
+                                <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #cbd5e1; display: flex; flex-direction: column; gap: 4px;">
+                                    <?php foreach ( $act as $inv_act ) : ?>
+                                        <?php if ( isset( $inv_act['view'] ) ) : ?>
+                                            <button type="button" class="<?php echo esc_attr( $inv_act['view']['class'] ); ?>" <?php echo $inv_act['view']['attribs'] ?? ''; ?>>
+                                                <?php echo esc_html( $inv_act['view']['label'] ); ?>
+                                            </button>
+                                        <?php endif; ?>
+                                        <?php if ( isset( $inv_act['pay'] ) ) : ?>
+                                            <button type="button" class="<?php echo esc_attr( $inv_act['pay']['class'] ); ?>" <?php echo $inv_act['pay']['attribs'] ?? ''; ?>>
+                                                <?php echo esc_html( $inv_act['pay']['label'] ); ?>
+                                            </button>
+                                        <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </div>
+                                <?php
+                            } else {
+                                $target = isset( $act['target'] ) ? ' target="' . esc_attr( $act['target'] ) . '"' : '';
+                                $onclick = isset( $act['onclick'] ) ? ' onclick="' . esc_attr( $act['onclick'] ) . '"' : '';
+                                $style = isset( $act['style'] ) ? ' style="' . esc_attr( $act['style'] ) . '"' : ' style="margin-left: 4px;"';
+                                $attribs = isset( $act['attribs'] ) ? ' ' . $act['attribs'] : '';
+                                ?>
+                                <a href="<?php echo esc_url( $act['url'] ); ?>" class="<?php echo esc_attr( $act['class'] ); ?>"<?php echo $style . $target . $onclick . $attribs; ?>>
+                                    <?php echo esc_html( $act['label'] ); ?>
+                                </a>
+                                <?php
                             }
-                            ?>
-                            <a href="<?php echo esc_url( $cancel_url ); ?>" class="button button-small" style="color:#d63638; text-decoration:none;" onclick="return confirm('<?php echo esc_js( __( 'هل أنت متأكد من إلغاء وحذف هذا العقد؟', 'olama-registration' ) ); ?>');">
-                                <?php esc_html_e( 'إلغاء', 'olama-registration' ); ?>
-                            </a>
-                        <?php endif; ?>
+                        }
+                        ?>
                     </td>
                 </tr>
             <?php endforeach; ?>

@@ -189,6 +189,10 @@ class Olama_Reg_Billing_Payment {
         self::log_audit( 'payment', $payment_id, 'payment_created', null,
             self::get_payment_row( $payment_id ) );
 
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && ! empty( $family_uid ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $family_uid, 0 );
+        }
+
         return $payment_id;
     }
 
@@ -278,6 +282,10 @@ class Olama_Reg_Billing_Payment {
 
         self::log_audit( 'payment', $id, 'payment_reversed', $payment, self::get_payment_row( $id ) );
 
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && $payment && ! empty( $payment->family_uid ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $payment->family_uid, 0 );
+        }
+
         return $new_payment_id;
     }
 
@@ -332,6 +340,8 @@ class Olama_Reg_Billing_Payment {
         $remaining = (float) $payment->amount;
         if ( $remaining <= 0 ) return;
 
+        $details = self::resolve_allocation_details( (int) $payment->invoice_id );
+
         // Get unpaid/partial installments ordered oldest first
         $installments = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM " . self::t( 'olama_invoice_installments' ) . "
@@ -349,6 +359,8 @@ class Olama_Reg_Billing_Payment {
                 'amount'          => round( $remaining, 2 ),
                 'allocation_date' => $payment->payment_date ?: date( 'Y-m-d' ),
                 'type'            => 'normal',
+                'student_uid'     => $details['student_uid'],
+                'fee_category'    => $details['fee_category'],
                 'created_by'      => get_current_user_id(),
             ] );
             return;
@@ -387,6 +399,8 @@ class Olama_Reg_Billing_Payment {
                 'amount'          => round( $apply, 2 ),
                 'allocation_date' => $payment->payment_date ?: date( 'Y-m-d' ),
                 'type'            => 'normal',
+                'student_uid'     => $details['student_uid'],
+                'fee_category'    => $details['fee_category'],
                 'created_by'      => get_current_user_id(),
             ] );
         }
@@ -501,17 +515,8 @@ class Olama_Reg_Billing_Payment {
     }
 
     public static function get_status_label( object|string $payment ): string {
-        $labels = [
-            'draft'          => __( 'مسودة', 'olama-registration' ),
-            'pending_review' => __( 'قيد المراجعة', 'olama-registration' ),
-            'posted'         => __( 'معتمد', 'olama-registration' ),
-            'reversed'       => __( 'معكوس', 'olama-registration' ),
-            'failed'         => __( 'فشل', 'olama-registration' ),
-            'cancelled'      => __( 'ملغى', 'olama-registration' ),
-        ];
         $status = is_object( $payment ) ? (string) ( $payment->status ?? 'posted' ) : (string) $payment;
-
-        return $labels[ $status ] ?? $status;
+        return Olama_Reg_Status_Labels::label( $status, 'payment' );
     }
 
     private static function reverse_allocations( int $original_payment_id, int $reversal_payment_id ): void {
@@ -563,6 +568,8 @@ class Olama_Reg_Billing_Payment {
                 'amount'                    => $amount,
                 'allocation_date'           => date( 'Y-m-d' ),
                 'type'                      => 'reversal',
+                'student_uid'               => $allocation->student_uid ?? null,
+                'fee_category'              => $allocation->fee_category ?? null,
                 'reversed_allocation_id'    => (int) $allocation->id,
                 'created_by'                => get_current_user_id(),
             ] );
@@ -714,5 +721,61 @@ class Olama_Reg_Billing_Payment {
             'after_state'  => $after  ? wp_json_encode( $after )  : null,
             'ip_address'   => sanitize_text_field( $_SERVER['REMOTE_ADDR'] ?? '' ),
         ] );
+    }
+
+    private static function resolve_allocation_details( int $invoice_id ): array {
+        global $wpdb;
+        
+        $student_uid = null;
+        $fee_category = null;
+        
+        // 1. Check invoice table first
+        $invoice = $wpdb->get_row( $wpdb->prepare(
+            "SELECT student_uid, ext_child_id, agreement_id 
+             FROM {$wpdb->prefix}olama_invoices 
+             WHERE id = %d",
+            $invoice_id
+        ) );
+        
+        if ( $invoice ) {
+            if ( ! empty( $invoice->student_uid ) ) {
+                $student_uid = $invoice->student_uid;
+            } elseif ( ! empty( $invoice->ext_child_id ) ) {
+                $student_uid = (string) $invoice->ext_child_id;
+            }
+        }
+        
+        // 2. Query agreement_fees for fee category and student fallback
+        $fee = $wpdb->get_row( $wpdb->prepare(
+            "SELECT child_id, fee_category FROM {$wpdb->prefix}olama_agreement_fees 
+             WHERE invoice_id = %d LIMIT 1",
+            $invoice_id
+        ) );
+        
+        if ( $fee ) {
+            $fee_category = $fee->fee_category;
+            if ( empty( $student_uid ) && ! empty( $fee->child_id ) ) {
+                $student_uid = $fee->child_id;
+            }
+        }
+        
+        // 3. Fallback: look at invoice items or default to general
+        if ( empty( $fee_category ) ) {
+            $item_desc = $wpdb->get_var( $wpdb->prepare(
+                "SELECT description FROM {$wpdb->prefix}olama_invoice_items 
+                 WHERE invoice_id = %d LIMIT 1",
+                $invoice_id
+            ) );
+            if ( $item_desc ) {
+                $fee_category = $item_desc;
+            } else {
+                $fee_category = 'general';
+            }
+        }
+        
+        return [
+            'student_uid'  => $student_uid,
+            'fee_category' => $fee_category
+        ];
     }
 }

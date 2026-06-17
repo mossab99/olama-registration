@@ -115,6 +115,7 @@ $statement_report = Olama_Reg_Billing_Reports::get_family_statement_report( [
     'entity_type' => sanitize_key( $_GET['entity_type'] ?? 'family' ),
     'uid'         => sanitize_text_field( $_GET['uid'] ?? '' ),
     'year_id'     => $year_id,
+    'student_uid' => sanitize_text_field( $_GET['student_uid'] ?? '' ),
     'date_from'   => sanitize_text_field( $_GET['date_from'] ?? '' ),
     'date_to'     => sanitize_text_field( $_GET['date_to'] ?? '' ),
 ] );
@@ -635,6 +636,33 @@ function olama_reg_statement_text( string $key ): string {
                         <?php endforeach; ?>
                     </select>
                 </div>
+
+                <?php
+                $show_student_dropdown = false;
+                $family_students = [];
+                if ( $statement_report['filters']['entity_type'] === 'family' && ! empty( $statement_report['filters']['uid'] ) ) {
+                    global $wpdb;
+                    $family_students = $wpdb->get_results( $wpdb->prepare(
+                        "SELECT student_uid, student_name FROM {$wpdb->prefix}olama_students WHERE family_id = %s AND is_active = 1",
+                        $statement_report['filters']['uid']
+                    ) ) ?: [];
+                    if ( ! empty( $family_students ) ) {
+                        $show_student_dropdown = true;
+                    }
+                }
+                if ( $show_student_dropdown ) :
+                ?>
+                <div class="olama-reg-field">
+                    <label><?php esc_html_e( 'الطالب (اختياري)', 'olama-registration' ); ?></label>
+                    <select name="student_uid">
+                        <option value=""><?php esc_html_e( 'جميع الطلاب', 'olama-registration' ); ?></option>
+                        <?php foreach ( $family_students as $fs ) : ?>
+                            <option value="<?php echo esc_attr( $fs->student_uid ); ?>" <?php selected( $statement_report['filters']['student_uid'], $fs->student_uid ); ?>><?php echo esc_html( $fs->student_name ); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
+
                 <div class="olama-reg-field">
                     <label><?php echo esc_html( olama_reg_statement_text( 'from_date' ) ); ?></label>
                     <input type="date" name="date_from" value="<?php echo esc_attr( $statement_report['filters']['date_from'] ); ?>">
@@ -910,7 +938,7 @@ function olama_reg_statement_text( string $key ): string {
                                 <td><?php echo esc_html( $row->payment_no ?: '#' . (int) $row->payment_id ); ?></td>
                                 <td><?php echo esc_html( $row->invoice_number ?: 'â€”' ); ?></td>
                                 <td><?php echo esc_html( $row->account_name ?: 'â€”' ); ?></td>
-                                <td><?php echo esc_html( $row->status ); ?></td>
+                                <td><?php echo esc_html( Olama_Reg_Status_Labels::label( $row->status, 'cheque' ) ); ?></td>
                                 <td><?php echo esc_html( Olama_Reg_Billing_Payment::get_status_label( $row->payment_status ?: 'posted' ) ); ?></td>
                                 <td class="olama-reg-text--success"><?php echo esc_html( $money( $row->amount ) ); ?></td>
                             </tr>

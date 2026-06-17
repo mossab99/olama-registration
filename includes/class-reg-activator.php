@@ -12,6 +12,13 @@ class Olama_Reg_Activator {
      * Called once on plugin activation hook.
      */
     public static function activate(): void {
+        self::upgrade();
+    }
+
+    /**
+     * Public upgrade method running all migrations and setups.
+     */
+    public static function upgrade(): void {
         self::run_migrations();
         self::install_capabilities();
         update_option( 'olama_reg_version', OLAMA_REG_VERSION );
@@ -35,10 +42,14 @@ class Olama_Reg_Activator {
         self::create_customer_children_table( $wpdb, $charset );
         self::create_agreements_tables( $wpdb, $charset );
         self::create_agreement_amendment_tables( $wpdb, $charset );
+        self::create_agreement_participants_table( $wpdb, $charset );
+        self::create_financial_snapshots_table( $wpdb, $charset );
         self::upgrade_invoices_table( $wpdb );
         self::upgrade_payments_table( $wpdb );
         self::upgrade_installments_table( $wpdb );
-        self::install_capabilities();
+        self::upgrade_allocations_table( $wpdb );
+        self::upgrade_agreement_fees_table( $wpdb );
+        self::backfill_agreement_participants( $wpdb );
     }
 
     public static function financial_capabilities(): array {
@@ -639,6 +650,8 @@ class Olama_Reg_Activator {
             amount decimal(10,2) NOT NULL DEFAULT 0.00,
             allocation_date date DEFAULT NULL,
             type varchar(20) NOT NULL DEFAULT 'normal',
+            student_uid varchar(50) DEFAULT NULL,
+            fee_category varchar(100) DEFAULT NULL,
             reversed_allocation_id bigint(20) UNSIGNED DEFAULT NULL,
             created_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
             created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -646,6 +659,8 @@ class Olama_Reg_Activator {
             KEY payment_id (payment_id),
             KEY invoice_id (invoice_id),
             KEY installment_id (installment_id),
+            KEY student_uid (student_uid),
+            KEY fee_category (fee_category),
             KEY reversed_allocation_id (reversed_allocation_id)
         ) {$charset};";
 
@@ -748,6 +763,11 @@ class Olama_Reg_Activator {
             invoice_id BIGINT UNSIGNED DEFAULT NULL,
             paid_status VARCHAR(20) NOT NULL DEFAULT 'unpaid',
             sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            status VARCHAR(30) NOT NULL DEFAULT 'active',
+            cancelled_at DATETIME DEFAULT NULL,
+            cancelled_by BIGINT UNSIGNED DEFAULT NULL,
+            cancellation_reason TEXT DEFAULT NULL,
+            cancellation_amendment_id BIGINT UNSIGNED DEFAULT NULL,
             PRIMARY KEY (id),
             KEY agreement_id (agreement_id),
             KEY invoice_id (invoice_id)
@@ -919,6 +939,232 @@ class Olama_Reg_Activator {
             if ( ! in_array( $column, (array) $existing_lines, true ) ) {
                 $wpdb->query( $sql );
             }
+        }
+    }
+
+    private static function create_agreement_participants_table( $wpdb, string $charset ): void {
+        $table = $wpdb->prefix . 'olama_agreement_participants';
+
+        $sql = "CREATE TABLE {$table} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            agreement_id BIGINT UNSIGNED NOT NULL,
+            payer_type VARCHAR(20) NOT NULL DEFAULT 'family',
+            family_uid VARCHAR(50) NOT NULL,
+            participant_type VARCHAR(20) NOT NULL DEFAULT 'student',
+            participant_ref VARCHAR(50) NOT NULL,
+            student_uid VARCHAR(50) DEFAULT NULL,
+            child_id BIGINT UNSIGNED DEFAULT NULL,
+            role VARCHAR(30) NOT NULL DEFAULT 'beneficiary',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            created_by BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (id),
+            UNIQUE KEY agreement_participant (agreement_id, participant_type, participant_ref),
+            KEY family_uid (family_uid),
+            KEY student_uid (student_uid),
+            KEY child_id (child_id),
+            KEY agreement_id (agreement_id),
+            KEY payer_type (payer_type)
+        ) {$charset};";
+
+        dbDelta( $sql );
+    }
+
+    private static function create_financial_snapshots_table( $wpdb, string $charset ): void {
+        $table = $wpdb->prefix . 'olama_family_financial_snapshots';
+
+        $sql = "CREATE TABLE {$table} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            family_uid VARCHAR(50) NOT NULL,
+            academic_year_id INT UNSIGNED NOT NULL DEFAULT 0,
+            total_agreements INT UNSIGNED NOT NULL DEFAULT 0,
+            total_fees DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            total_discounts DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            gross_invoiced DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            total_paid DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            total_settlements DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            total_credit_adjustments DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            total_debit_adjustments DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            net_adjustments DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            current_balance DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            due_now DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            overdue DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            previous_balance DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            unallocated_payments DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+            calculated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            calculation_hash VARCHAR(64) DEFAULT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY family_year (family_uid, academic_year_id),
+            KEY academic_year_id (academic_year_id),
+            KEY calculated_at (calculated_at)
+        ) {$charset};";
+
+        dbDelta( $sql );
+    }
+
+    private static function backfill_agreement_participants( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_agreement_participants';
+        $agr_table = $wpdb->prefix . 'olama_agreements';
+        $fees_table = $wpdb->prefix . 'olama_agreement_fees';
+
+        // Skip if already backfilled
+        $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+        if ( $count > 0 ) {
+            return;
+        }
+
+        $agreements = $wpdb->get_results( "SELECT * FROM {$agr_table}" );
+        if ( empty( $agreements ) ) {
+            return;
+        }
+
+        foreach ( $agreements as $agr ) {
+            $payer_type = $agr->payer_type;
+            $payer_id = $agr->payer_id;
+            $is_family = ( $payer_type === 'family' );
+
+            // 1. Collect participant IDs from agreement_fees.child_id first (most accurate)
+            $fee_children = $wpdb->get_col( $wpdb->prepare(
+                "SELECT DISTINCT child_id FROM {$fees_table}
+                 WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
+                $agr->id
+            ) );
+
+            // 2. Fallback to participant_ids JSON
+            if ( empty( $fee_children ) ) {
+                $json_ids = json_decode( $agr->participant_ids, true ) ?: [];
+                if ( empty( $json_ids ) && ! empty( $agr->participant_id ) ) {
+                    $json_ids = [ $agr->participant_id ];
+                }
+                $fee_children = array_filter( array_map( 'trim', array_map( 'strval', $json_ids ) ) );
+            }
+
+            // 3. Insert into participants table
+            foreach ( $fee_children as $pid ) {
+                $pid = trim( (string) $pid );
+                if ( empty( $pid ) || $pid === '0' ) {
+                    continue;
+                }
+
+                $participant_type = $is_family ? 'student' : 'child';
+                $participant_ref  = $pid; // Always non-null string
+
+                $row = [
+                    'agreement_id'     => $agr->id,
+                    'payer_type'       => $payer_type,
+                    'family_uid'       => (string) $payer_id,
+                    'participant_type' => $participant_type,
+                    'participant_ref'  => $participant_ref,
+                    'student_uid'      => $is_family ? (string) $pid : null,
+                    'child_id'         => ( ! $is_family && is_numeric( $pid ) ) ? (int) $pid : null,
+                    'role'             => 'beneficiary',
+                    'created_by'       => (int) ( $agr->created_by ?? 0 ),
+                ];
+
+                if ( $is_family ) {
+                    $wpdb->query( $wpdb->prepare(
+                        "INSERT IGNORE INTO {$table}
+                         (agreement_id, payer_type, family_uid, participant_type, participant_ref, student_uid, child_id, role, created_by)
+                         VALUES (%d, %s, %s, %s, %s, %s, NULL, %s, %d)",
+                        $row['agreement_id'],
+                        $row['payer_type'],
+                        $row['family_uid'],
+                        $row['participant_type'],
+                        $row['participant_ref'],
+                        $row['student_uid'],
+                        $row['role'],
+                        $row['created_by']
+                    ) );
+                } else {
+                    $wpdb->query( $wpdb->prepare(
+                        "INSERT IGNORE INTO {$table}
+                         (agreement_id, payer_type, family_uid, participant_type, participant_ref, student_uid, child_id, role, created_by)
+                         VALUES (%d, %s, %s, %s, %s, NULL, %d, %s, %d)",
+                        $row['agreement_id'],
+                        $row['payer_type'],
+                        $row['family_uid'],
+                        $row['participant_type'],
+                        $row['participant_ref'],
+                        $row['child_id'],
+                        $row['role'],
+                        $row['created_by']
+                    ) );
+                }
+            }
+        }
+    }
+
+    private static function upgrade_allocations_table( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_payment_allocations';
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'student_uid', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `student_uid` varchar(50) DEFAULT NULL AFTER `type`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `student_uid` (`student_uid`)" );
+        }
+        if ( ! in_array( 'fee_category', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `fee_category` varchar(100) DEFAULT NULL AFTER `student_uid`" );
+            $wpdb->query( "ALTER TABLE {$table} ADD KEY `fee_category` (`fee_category`)" );
+        }
+
+        self::backfill_payment_allocations( $wpdb );
+    }
+
+    private static function backfill_payment_allocations( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_payment_allocations';
+        $invoices = $wpdb->prefix . 'olama_invoices';
+        $fees = $wpdb->prefix . 'olama_agreement_fees';
+
+        // 1. Backfill student_uid from invoices where student_uid is present and valid
+        $wpdb->query( "
+            UPDATE {$table} a
+            INNER JOIN {$invoices} i ON i.id = a.invoice_id
+            SET a.student_uid = i.student_uid
+            WHERE (a.student_uid IS NULL OR a.student_uid = '') AND i.student_uid IS NOT NULL AND i.student_uid != ''
+        " );
+
+        // 2. Backfill student_uid from external customer child column where ext_child_id is set
+        $wpdb->query( "
+            UPDATE {$table} a
+            INNER JOIN {$invoices} i ON i.id = a.invoice_id
+            SET a.student_uid = CAST(i.ext_child_id AS CHAR)
+            WHERE (a.student_uid IS NULL OR a.student_uid = '') AND i.ext_child_id IS NOT NULL AND i.ext_child_id != 0
+        " );
+
+        // 3. Backfill fee_category and student_uid fallback from agreement_fees
+        $wpdb->query( "
+            UPDATE {$table} a
+            INNER JOIN {$fees} f ON f.invoice_id = a.invoice_id
+            SET a.fee_category = f.fee_category,
+                a.student_uid = IF(a.student_uid IS NULL OR a.student_uid = '', f.child_id, a.student_uid)
+            WHERE (a.fee_category IS NULL OR a.fee_category = '') AND f.fee_category IS NOT NULL AND f.fee_category != ''
+        " );
+
+        // 4. Fallback for fee_category: set to general if still empty
+        $wpdb->query( "
+            UPDATE {$table}
+            SET fee_category = 'general'
+            WHERE fee_category IS NULL OR fee_category = ''
+        " );
+    }
+
+    private static function upgrade_agreement_fees_table( $wpdb ): void {
+        $table = $wpdb->prefix . 'olama_agreement_fees';
+        $existing = $wpdb->get_col( "DESCRIBE {$table}", 0 );
+
+        if ( ! in_array( 'status', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `status` varchar(30) NOT NULL DEFAULT 'active' AFTER `sort_order`" );
+        }
+        if ( ! in_array( 'cancelled_at', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cancelled_at` datetime DEFAULT NULL AFTER `status`" );
+        }
+        if ( ! in_array( 'cancelled_by', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cancelled_by` bigint(20) UNSIGNED DEFAULT NULL AFTER `cancelled_at`" );
+        }
+        if ( ! in_array( 'cancellation_reason', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cancellation_reason` text DEFAULT NULL AFTER `cancelled_by`" );
+        }
+        if ( ! in_array( 'cancellation_amendment_id', (array) $existing, true ) ) {
+            $wpdb->query( "ALTER TABLE {$table} ADD COLUMN `cancellation_amendment_id` bigint(20) UNSIGNED DEFAULT NULL AFTER `cancellation_reason`" );
         }
     }
 }

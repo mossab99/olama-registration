@@ -3,7 +3,7 @@
  * Plugin Name: Olama Family Billing
  * Plugin URI:  https://olama.online/olama-registration
  * Description: Family-centric billing and invoicing system for Olama School. Requires Olama School System plugin.
- * Version:     1.1.3
+ * Version:     1.3.2
  * Author:      د. مصعب الحنيطي
  * Author URI:  https://olama.online
  * Text Domain: olama-registration
@@ -51,6 +51,7 @@ function olama_reg_init() {
     }
 
     // ── Load includes ────────────────────────────────────────────────────────
+    require_once OLAMA_REG_PATH . 'includes/class-reg-status-labels.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-id-generator.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-activator.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-family.php';
@@ -59,6 +60,7 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-child.php';
     
     // Agreements
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-participants.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-policy.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-amendment.php';
@@ -67,6 +69,7 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-clause-bank.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-invoice.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-templates.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-agreement-renderer.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-financial.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-fees.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-invoice.php';
@@ -79,6 +82,7 @@ function olama_reg_init() {
     require_once OLAMA_REG_PATH . 'includes/class-reg-billing-reports.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-receipt-repair.php';
     require_once OLAMA_REG_PATH . 'includes/class-reg-settlement.php';
+    require_once OLAMA_REG_PATH . 'includes/class-reg-family-financial-summary.php';
 
     // ── Load admin ───────────────────────────────────────────────────────────
     if ( is_admin() ) {
@@ -93,9 +97,29 @@ function olama_reg_init() {
     // Schema version check — run migrations if version changed
     $installed = get_option( 'olama_reg_version', '0' );
     if ( version_compare( $installed, OLAMA_REG_VERSION, '<' ) ) {
-        Olama_Reg_Activator::run_migrations();
-        update_option( 'olama_reg_version', OLAMA_REG_VERSION );
+        Olama_Reg_Activator::upgrade();
     }
+
+    // Versioned migrations check on admin_init (handles code updates dynamically)
+    add_action( 'admin_init', function() {
+        $target_version = '2.2.0'; // Bump this with each schema change
+        $installed_version = get_option( 'olama_registration_db_version', '0' );
+
+        if ( version_compare( $installed_version, $target_version, '<' ) ) {
+            if ( get_transient( 'olama_registration_db_upgrade_lock' ) ) {
+                return;
+            }
+
+            set_transient( 'olama_registration_db_upgrade_lock', 1, 5 * MINUTE_IN_SECONDS );
+
+            try {
+                Olama_Reg_Activator::upgrade();
+                update_option( 'olama_registration_db_version', $target_version );
+            } finally {
+                delete_transient( 'olama_registration_db_upgrade_lock' );
+            }
+        }
+    });
 
     // ── Load translations ────────────────────────────────────────────────────
     load_plugin_textdomain(
@@ -135,6 +159,9 @@ function olama_reg_deactivate() {
 // ── Temporary DB Cleanup Script ──────────────────────────────────────────────
 add_action( 'admin_init', function() {
     if ( isset( $_GET['force_db_create'] ) ) {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'Unauthorized.', 'olama-registration' ), 403 );
+        }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         require_once OLAMA_REG_PATH . 'includes/class-reg-activator.php';
         Olama_Reg_Activator::run_migrations();
@@ -142,6 +169,10 @@ add_action( 'admin_init', function() {
     }
 
     if ( ! isset( $_GET['olama_db_cleanup'] ) ) return;
+    
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( esc_html__( 'Unauthorized.', 'olama-registration' ), 403 );
+    }
     
     global $wpdb;
     

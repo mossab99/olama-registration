@@ -269,7 +269,7 @@ if ($action === 'print_receipt' && $payment_id) {
                 <?php if ($method_details && $payment->method === 'cheque'): ?>
                     <tr>
                         <td class="label"><?php esc_html_e('حالة الشيك:', 'olama-registration'); ?></td>
-                        <td><?php echo esc_html($method_details->status); ?></td>
+                        <td><?php echo esc_html( Olama_Reg_Status_Labels::label( $method_details->status, 'cheque' ) ); ?></td>
                     </tr>
                     <?php if (!empty($method_details->due_date)): ?>
                     <tr>
@@ -280,7 +280,7 @@ if ($action === 'print_receipt' && $payment_id) {
                 <?php elseif ($method_details && $payment->method === 'bank_transfer'): ?>
                     <tr>
                         <td class="label"><?php esc_html_e('حالة التحويل:', 'olama-registration'); ?></td>
-                        <td><?php echo esc_html($method_details->status); ?></td>
+                        <td><?php echo esc_html( Olama_Reg_Status_Labels::label( $method_details->status, 'bank_transfer' ) ); ?></td>
                     </tr>
                 <?php elseif ($method_details && $payment->method === 'online'): ?>
                     <tr>

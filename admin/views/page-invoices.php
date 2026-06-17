@@ -156,15 +156,7 @@ if ( $action === 'print' && $id ) {
                     <td colspan="3">
                         <strong>
                             <?php 
-                            $status_labels = [
-                                'draft'     => 'مسودة',
-                                'issued'    => 'صادرة / غير مدفوعة',
-                                'partial'   => 'مدفوعة جزئياً',
-                                'paid'      => 'مدفوعة بالكامل',
-                                'overdue'   => 'متأخرة السداد',
-                                'cancelled' => 'ملغاة',
-                            ];
-                            echo esc_html( $status_labels[ $invoice->status ] ?? $invoice->status );
+                            echo esc_html( Olama_Reg_Status_Labels::label( $invoice->status, 'invoice' ) );
                             ?>
                         </strong>
                     </td>
@@ -240,15 +232,7 @@ if ( $action === 'print' && $id ) {
                                 <td style="text-align: left; font-weight: 700;"><?php echo esc_html( number_format( $inst->amount_due, 2 ) ); ?></td>
                                 <td style="text-align: left;"><?php echo esc_html( number_format( $inst->amount_paid, 2 ) ); ?></td>
                                 <td>
-                                    <?php 
-                                    $inst_labels = [
-                                        'pending' => 'معلق',
-                                        'partial' => 'جزئي',
-                                        'paid'    => 'مسدد',
-                                        'overdue' => 'متأخر',
-                                    ];
-                                    echo esc_html( $inst_labels[ $inst->status ] ?? $inst->status );
-                                    ?>
+                                    <?php echo esc_html( Olama_Reg_Status_Labels::label( $inst->status, 'installment' ) ); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

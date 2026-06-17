@@ -101,28 +101,30 @@ class Olama_Reg_Ajax
     private function guard(): void
     {
         check_ajax_referer('olama_reg_nonce', 'nonce');
-        if (
-            !current_user_can('manage_options') &&
-            !current_user_can('olama_manage_registration_families') &&
-            !current_user_can('olama_manage_registration_students') &&
-            !current_user_can('olama_manage_registration_fees') &&
-            !current_user_can('olama_manage_registration_invoices') &&
-            !current_user_can('olama_manage_registration_payments') &&
-            !current_user_can('olama_manage_registration_reports') &&
-            !current_user_can('olama_record_payments') &&
-            !current_user_can('olama_reverse_payments') &&
-            !current_user_can('olama_confirm_bank_payments') &&
-            !current_user_can('olama_manage_cheques') &&
-            !current_user_can('olama_view_cash_reports') &&
-            !current_user_can('olama_manage_financial_accounts')
-            && !current_user_can('olama_edit_agreement_admin_fields')
-            && !current_user_can('olama_create_agreement_amendment')
-            && !current_user_can('olama_approve_agreement_amendment')
-            && !current_user_can('olama_post_agreement_amendment')
-            && !current_user_can('olama_reschedule_agreement_installments')
-            && !current_user_can('olama_cancel_financial_agreement')
-            && !current_user_can('olama_view_agreement_audit')
-        ) {
+        
+        $caps = [
+            'olama_manage_registration_families',
+            'olama_manage_registration_students',
+            'olama_manage_registration_fees',
+            'olama_manage_registration_invoices',
+            'olama_manage_registration_payments',
+            'olama_manage_registration_reports',
+            'olama_record_payments',
+            'olama_reverse_payments',
+            'olama_confirm_bank_payments',
+            'olama_manage_cheques',
+            'olama_view_cash_reports',
+            'olama_manage_financial_accounts',
+            'olama_edit_agreement_admin_fields',
+            'olama_create_agreement_amendment',
+            'olama_approve_agreement_amendment',
+            'olama_post_agreement_amendment',
+            'olama_reschedule_agreement_installments',
+            'olama_cancel_financial_agreement',
+            'olama_view_agreement_audit',
+        ];
+
+        if (!Olama_Reg_Payment_Policy::current_user_can_any($caps)) {
             wp_send_json_error(['message' => __('Unauthorized.', 'olama-registration')], 403);
         }
     }
@@ -1533,28 +1535,41 @@ class Olama_Reg_Ajax
     public function ajax_agr_delete_fee(): void
     {
         $this->guard();
-        $id = (int) ($_POST['id'] ?? 0);
+        $fee_id = (int) ($_POST['id'] ?? 0);
         $agreement_id = (int) ($_POST['agreement_id'] ?? 0);
 
-        if ($id > 0) {
-            $existing_fee = Olama_Reg_Agreement_Fees::get($id);
+        if ($fee_id > 0) {
+            $existing_fee = Olama_Reg_Agreement_Fees::get($fee_id);
             if ($existing_fee) {
                 $agreement_id = (int) $existing_fee->agreement_id;
             }
         }
 
-        if ($agreement_id > 0 && class_exists('Olama_Reg_Agreement_Policy')) {
-            $financial_edit = Olama_Reg_Agreement_Policy::can_edit_financial_fields($agreement_id);
-            if (is_wp_error($financial_edit)) {
-                wp_send_json_error(['message' => $financial_edit->get_error_message()]);
-            }
+        if (!$agreement_id || !$fee_id) {
+            wp_send_json_error(['message' => __('بيانات غير صالحة.', 'olama-registration')]);
         }
 
-        if (Olama_Reg_Agreement_Fees::delete($id)) {
-            Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
-            wp_send_json_success(['message' => __('تم حذف الرسم.', 'olama-registration'), 'total' => Olama_Reg_Agreement::get($agreement_id)->total_amount]);
+        $args = [
+            'reason'         => sanitize_text_field($_POST['reason'] ?? ''),
+            'effective_date' => sanitize_text_field($_POST['effective_date'] ?? ''),
+            'notes'          => sanitize_textarea_field($_POST['notes'] ?? ''),
+            'paid_handling'  => sanitize_text_field($_POST['paid_handling'] ?? 'credit'),
+        ];
+
+        $result = Olama_Reg_Agreement_Fees::cancel_fee_item($agreement_id, $fee_id, $args);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
         }
-        wp_send_json_error(['message' => __('لا يمكن حذف هذا الرسم.', 'olama-registration')]);
+
+        if ($result['mode'] === 'direct_delete') {
+            Olama_Reg_Agreement_Invoice::generate_default_due_schedule($agreement_id);
+        }
+
+        $agreement = Olama_Reg_Agreement::get($agreement_id);
+        $result['total'] = $agreement ? $agreement->total_amount : 0.0;
+
+        wp_send_json_success($result);
     }
 
     public function ajax_agr_add_clause(): void
@@ -2148,8 +2163,33 @@ class Olama_Reg_Ajax
             }
             $settlements = (int) $wpdb->get_var($wpdb->prepare($settle_sql, $settle_args));
 
-            // Financial summary (just 1 record flag — shown as null badge)
-            $financial = null;
+            // Financial summary (show badge count if current balance > 0)
+            $family_card_data = null;
+            if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) ) {
+                $summary = Olama_Reg_Family_Financial_Summary::get_family_summary( $uid, $year );
+                $financial = $summary->current_balance > 0.009 ? 1 : 0;
+
+                // Fetch Linked Student Names
+                $students_list = $wpdb->get_results($wpdb->prepare(
+                    "SELECT student_name FROM {$wpdb->prefix}olama_students 
+                     WHERE family_id = %s AND is_active = 1 
+                     ORDER BY sequence_in_family ASC",
+                    $uid
+                ));
+                $students_str = implode('، ', wp_list_pluck($students_list, 'student_name'));
+
+                // Build family financial card payload
+                $family_card_data = [
+                    'family_uid'      => $uid,
+                    'total_fees'      => (float) $summary->total_fees,
+                    'total_billed'    => (float) $summary->gross_invoiced,
+                    'total_paid'      => (float) $summary->total_paid,
+                    'total_balance'   => (float) $summary->current_balance,
+                    'students'        => $students_str ? $students_str : __( 'لا يوجد طلاب مسجلين', 'olama-registration' )
+                ];
+            } else {
+                $financial = null;
+            }
             $statement = $invoices + $payments;
 
         } else {
@@ -2213,6 +2253,9 @@ class Olama_Reg_Ajax
             'financial_mini' => ($type === 'family')
                 ? $this->hub_financial_mini($uid, $year)
                 : null,
+            'family_financial_card' => ($type === 'family')
+                ? $family_card_data
+                : null,
         ]);
     }
 
@@ -2221,6 +2264,15 @@ class Olama_Reg_Ajax
      */
     private function hub_financial_mini(string $family_uid, int $year): array
     {
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) ) {
+            $summary = Olama_Reg_Family_Financial_Summary::get_family_summary( $family_uid, $year );
+            return [
+                'total_billed'  => (float) $summary->gross_invoiced,
+                'total_paid'    => (float) $summary->total_paid,
+                'total_balance' => (float) $summary->current_balance,
+            ];
+        }
+
         global $wpdb;
         $args = [$family_uid];
         $year_clause = '';
@@ -2459,7 +2511,6 @@ class Olama_Reg_Ajax
     private function hub_tile_agreements(string $uid, string $type, int $year): array
     {
         global $wpdb;
-        $payer_type = ($type === 'family') ? 'family' : 'customer';
         $payer_id   = $uid;
 
         // For external customers, resolve internal id
@@ -2471,37 +2522,39 @@ class Olama_Reg_Ajax
             $payer_id = $c ? (string) $c->id : $uid;
         }
 
-        $args = [
-            'payer_type' => $payer_type,
-            'payer_id'   => $payer_id,
-        ];
-        $agreements = Olama_Reg_Agreement::get_list($args);
+        $html = class_exists( 'Olama_Reg_Agreement_Renderer' ) 
+            ? Olama_Reg_Agreement_Renderer::render_agreements_list( $payer_id, $year, 'customer_hub' )
+            : '';
 
-        if (!$agreements) {
-            $html = $this->hub_empty_state(
-                __('لا توجد عقود مسجلة', 'olama-registration'),
-                'dashicons-media-document'
-            );
-            return ['html' => $html];
+        // Resolve agreements count safely
+        $args = [];
+        if ( ! empty( $payer_id ) ) {
+            $family_exists = $wpdb->get_var( $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_families WHERE family_uid = %s",
+                $payer_id
+            ) );
+            if ( $family_exists ) {
+                $args['payer_type'] = 'family';
+                $args['payer_id']   = $payer_id;
+            } else {
+                $customer = $wpdb->get_row( $wpdb->prepare(
+                    "SELECT id FROM {$wpdb->prefix}olama_customers WHERE customer_uid = %s OR id = %d LIMIT 1",
+                    $payer_id,
+                    is_numeric( $payer_id ) ? (int) $payer_id : 0
+                ) );
+                if ( $customer ) {
+                    $args['payer_type'] = 'customer';
+                    $args['payer_id']   = (string) $customer->id;
+                } else {
+                    $args['payer_type'] = 'customer';
+                    $args['payer_id']   = $payer_id;
+                }
+            }
         }
-
-        foreach ($agreements as $agr) {
-            $agr->invoices = $wpdb->get_results($wpdb->prepare(
-                "SELECT id, invoice_number, status, balance FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-                $agr->id
-            )) ?: [];
-
-            $agr->collected_amount = (float) $wpdb->get_var($wpdb->prepare(
-                "SELECT SUM(amount_paid) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-                $agr->id
-            ));
-            $agr->remaining_amount = max(0, (float)$agr->total_amount - $agr->collected_amount);
+        if ( $year > 0 ) {
+            $args['academic_year_id'] = $year;
         }
-
-        ob_start();
-        $is_hub = true;
-        include OLAMA_REG_PATH . 'admin/views/partial-agreements-table.php';
-        $html = ob_get_clean();
+        $agreements = class_exists( 'Olama_Reg_Agreement' ) ? Olama_Reg_Agreement::get_list( $args ) : [];
 
         return [
             'html' => $html,
@@ -2937,26 +2990,42 @@ class Olama_Reg_Ajax
             $paid    = $summary ? (float) $summary->paid    : 0;
             $balance = $summary ? (float) $summary->balance : 0;
         } else {
-            // Family: year-scoped
-            $args = [$uid];
-            $yc   = '';
-            if ($year) { $yc = 'AND academic_year_id = %d'; $args[] = $year; }
+            // Family: year-scoped using summary service
+            if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) ) {
+                $summary = Olama_Reg_Family_Financial_Summary::get_family_summary( $uid, $year );
 
-            $summary = $wpdb->get_row($wpdb->prepare(
-                "SELECT
-                     COALESCE(SUM(total), 0)       AS billed,
-                     COALESCE(SUM(amount_paid), 0) AS paid,
-                     COALESCE(SUM(balance), 0)     AS balance
-                 FROM {$wpdb->prefix}olama_invoices
-                 WHERE family_uid = %s
-                   AND (ext_customer_id IS NULL OR ext_customer_id = 0)
-                   AND status != 'cancelled' {$yc}",
-                $args
-            ));
+                $billed  = (float) $summary->gross_invoiced;
+                $paid    = (float) $summary->total_paid;
+                $balance = (float) $summary->current_balance;
 
-            $billed  = $summary ? (float) $summary->billed  : 0;
-            $paid    = $summary ? (float) $summary->paid    : 0;
-            $balance = $summary ? (float) $summary->balance : 0;
+                $due_now = (float) $summary->due_now;
+                $overdue = (float) $summary->overdue;
+                $unallocated = (float) $summary->unallocated_payments;
+                $settlements = (float) $summary->total_settlements;
+                $adjustments = (float) $summary->net_adjustments;
+                $total_fees = (float) $summary->total_fees;
+                $discounts = (float) $summary->total_discounts;
+            } else {
+                $args = [$uid];
+                $yc   = '';
+                if ($year) { $yc = 'AND academic_year_id = %d'; $args[] = $year; }
+
+                $summary = $wpdb->get_row($wpdb->prepare(
+                    "SELECT
+                         COALESCE(SUM(total), 0)       AS billed,
+                         COALESCE(SUM(amount_paid), 0) AS paid,
+                         COALESCE(SUM(balance), 0)     AS balance
+                     FROM {$wpdb->prefix}olama_invoices
+                     WHERE family_uid = %s
+                       AND (ext_customer_id IS NULL OR ext_customer_id = 0)
+                       AND status != 'cancelled' {$yc}",
+                    $args
+                ));
+
+                $billed  = $summary ? (float) $summary->billed  : 0;
+                $paid    = $summary ? (float) $summary->paid    : 0;
+                $balance = $summary ? (float) $summary->balance : 0;
+            }
         }
 
         $paid_pct    = $billed > 0 ? round($paid / $billed * 100, 1) : 0;
@@ -2971,6 +3040,24 @@ class Olama_Reg_Ajax
         $html .= $this->hub_fin_card(__('الرصيد المستحق', 'olama-registration'), $balance, $balance > 0 ? 'os-hub-badge--red' : 'os-hub-badge--green');
         $html .= '</div>';
 
+        if ($type === 'family' && class_exists( 'Olama_Reg_Family_Financial_Summary' )) {
+            $html .= '<div class="os-hub-fin-subgrid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">';
+            $html .= $this->hub_fin_card_small(__('المستحق حالياً', 'olama-registration'), $due_now, $due_now > 0 ? 'os-hub-badge--red' : 'os-hub-badge--gray');
+            $html .= $this->hub_fin_card_small(__('المتأخرات', 'olama-registration'), $overdue, $overdue > 0 ? 'os-hub-badge--red' : 'os-hub-badge--gray');
+            $html .= $this->hub_fin_card_small(__('مدفوعات غير مخصصة', 'olama-registration'), $unallocated, $unallocated > 0 ? 'os-hub-badge--blue' : 'os-hub-badge--gray');
+            $html .= $this->hub_fin_card_small(__('إجمالي الرسوم', 'olama-registration'), $total_fees, 'os-hub-badge--blue');
+            $html .= $this->hub_fin_card_small(__('إجمالي الخصومات', 'olama-registration'), $discounts, $discounts > 0 ? 'os-hub-badge--green' : 'os-hub-badge--gray');
+            $html .= $this->hub_fin_card_small(__('صافي الإشعارات', 'olama-registration'), $adjustments, $adjustments >= 0 ? 'os-hub-badge--blue' : 'os-hub-badge--red');
+            $html .= '</div>';
+
+            if ($settlements > 0) {
+                $html .= '<div class="os-hub-settlements-banner" style="margin-top: 10px; background: #fdf6ec; border: 1px solid #faecd8; padding: 8px 12px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">';
+                $html .= '<span style="color: #e6a23c; font-size: 13px; font-weight: bold;">' . esc_html__('إجمالي التسويات المعتمدة', 'olama-registration') . '</span>';
+                $html .= '<span style="font-weight: bold; color: #e6a23c;" dir="ltr">' . number_format($settlements, 2) . ' د.أ</span>';
+                $html .= '</div>';
+            }
+        }
+
         // Progress bar
         if ($billed > 0) {
             $html .= '<div class="os-hub-progress-wrap">';
@@ -2982,6 +3069,39 @@ class Olama_Reg_Ajax
             $html .= '<div class="os-hub-progress__bar" style="width:' . $paid_pct . '%;"></div>';
             $html .= '</div>';
             $html .= '</div>';
+        }
+
+        if ($type === 'family' && class_exists( 'Olama_Reg_Family_Financial_Summary' )) {
+            $student_breakdown = Olama_Reg_Family_Financial_Summary::get_student_breakdown($uid, $year);
+            if (!empty($student_breakdown)) {
+                $html .= '<div class="os-hub-student-breakdown" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">';
+                $html .= '<h4 style="margin: 0 0 12px; font-size: 14px; color: var(--os-hub-accent-family);">' . __('التحليل المالي على مستوى الطلاب', 'olama-registration') . '</h4>';
+                $html .= '<div class="os-hub-table-wrap" style="overflow-x: auto;">';
+                $html .= '<table class="widefat striped" style="width: 100%; border-collapse: collapse; font-size: 12px;">';
+                $html .= '<thead><tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: right;">' . __('الطالب', 'olama-registration') . '</th>';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: center;">' . __('العقود', 'olama-registration') . '</th>';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: left;">' . __('إجمالي الرسوم', 'olama-registration') . '</th>';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: left;">' . __('المفوتر', 'olama-registration') . '</th>';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: left;">' . __('المدفوع', 'olama-registration') . '</th>';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: left;">' . __('المتبقي', 'olama-registration') . '</th>';
+                $html .= '<th style="padding: 8px; font-weight: bold; text-align: left;">' . __('المتأخر', 'olama-registration') . '</th>';
+                $html .= '</tr></thead><tbody>';
+                foreach ($student_breakdown as $sb) {
+                    $html .= '<tr style="border-bottom: 1px solid #edf2f7;">';
+                    $html .= '<td style="padding: 8px; font-weight: bold;">' . esc_html($sb->student_name) . '</td>';
+                    $html .= '<td style="padding: 8px; text-align: center;">' . (int)$sb->agreement_count . '</td>';
+                    $html .= '<td style="padding: 8px; text-align: left;" dir="ltr">' . number_format($sb->total_fees, 2) . ' د.أ</td>';
+                    $html .= '<td style="padding: 8px; text-align: left;" dir="ltr">' . number_format($sb->total_invoiced, 2) . ' د.أ</td>';
+                    $html .= '<td style="padding: 8px; text-align: left; color: #10b981;" dir="ltr">' . number_format($sb->total_paid, 2) . ' د.أ</td>';
+                    $html .= '<td style="padding: 8px; text-align: left; font-weight: bold; color: ' . ($sb->remaining > 0.009 ? '#ef4444' : '#10b981') . ';" dir="ltr">' . number_format($sb->remaining, 2) . ' د.أ</td>';
+                    $html .= '<td style="padding: 8px; text-align: left; color: ' . ($sb->overdue > 0.009 ? '#ef4444' : '#6b7280') . ';" dir="ltr">' . number_format($sb->overdue, 2) . ' د.أ</td>';
+                    $html .= '</tr>';
+                }
+                $html .= '</tbody></table>';
+                $html .= '</div>';
+                $html .= '</div>';
+            }
         }
 
         // Footer CTA: New Invoice
@@ -3017,14 +3137,27 @@ class Olama_Reg_Ajax
              . '</div>';
     }
 
+    private function hub_fin_card_small(string $label, float $amount, string $cls): string
+    {
+        return '<div class="os-hub-fin-card os-hub-fin-card--small" style="padding: 8px; border: 1px solid #f0f0f0; border-radius: 4px; background: #fafafa;">'
+             . '<div class="os-hub-fin-card__label" style="font-size: 11px; color: #666; margin-bottom: 4px;">' . esc_html($label) . '</div>'
+             . '<div class="os-hub-fin-card__amount ' . $cls . '" style="font-size: 14px; font-weight: bold;" dir="ltr">'
+             . number_format($amount, 2) . ' <small style="font-size: 9px; font-weight: normal;">د.أ</small>'
+             . '</div>'
+             . '</div>';
+    }
+
     // ── Tile: History & Audit ─────────────────────────────────────────────────
 
     private function hub_tile_statement(string $uid, string $type, int $year): array
     {
+        $student_uid = ! empty($_POST['student_uid']) ? sanitize_text_field($_POST['student_uid']) : '';
+
         $report = Olama_Reg_Billing_Reports::get_family_statement_report([
             'entity_type' => $type === 'external' ? 'external' : 'family',
             'uid'         => $uid,
             'year_id'     => $year,
+            'student_uid' => $student_uid,
         ]);
 
         $rows    = array_slice($report['rows'] ?? [], -40);
@@ -3039,7 +3172,31 @@ class Olama_Reg_Ajax
             'debit'            => __('إشعار مدين', 'olama-registration'),
         ];
 
+        // Fetch students for family filtering
+        $students = [];
+        if ($type === 'family') {
+            global $wpdb;
+            $students = $wpdb->get_results($wpdb->prepare(
+                "SELECT student_uid, student_name FROM {$wpdb->prefix}olama_students WHERE family_id = %s AND is_active = 1",
+                $uid
+            )) ?: [];
+        }
+
         $html  = '<div class="os-hub-financial-summary os-hub-statement-summary">';
+
+        // Student Select Dropdown Filter (RTL)
+        if ($type === 'family' && !empty($students)) {
+            $html .= '<div class="os-hub-statement-filter-bar" style="margin-bottom: 15px; display: flex; align-items: center; gap: 8px; justify-content: flex-start;" dir="rtl">';
+            $html .= '<label for="os-hub-statement-student-select" style="font-weight: bold; font-size: 13px;">' . __('تصفية حسب الطالب:', 'olama-registration') . '</label>';
+            $html .= '<select id="os-hub-statement-student-select" style="padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; min-width: 180px;">';
+            $html .= '<option value="">' . __('جميع الطلاب', 'olama-registration') . '</option>';
+            foreach ($students as $stu) {
+                $html .= '<option value="' . esc_attr($stu->student_uid) . '" ' . selected($student_uid, $stu->student_uid, false) . '>' . esc_html($stu->student_name) . '</option>';
+            }
+            $html .= '</select>';
+            $html .= '</div>';
+        }
+
         $html .= '<div class="os-hub-fin-cards">';
         $html .= $this->hub_fin_card(__('الرصيد الافتتاحي', 'olama-registration'), (float) ($summary['opening_balance'] ?? 0), 'os-hub-badge--blue');
         $html .= $this->hub_fin_card(__('إجمالي المدين', 'olama-registration'), (float) ($summary['total_debit'] ?? 0), 'os-hub-badge--red');
@@ -3079,6 +3236,7 @@ class Olama_Reg_Ajax
             'year_id'     => $year,
             'entity_type' => $type === 'external' ? 'external' : 'family',
             'uid'         => $uid,
+            'student_uid' => $student_uid,
         ], admin_url('admin.php'));
         $html .= '<div class="os-hub-tile-footer"><a href="' . esc_url($report_url) . '" class="button button-small"><span class="dashicons dashicons-visibility" aria-hidden="true"></span> ' . esc_html__('عرض الكشف الكامل', 'olama-registration') . '</a></div>';
         $html .= '</div>';

@@ -269,12 +269,12 @@ $mother_mobile_val = $school_family ? $school_family->mother_mobile : ($f->mothe
                     
                     // Status Badge Logic
                     $status_colors = [
-                        'draft'     => ['bg' => '#f1f5f9', 'text' => '#475569', 'label' => 'مسودة'],
-                        'issued'    => ['bg' => '#e0f2fe', 'text' => '#0369a1', 'label' => 'صادرة'],
-                        'partial'   => ['bg' => '#fef3c7', 'text' => '#b45309', 'label' => 'جزئية'],
-                        'paid'      => ['bg' => '#dcfce7', 'text' => '#15803d', 'label' => 'مدفوعة'],
-                        'overdue'   => ['bg' => '#fee2e2', 'text' => '#b91c1c', 'label' => 'متأخرة'],
-                        'cancelled' => ['bg' => '#f3f4f6', 'text' => '#374151', 'label' => 'ملغاة'],
+                        'draft'     => ['bg' => '#f1f5f9', 'text' => '#475569', 'label' => Olama_Reg_Status_Labels::label('draft', 'invoice')],
+                        'issued'    => ['bg' => '#e0f2fe', 'text' => '#0369a1', 'label' => Olama_Reg_Status_Labels::label('issued', 'invoice')],
+                        'partial'   => ['bg' => '#fef3c7', 'text' => '#b45309', 'label' => Olama_Reg_Status_Labels::label('partial', 'invoice')],
+                        'paid'      => ['bg' => '#dcfce7', 'text' => '#15803d', 'label' => Olama_Reg_Status_Labels::label('paid', 'invoice')],
+                        'overdue'   => ['bg' => '#fee2e2', 'text' => '#b91c1c', 'label' => Olama_Reg_Status_Labels::label('overdue', 'invoice')],
+                        'cancelled' => ['bg' => '#f3f4f6', 'text' => '#374151', 'label' => Olama_Reg_Status_Labels::label('cancelled', 'invoice')],
                     ];
                     $st = $status_colors[ $inv->status ] ?? $status_colors['draft'];
                 ?>

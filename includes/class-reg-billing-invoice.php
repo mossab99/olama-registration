@@ -210,6 +210,10 @@ class Olama_Reg_Billing_Invoice
 
         self::log_audit('invoice', $invoice_id, 'created', null, self::get_invoice($invoice_id));
 
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && ! empty( $data['family_uid'] ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( sanitize_text_field( $data['family_uid'] ), 0 );
+        }
+
         return $invoice_id;
     }
 
@@ -288,6 +292,15 @@ class Olama_Reg_Billing_Invoice
         }
 
         self::log_audit('invoice', $id, 'updated', $before, self::get_invoice($id));
+
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) ) {
+            if ( $before && ! empty( $before->family_uid ) ) {
+                Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $before->family_uid, 0 );
+            }
+            if ( ! empty( $data['family_uid'] ) && $data['family_uid'] !== $before->family_uid ) {
+                Olama_Reg_Family_Financial_Summary::invalidate_snapshot( sanitize_text_field( $data['family_uid'] ), 0 );
+            }
+        }
 
         return true;
     }
@@ -522,6 +535,9 @@ class Olama_Reg_Billing_Invoice
 
         if (false !== $result) {
             self::log_audit('invoice', $id, 'status_changed', $before, self::get_invoice($id));
+            if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && $before && ! empty( $before->family_uid ) ) {
+                Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $before->family_uid, 0 );
+            }
         }
 
         return false !== $result;
@@ -564,6 +580,10 @@ class Olama_Reg_Billing_Invoice
         $wpdb->update(self::t('olama_invoice_installments'), ['status' => 'cancelled'], ['invoice_id' => $id]);
 
         self::log_audit('invoice', $id, 'cancelled', $inv, self::get_invoice($id));
+
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && $inv && ! empty( $inv->family_uid ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $inv->family_uid, 0 );
+        }
 
         return true;
     }
@@ -848,6 +868,10 @@ class Olama_Reg_Billing_Invoice
         self::recalculate_totals($invoice_id);
         self::log_audit('invoice_adjustment', $adjustment_id, $type . '_note_issued', $before, self::get_invoice($invoice_id));
 
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && $invoice && ! empty( $invoice->family_uid ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $invoice->family_uid, 0 );
+        }
+
         return $adjustment_id;
     }
 
@@ -875,6 +899,10 @@ class Olama_Reg_Billing_Invoice
 
         self::recalculate_totals((int) $adjustment->invoice_id);
         self::log_audit('invoice_adjustment', $adjustment_id, 'adjustment_cancelled', $before, self::get_invoice((int) $adjustment->invoice_id));
+
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && $before && ! empty( $before->family_uid ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $before->family_uid, 0 );
+        }
 
         return true;
     }

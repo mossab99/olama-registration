@@ -43,12 +43,6 @@ $require_cash_session = get_option( 'olama_require_cash_session', '0' ) === '1';
 $money = static function ( $amount ): string {
     return number_format( (float) $amount, 2 );
 };
-$status_labels = [
-    'open'           => __( 'مفتوحة', 'olama-registration' ),
-    'pending_review' => __( 'قيد المراجعة', 'olama-registration' ),
-    'closed'         => __( 'مغلقة', 'olama-registration' ),
-    'rejected'       => __( 'مرفوضة', 'olama-registration' ),
-];
 ?>
 <div class="wrap olama-reg-wrap" dir="rtl">
     <div class="olama-reg-page-header">
@@ -168,7 +162,7 @@ $status_labels = [
                             <td><strong><?php echo esc_html( $money( $expected ) ); ?></strong></td>
                             <td><?php echo $actual === null ? '—' : esc_html( $money( $actual ) ); ?></td>
                             <td><?php echo $difference === null ? '—' : esc_html( $money( $difference ) ); ?></td>
-                            <td><?php echo esc_html( $status_labels[ $session->status ] ?? $session->status ); ?></td>
+                            <td><?php echo esc_html( Olama_Reg_Status_Labels::label( $session->status, 'cash_session' ) ); ?></td>
                             <td>
                                 <?php if ( $session->status === 'open' ) : ?>
                                     <form method="post" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">

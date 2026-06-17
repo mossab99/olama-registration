@@ -114,7 +114,7 @@ if ($agreement->payer_type === 'customer') {
                 <td class="label"><?php esc_html_e('المشترك:', 'olama-registration'); ?></td>
                 <td><strong><?php echo esc_html($agreement->participant_name); ?></strong></td>
                 <td class="label"><?php esc_html_e('الحالة:', 'olama-registration'); ?></td>
-                <td><strong><?php echo esc_html($agreement->status); ?></strong></td>
+                <td><strong><?php echo esc_html( Olama_Reg_Status_Labels::label( $agreement->status, 'agreement' ) ); ?></strong></td>
             </tr>
         </table>
 

@@ -643,9 +643,14 @@
                         }
                     });
 
-                    // Update identity header with financial mini-stats (families only)
-                    if (fin && type === 'family') {
-                        IdentityHeader.renderFinStats(fin);
+                    // Update identity header with financial mini-stats / family card (families only)
+                    if (type === 'family') {
+                        var fcData = response.data.family_financial_card || null;
+                        if (fcData) {
+                            IdentityHeader.renderFamilyCard(fcData);
+                        } else if (fin) {
+                            IdentityHeader.renderFinStats(fin);
+                        }
                     }
                 },
                 error: function () {
@@ -702,7 +707,17 @@
             RecentLookups.save(customer);
 
             // Update identity header
-            IdentityHeader.render(customer);
+            if (customer.type === 'family') {
+                $('#os-hub-identity-standard').hide();
+                $('#os-hub-identity-family').show();
+                // Prepopulate basic details
+                $('#os-fc-family-uid').text(customer.uid);
+                $('#os-fc-family-name').text(customer.name);
+            } else {
+                $('#os-hub-identity-family').hide();
+                $('#os-hub-identity-standard').css('display', 'flex'); // maintain flex layout
+                IdentityHeader.render(customer);
+            }
 
             // Settlement tile visibility (families only)
             if (customer.type === 'family') {
@@ -786,6 +801,37 @@
             html += '</div>';
 
             $('#os-hub-identity-meta').after(html);
+        },
+
+        renderFamilyCard: function (card) {
+            var fmt = function (n) { 
+                return parseFloat(n).toLocaleString('ar', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' د.أ'; 
+            };
+            
+            $('#os-fc-family-uid').text(card.family_uid);
+            $('#os-fc-students').text(card.students).attr('title', card.students);
+            $('#os-fc-total-fees').text(fmt(card.total_fees));
+            $('#os-fc-gross-invoiced').text(fmt(card.total_billed));
+            $('#os-fc-total-paid').text(fmt(card.total_paid));
+            
+            var balanceEl = $('#os-fc-remaining-balance');
+            balanceEl.text(fmt(card.total_balance));
+            if (parseFloat(card.total_balance) > 0.009) {
+                balanceEl.css('color', '#c82333');
+            } else {
+                balanceEl.css('color', '#1a7c2e');
+            }
+
+            // Update Academic Year text based on selected ID
+            var selectedYearName = '';
+            var yearId = state.currentYearId;
+            if (yearId === 0) {
+                selectedYearName = I18N.yearAll || 'جميع السنوات';
+            } else if (HUB_DATA.academicYears) {
+                var yr = HUB_DATA.academicYears.find(function(y) { return y.id === yearId; });
+                if (yr) selectedYearName = yr.name;
+            }
+            $('#os-fc-academic-year').text(selectedYearName);
         },
     };
 
@@ -1463,79 +1509,6 @@
             if (!customer) return;
 
             OriginalFormModal.open('agreement', 'إضافة عقد جديد');
-            return;
-
-            var $payerSelect = $('#os-agr-payer-modal');
-            if ($payerSelect.length) {
-                var payerType = (customer.type === 'family') ? 'family' : 'customer';
-                var payerId = (customer.type === 'family') ? customer.uid : (customer.internal_id || customer.id || '');
-
-                // Reset tabs to default (first tab active, others disabled)
-                $('#modal-tab-link-header').trigger('click');
-                $('#modal-tab-link-fees, #modal-tab-link-clauses').addClass('os-disabled');
-
-                // Prefill dummy radio buttons
-                $('input[name="payer_type_dummy"][value="' + payerType + '"]').prop('checked', true);
-
-                // Pre-select the customer name in select
-                $payerSelect.empty().append(new Option(customer.name + ' (' + customer.uid + ')', payerId, true, true));
-                $payerSelect.prop('disabled', true);
-
-                var $form = $('#os-form-agreement-header');
-                
-                // Reset IDs
-                $form.find('input[name="id"]').val(0);
-                $('#os-agr-fees-table').data('agr-id', 0).attr('data-agr-id', 0);
-                $('#os-agr-add-clause').data('agr-id', 0).attr('data-agr-id', 0);
-                $form.find('input[name="template_id"]').val(0);
-
-                // Clear dynamic content
-                $('#os-agr-fees-table tbody').empty();
-                $('#os-agr-clauses-list').empty();
-                $('#os-agr-total-label').text('0.000');
-                $('#os-agr-new-clause').val('');
-                $('#os-btn-save-header').html('<span class="dashicons dashicons-saved"></span> ' + 'حفظ البيانات');
-
-                // Set hidden fields
-                $form.find('input[name="payer_type"]').val(payerType);
-                $form.find('input[name="payer_id"]').val(payerId);
-                $form.find('#os-agr-customer-uid-hidden').val(customer.uid);
-
-                // Fetch participants to populate window.payerChildren
-                window.payerChildren = [];
-                $.post(AJAX_URL, {
-                    action: 'olama_reg_agr_get_participants',
-                    nonce: REG_NONCE,
-                    payer_type: payerType,
-                    payer_id: payerId
-                }).done(function (res) {
-                    if (res.success && res.data.results) {
-                        window.payerChildren = res.data.results;
-                    }
-                });
-
-                // Initialize datepickers
-                if (typeof $.fn.datepicker !== 'undefined') {
-                    $('#olama-reg-agreement-modal').find('.olama-reg-datepicker').each(function () {
-                        if (!$(this).hasClass('hasDatepicker')) {
-                            $(this).datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
-                        }
-                    });
-                }
-
-                // Initialize select2 on activity nature dropdown if select2 is available
-                var $activitySelect = $('#os-agr-activity-modal');
-                if (typeof $.fn.select2 !== 'undefined' && !$activitySelect.hasClass('select2-hidden-accessible')) {
-                    $activitySelect.select2({
-                        dir: 'rtl',
-                        width: '100%',
-                        dropdownParent: $('#olama-reg-agreement-modal')
-                    });
-                }
-
-                // Open the modal
-                $('#olama-reg-agreement-modal').fadeIn(200);
-            }
         });
 
         // Intercept Edit Agreement action click in dashboard table
@@ -1546,161 +1519,6 @@
             if (!customer || !agreementId) return;
 
             OriginalFormModal.open('agreement', 'تعديل العقد', { id: agreementId });
-            return;
-
-            var $payerSelect = $('#os-agr-payer-modal');
-            var payerType = (customer.type === 'family') ? 'family' : 'customer';
-            var payerId = (customer.type === 'family') ? customer.uid : (customer.internal_id || customer.id || '');
-
-            $.post(AJAX_URL, {
-                action: 'olama_reg_agr_get_details',
-                nonce: REG_NONCE,
-                id: agreementId
-            }).done(function (res) {
-                if (!res.success) {
-                    alert(res.data?.message || 'Error loading agreement details');
-                    return;
-                }
-
-                var data = res.data;
-                var agreement = data.agreement;
-
-                // Reset modal to Header tab
-                $('#modal-tab-link-header').trigger('click');
-                $('#modal-tab-link-fees, #modal-tab-link-clauses').removeClass('os-disabled');
-
-                // Prefill dummy radio buttons
-                $('input[name="payer_type_dummy"][value="' + payerType + '"]').prop('checked', true);
-
-                // Pre-select the customer name in select
-                $payerSelect.empty().append(new Option(customer.name + ' (' + customer.uid + ')', payerId, true, true));
-                $payerSelect.prop('disabled', true);
-
-                var $form = $('#os-form-agreement-header');
-                
-                // Set IDs
-                $form.find('input[name="id"]').val(agreement.id);
-                $('#os-agr-fees-table').data('agr-id', agreement.id).attr('data-agr-id', agreement.id);
-                $('#os-agr-add-clause').data('agr-id', agreement.id).attr('data-agr-id', agreement.id);
-                $form.find('input[name="template_id"]').val(agreement.template_id || 0);
-
-                // Set header values
-                $form.find('input[name="payer_type"]').val(agreement.payer_type);
-                $form.find('input[name="payer_id"]').val(agreement.payer_id);
-                $form.find('#os-agr-customer-uid-hidden').val(customer.uid);
-                $form.find('[name="activity_type"]').val(agreement.activity_type).trigger('change');
-                $form.find('[name="start_date"]').val(agreement.start_date);
-                $form.find('[name="end_date"]').val(agreement.end_date || '');
-                $form.find('[name="status"]').val(agreement.status);
-                $form.find('[name="notes"]').val(agreement.notes || '');
-
-                $('#os-btn-save-header').html('<span class="dashicons dashicons-saved"></span> ' + 'تحديث البيانات');
-                $('#olama-reg-agreement-modal .olama-reg-modal-title').html(
-                    '<span class="dashicons dashicons-media-text"></span> ' + 
-                    'تعديل العقد #' + agreement.agreement_number
-                );
-
-                // Populate participants for dropdowns inside fees tab
-                window.payerChildren = [];
-                $.post(AJAX_URL, {
-                    action: 'olama_reg_agr_get_participants',
-                    nonce: REG_NONCE,
-                    payer_type: payerType,
-                    payer_id: payerId
-                }).done(function (pRes) {
-                    if (pRes.success && pRes.data.results) {
-                        window.payerChildren = pRes.data.results;
-                    }
-
-                    // Set data-agr-id on invoice open button too (gives another fallback for agrId detection)
-                    $('#os-agr-open-invoice-modal').attr('data-agr-id', agreement.id);
-
-                    // Clear and render fees
-                    // Re-set agr-id after empty() to keep jQuery data cache fresh
-                    var $tbody = $('#os-agr-fees-table tbody').empty();
-                    $('#os-agr-fees-table').data('agr-id', agreement.id).attr('data-agr-id', agreement.id);
-                    if (data.fees && data.fees.length) {
-                        data.fees.forEach(function (fee) {
-                            var $row = $('#os-agr-fee-row-template tr').clone();
-                            $row.attr('data-fee-id', fee.id);
-                            
-                            $row.find('[name="fee_category"]').val(fee.fee_category);
-                            
-                            // Fill child_id dropdown options dynamically
-                            var $childSelect = $row.find('[name="child_id"]');
-                            $childSelect.empty().append(new Option('اختر المشترك', ''));
-                            window.payerChildren.forEach(function (child) {
-                                var selected = (child.id == fee.child_id);
-                                $childSelect.append(new Option(child.text, child.id, selected, selected));
-                            });
-
-                            $row.find('[name="label"]').val(fee.label);
-                            $row.find('[name="amount"]').val(fee.amount);
-                            $row.find('[name="discount"]').val(fee.discount);
-                            $row.find('.os-agr-fee-net').text(parseFloat(fee.net_amount).toFixed(3));
-                            $row.find('[name="due_date"]').val(fee.due_date || '');
-                            $row.find('td').eq(7).text(fee.paid_status); // Update status column cell (unpaid/paid)
-
-                            $tbody.append($row);
-                        });
-                        // Initialize datepickers on new rows
-                        if (typeof $.fn.datepicker !== 'undefined') {
-                            $tbody.find('.os-datepicker').each(function () {
-                                if (!$(this).hasClass('hasDatepicker')) {
-                                    $(this).datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
-                                }
-                            });
-                        }
-                    }
-                    if (window.olamaRegSyncAgreementFeeTemplateOptions) {
-                        window.olamaRegSyncAgreementFeeTemplateOptions($('#os-agr-fees-table'));
-                    }
-                    $('#os-agr-total-label').text(parseFloat(agreement.total_amount).toFixed(3));
-                });
-
-                // Clear and render clauses
-                var $clausesList = $('#os-agr-clauses-list').empty();
-                if (data.clauses && data.clauses.length) {
-                    data.clauses.forEach(function (clause) {
-                        var $li = $('<li>')
-                            .attr('data-clause-id', clause.id)
-                            .css({ 'margin-bottom': '12px', 'padding': '10px', 'background': '#fff', 'border': '1px solid #ddd', 'border-radius': '4px', 'display': 'flex', 'justify-content': 'space-between', 'align-items': 'center' });
-                        
-                        $li.append($('<span>').text(clause.clause_text));
-                        
-                        var $delBtn = $('<button>')
-                            .attr('type', 'button')
-                            .addClass('button button-small os-agr-delete-clause')
-                            .css('color', 'red')
-                            .text('X');
-                        $li.append($delBtn);
-                        
-                        $clausesList.append($li);
-                    });
-                }
-
-                // Initialize datepickers
-                if (typeof $.fn.datepicker !== 'undefined') {
-                    $('#olama-reg-agreement-modal').find('.olama-reg-datepicker').each(function () {
-                        if (!$(this).hasClass('hasDatepicker')) {
-                            $(this).datepicker({ dateFormat: 'yy-mm-dd', changeYear: true, changeMonth: true, yearRange: '1970:2050' });
-                        }
-                    });
-                }
-
-                // Open the modal
-                $('#olama-reg-agreement-modal').fadeIn(200);
-            });
-        });
-
-        // Auto-reload the dashboard when the agreement modal is closed to refresh listings & totals
-        $(document).on('click', '#olama-reg-agreement-modal .olama-reg-modal-close', function () {
-            var customer = state.currentCustomer;
-            if (customer) {
-                // Use explicit redirect with uid to guarantee the panel reloads on the same customer
-                var param = (customer.type === 'family') ? 'family_uid' : 'customer_uid';
-                window.location.href = window.location.pathname + '?page=olama-registration&' + param + '=' + encodeURIComponent(customer.uid);
-            }
         });
 
         // Intercept Payment Quick Action click to open modal inline on customer hub page
@@ -2177,6 +1995,19 @@
             };
             
             TileManager.open('history', $btn, $panel, extraData);
+        });
+
+        // Handle student selection change in statement tile
+        $(document).on('change', '#os-hub-statement-student-select', function () {
+            var studentUid = $(this).val();
+            var $panel = $('#os-hub-tile-panel-statement');
+            var $btn = $('#os-hub-tile-btn-statement');
+            
+            var extraData = {
+                student_uid: studentUid
+            };
+            
+            TileManager.open('statement', $btn, $panel, extraData);
         });
 
         // Phase 6: Preload customer/family if passed in URL

@@ -517,8 +517,9 @@ class Olama_Reg_Billing_Reports {
             $entity_type = 'family';
         }
 
-        $uid       = sanitize_text_field( $filters['uid'] ?? '' );
+        $uid         = sanitize_text_field( $filters['uid'] ?? '' );
         $year_id   = absint( $filters['year_id'] ?? 0 );
+        $student_uid = ! empty( $filters['student_uid'] ) ? sanitize_text_field( $filters['student_uid'] ) : '';
         $date_from = self::sanitize_report_date( $filters['date_from'] ?? '' );
         $date_to   = self::sanitize_report_date( $filters['date_to'] ?? '' );
 
@@ -560,6 +561,16 @@ class Olama_Reg_Billing_Reports {
             }
         }
 
+        if ($student_uid !== '' && $entity_type === 'family') {
+            $student_name = $wpdb->get_var($wpdb->prepare(
+                "SELECT student_name FROM {$wpdb->prefix}olama_students WHERE student_uid = %s LIMIT 1",
+                $student_uid
+            ));
+            if ($student_name) {
+                $entity['name'] .= ' - ' . $student_name;
+            }
+        }
+
         $conditions = [ "i.status != 'cancelled'" ];
         $params     = [];
 
@@ -580,6 +591,18 @@ class Olama_Reg_Billing_Reports {
 
         $where_sql = implode( ' AND ', $conditions );
 
+        $student_where_i = '';
+        $student_params_i = [];
+        $student_where_p = '';
+        $student_params_p = [];
+        if ( $student_uid !== '' ) {
+            $student_where_i = ' AND i.student_uid = %s';
+            $student_params_i[] = $student_uid;
+            $student_where_p = ' AND (i.student_uid = %s OR p.id IN (SELECT DISTINCT payment_id FROM ' . self::t( 'olama_payment_allocations' ) . ' WHERE student_uid = %s))';
+            $student_params_p[] = $student_uid;
+            $student_params_p[] = $student_uid;
+        }
+
         $invoice_sql = "SELECT
                 i.issue_date AS movement_date,
                 i.created_at AS created_at,
@@ -590,7 +613,7 @@ class Olama_Reg_Billing_Reports {
                 0.00 AS credit_amount,
                 i.id AS sort_id
             FROM " . self::t( 'olama_invoices' ) . " i
-            WHERE {$where_sql}";
+            WHERE {$where_sql}{$student_where_i}";
 
         $adjustment_sql = "SELECT
                 DATE(adj.created_at) AS movement_date,
@@ -603,7 +626,7 @@ class Olama_Reg_Billing_Reports {
                 adj.id AS sort_id
             FROM " . self::t( 'olama_invoice_adjustments' ) . " adj
             INNER JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = adj.invoice_id
-            WHERE adj.status = 'issued' AND {$where_sql}";
+            WHERE adj.status = 'issued' AND {$where_sql}{$student_where_i}";
 
         $payment_sql = "SELECT
                 p.payment_date AS movement_date,
@@ -625,7 +648,7 @@ class Olama_Reg_Billing_Reports {
                 p.id AS sort_id
             FROM " . self::t( 'olama_payments' ) . " p
             INNER JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id
-            WHERE {$where_sql}
+            WHERE {$where_sql}{$student_where_p}
               AND COALESCE(p.status, 'posted') NOT IN ('cancelled', 'failed')";
 
         $union_sql = "{$invoice_sql} UNION ALL {$adjustment_sql} UNION ALL {$payment_sql}";
@@ -647,29 +670,46 @@ class Olama_Reg_Billing_Reports {
         }
         $outer_sql .= ' ORDER BY movement_date ASC, created_at ASC, sort_id ASC';
 
-        $query_params = array_merge( $params, $params, $params, $range_params );
+        $query_params = array_merge(
+            array_merge( $params, $student_params_i ),
+            array_merge( $params, $student_params_i ),
+            array_merge( $params, $student_params_p ),
+            $range_params
+        );
         $rows = $query_params
             ? ( $wpdb->get_results( $wpdb->prepare( $outer_sql, ...$query_params ) ) ?: [] )
             : ( $wpdb->get_results( $outer_sql ) ?: [] );
 
-        $opening_sql = "SELECT
-                COALESCE(SUM(debit_amount), 0) AS total_debit,
-                COALESCE(SUM(credit_amount), 0) AS total_credit
-            FROM ({$union_sql}) statement_opening";
-        $opening_params = array_merge( $params, $params, $params );
-        if ( $date_from ) {
-            $opening_sql .= ' WHERE movement_date < %s';
-            $opening_params[] = $date_from;
+        $opening_balance = 0.0;
+        if ( $entity_type === 'family' && $year_id > 0 && class_exists( 'Olama_Reg_Family_Financial_Summary' ) ) {
+            $opening_balance = Olama_Reg_Family_Financial_Summary::get_previous_balance( $uid, $year_id );
         }
 
-        $opening_row = $opening_params
-            ? $wpdb->get_row( $wpdb->prepare( $opening_sql, ...$opening_params ) )
-            : $wpdb->get_row( $opening_sql );
+        if ( $date_from ) {
+            $opening_sql = "SELECT
+                    COALESCE(SUM(debit_amount), 0) AS total_debit,
+                    COALESCE(SUM(credit_amount), 0) AS total_credit
+                FROM ({$union_sql}) statement_opening
+                WHERE movement_date < %s";
+            
+            $opening_params = array_merge(
+                array_merge( $params, $student_params_i ),
+                array_merge( $params, $student_params_i ),
+                array_merge( $params, $student_params_p )
+            );
+            $opening_params[] = $date_from;
 
-        $opening_balance = round(
-            (float) ( $opening_row->total_debit ?? 0 ) - (float) ( $opening_row->total_credit ?? 0 ),
-            2
-        );
+            $opening_row = $opening_params
+                ? $wpdb->get_row( $wpdb->prepare( $opening_sql, ...$opening_params ) )
+                : $wpdb->get_row( $opening_sql );
+
+            if ( $opening_row ) {
+                $opening_balance += round(
+                    (float) ( $opening_row->total_debit ?? 0 ) - (float) ( $opening_row->total_credit ?? 0 ),
+                    2
+                );
+            }
+        }
 
         $running_balance = $opening_balance;
         $total_debit     = 0.0;
@@ -697,6 +737,7 @@ class Olama_Reg_Billing_Reports {
                 'entity_type' => $entity_type,
                 'uid'         => $uid,
                 'year_id'     => $year_id,
+                'student_uid' => $student_uid,
                 'date_from'   => $date_from,
                 'date_to'     => $date_to,
             ],

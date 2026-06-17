@@ -9,28 +9,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 global $wpdb;
 
-$args = [];
-if (!empty($_REQUEST['status'])) {
-    $args['status'] = sanitize_text_field($_REQUEST['status']);
-}
-if (!empty($_REQUEST['activity_type'])) {
-    $args['activity_type'] = sanitize_text_field($_REQUEST['activity_type']);
-}
 
-$agreements = Olama_Reg_Agreement::get_list($args);
-
-foreach ($agreements as $agr) {
-    $agr->invoices = $wpdb->get_results($wpdb->prepare(
-        "SELECT id, invoice_number, status, balance FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-        $agr->id
-    )) ?: [];
-
-    $agr->collected_amount = (float) $wpdb->get_var($wpdb->prepare(
-        "SELECT SUM(amount_paid) FROM {$wpdb->prefix}olama_invoices WHERE agreement_id = %d AND status != 'cancelled'",
-        $agr->id
-    ));
-    $agr->remaining_amount = max(0, (float)$agr->total_amount - $agr->collected_amount);
-}
 
 ?>
 <div class="olama-reg-wrap">
@@ -74,7 +53,7 @@ foreach ($agreements as $agr) {
                 </div>
             </div>
             
-            <?php include OLAMA_REG_PATH . 'admin/views/partial-agreements-table.php'; ?>
+            <?php echo Olama_Reg_Agreement_Renderer::render_agreements_list( '', 0, 'admin' ); ?>
         </form>
     </div>
 </div>

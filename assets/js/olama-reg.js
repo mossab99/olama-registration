@@ -3473,6 +3473,72 @@
             });
     });
 
+    // ── Agreements: Cancel Fee Modal ──────────────────────────────────────────
+
+    $(document).on('click', '.os-agr-cancel-fee-trigger', function () {
+        const $tr = $(this).closest('tr');
+        const id = $tr.attr('data-fee-id');
+        
+        if (!id || id == 0) {
+            $tr.remove();
+            return;
+        }
+
+        const label = $tr.find('input[name="label"]').val() || '';
+        const amount = parseFloat($tr.find('input[name="amount"]').val() || 0).toFixed(3);
+        const discount = parseFloat($tr.find('input[name="discount"]').val() || 0).toFixed(3);
+        const net = parseFloat($tr.find('.os-agr-fee-net').text() || 0).toFixed(3);
+
+        $('#os-cancel-fee-id-input').val(id);
+        $('#os-cancel-fee-label-text').text(label);
+        $('#os-cancel-fee-amount-text').text(amount + ' JD');
+        $('#os-cancel-fee-discount-text').text(discount + ' JD');
+        $('#os-cancel-fee-net-text').text(net + ' JD');
+        
+        $('#os-cancel-fee-reason').val('');
+        $('#os-cancel-fee-notes').val('');
+        
+        $('#os-cancel-fee-modal').show();
+    });
+
+    $(document).on('click', '#os-close-cancel-fee-modal', function () {
+        $('#os-cancel-fee-modal').hide();
+    });
+
+    $(document).on('submit', '#os-cancel-fee-form', function (e) {
+        e.preventDefault();
+        const $form = $(this);
+        const $btn = $form.find('button[type="submit"]');
+        const data = {
+            id: $('#os-cancel-fee-id-input').val(),
+            agreement_id: $form.find('input[name="agreement_id"]').val(),
+            reason: $('#os-cancel-fee-reason').val(),
+            effective_date: $('#os-cancel-fee-date').val(),
+            notes: $('#os-cancel-fee-notes').val(),
+        };
+
+        $btn.prop('disabled', true);
+        ajax('olama_reg_agr_delete_fee', data)
+            .done(res => {
+                if (res.success) {
+                    showNotice(res.data.message || 'تم إلغاء البند بنجاح.');
+                    $('#os-cancel-fee-modal').hide();
+                    if (res.data.reload) {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                } else {
+                    showNotice(res.data?.message || 'حدث خطأ أثناء إلغاء البند.', true);
+                    $btn.prop('disabled', false);
+                }
+            })
+            .fail(() => {
+                showNotice('حدث خطأ في الشبكة.', true);
+                $btn.prop('disabled', false);
+            });
+    });
+
     // ── Agreements: Clauses ──────────────────────────────────────────────────
 
     if (typeof $.fn.sortable !== 'undefined' && $('#os-agr-clauses-list').length) {

@@ -407,7 +407,7 @@ $school_name = $school_settings['school_name_ar'] ?? 'مدارس أوتاد ال
                 } elseif ( $receipt->status === 'cancelled' ) {
                     echo '<span class="info-val badge badge-cancelled">ملغي / Voided</span>';
                 } else {
-                    echo esc_html( $receipt->status );
+                    echo esc_html( Olama_Reg_Status_Labels::label( $receipt->status, 'settlement' ) );
                 }
                 ?>
             </span>

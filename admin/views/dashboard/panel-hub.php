@@ -80,13 +80,70 @@ $tiles = [
     <!-- ── Identity Header ─────────────────────────────────────────────────── -->
     <div class="os-hub-identity" id="os-hub-identity" aria-live="polite">
 
-        <div class="os-hub-identity__avatar">
-            <span class="dashicons dashicons-admin-users" aria-hidden="true"></span>
+        <!-- 1. Standard Customer Profile Header -->
+        <div id="os-hub-identity-standard" class="os-hub-identity__layout-standard" style="display: none; width: 100%; align-items: center; gap: 16px;">
+            <div class="os-hub-identity__avatar">
+                <span class="dashicons dashicons-admin-users" aria-hidden="true"></span>
+            </div>
+            <div class="os-hub-identity__info">
+                <div class="os-hub-identity__name" id="os-hub-identity-name">—</div>
+                <div class="os-hub-identity__meta" id="os-hub-identity-meta">—</div>
+            </div>
         </div>
 
-        <div class="os-hub-identity__info">
-            <div class="os-hub-identity__name" id="os-hub-identity-name">—</div>
-            <div class="os-hub-identity__meta" id="os-hub-identity-meta">—</div>
+        <!-- 2. Family Financial Card Layout -->
+        <div id="os-hub-identity-family" class="os-hub-identity__layout-family" style="display: none; width: 100%;">
+            <div class="os-hub-family-card">
+                <div class="os-hub-family-card__top">
+                    <div class="os-hub-family-card__title">
+                        <span class="dashicons dashicons-id-alt" aria-hidden="true"></span>
+                        <strong><?php _e( 'البطاقة المالية للعائلة', 'olama-registration' ); ?></strong>
+                    </div>
+                </div>
+                
+                <div class="os-hub-family-card__grid">
+                    <!-- 1. رقم العائلة -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'رقم العائلة (File #):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value os-hub-ltr" id="os-fc-family-uid">—</strong>
+                    </div>
+                    <!-- 2. ولي الأمر -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'ولي الأمر (Parent/Payer):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value" id="os-fc-family-name">—</strong>
+                    </div>
+                    <!-- 3. السنة الدراسية -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'السنة الدراسية (Year):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value" id="os-fc-academic-year">—</strong>
+                    </div>
+                    <!-- 4. الطلاب المرتبطون -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'الطلاب المسجلون (Students):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value" id="os-fc-students" title="">—</strong>
+                    </div>
+                    <!-- 5. إجمالي الرسوم -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'إجمالي الرسوم (Total Fees):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value os-hub-ltr" id="os-fc-total-fees">—</strong>
+                    </div>
+                    <!-- 6. إجمالي المفوتر -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'إجمالي المفوتر (Invoiced):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value os-hub-ltr" id="os-fc-gross-invoiced">—</strong>
+                    </div>
+                    <!-- 7. إجمالي المدفوع -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'إجمالي المدفوع (Paid):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value os-hub-ltr" id="os-fc-total-paid" style="color: #1a7c2e;">—</strong>
+                    </div>
+                    <!-- 8. الرصيد المستحق -->
+                    <div class="os-hub-family-card__item">
+                        <span class="os-hub-family-card__label"><?php _e( 'الرصيد المستحق (Balance):', 'olama-registration' ); ?></span>
+                        <strong class="os-hub-family-card__value os-hub-ltr" id="os-fc-remaining-balance" style="color: #c82333;">—</strong>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Phase 4: Quick action links (shown after customer loads) -->

@@ -53,6 +53,9 @@ class Olama_Reg_Agreement {
 
         if ( $inserted ) {
             $id = (int) $wpdb->insert_id;
+            if ( class_exists( 'Olama_Reg_Agreement_Participants' ) ) {
+                Olama_Reg_Agreement_Participants::sync_from_fees( $id );
+            }
             $new_agreement = self::get( $id );
             self::log_audit( $id, 'created', null, $new_agreement );
             return $id;
@@ -83,6 +86,9 @@ class Olama_Reg_Agreement {
         $updated = $wpdb->update( $table, $data, [ 'id' => $id ] );
         
         if ( $updated !== false ) {
+            if ( class_exists( 'Olama_Reg_Agreement_Participants' ) ) {
+                Olama_Reg_Agreement_Participants::sync_from_fees( $id );
+            }
             $after = self::get( $id );
             $action = 'updated';
             if ( $before && isset( $data['status'] ) && $before->status !== $data['status'] ) {
@@ -178,6 +184,11 @@ class Olama_Reg_Agreement {
             $values[] = $args['activity_type'];
         }
 
+        if ( ! empty( $args['academic_year_id'] ) ) {
+            $where[] = "academic_year_id = %d";
+            $values[] = (int) $args['academic_year_id'];
+        }
+
         $where_sql = implode( ' AND ', $where );
         
         $sql = "SELECT * FROM {$table} WHERE {$where_sql} ORDER BY id DESC";
@@ -187,16 +198,52 @@ class Olama_Reg_Agreement {
 
         $results = $wpdb->get_results( $sql );
         
-        // Add names
+        if ( empty( $results ) ) {
+            return [];
+        }
+
+        // Gather all agreement IDs and payer details
+        $agreement_ids = [];
+        $family_payer_ids = [];
+        $customer_payer_ids = [];
+
         foreach ( $results as $row ) {
-            $row->payer_name = self::resolve_payer_name( $row->payer_type, $row->payer_id );
-            
+            $agreement_ids[] = (int) $row->id;
+            if ( $row->payer_type === 'family' ) {
+                $family_payer_ids[] = $row->payer_id;
+            } elseif ( $row->payer_type === 'customer' ) {
+                $customer_payer_ids[] = $row->payer_id;
+            }
+        }
+
+        // Query all agreement fees in bulk to get child_ids
+        $agreement_child_ids = []; // agreement_id => array of child_ids
+        if ( ! empty( $agreement_ids ) ) {
             $fees_table = $wpdb->prefix . 'olama_agreement_fees';
-            $pids = $wpdb->get_col( $wpdb->prepare(
-                "SELECT DISTINCT child_id FROM {$fees_table} WHERE agreement_id = %d AND child_id IS NOT NULL AND child_id != ''",
-                $row->id
+            $ids_placeholder = implode( ',', array_fill( 0, count( $agreement_ids ), '%d' ) );
+            $fees_rows = $wpdb->get_results( $wpdb->prepare(
+                "SELECT agreement_id, child_id FROM {$fees_table} WHERE agreement_id IN ($ids_placeholder) AND child_id IS NOT NULL AND child_id != ''",
+                ...$agreement_ids
             ) );
-            if ( ! empty( $pids ) ) {
+            foreach ( $fees_rows as $f_row ) {
+                $agreement_child_ids[ $f_row->agreement_id ][] = $f_row->child_id;
+            }
+        }
+
+        // Collect participant ids and types
+        $student_participant_ids = [];
+        $child_participant_ids = [];
+
+        foreach ( $results as $row ) {
+            // Determine participant type
+            if ( empty( $row->participant_type ) ) {
+                $row->participant_type = ( $row->payer_type === 'family' ) ? 'student' : 'child';
+            }
+
+            // Resolve participant IDs array
+            $agr_id = (int) $row->id;
+            if ( ! empty( $agreement_child_ids[ $agr_id ] ) ) {
+                $pids = array_unique( $agreement_child_ids[ $agr_id ] );
                 $row->participant_ids_array = array_map( function( $val ) {
                     return is_numeric( $val ) ? (int) $val : $val;
                 }, $pids );
@@ -206,17 +253,214 @@ class Olama_Reg_Agreement {
                 $row->participant_ids_array = [ is_numeric( $row->participant_id ) ? (int) $row->participant_id : $row->participant_id ];
             }
 
-            if ( empty( $row->participant_type ) ) {
-                $row->participant_type = ( $row->payer_type === 'family' ) ? 'student' : 'child';
+            // Group by participant type
+            foreach ( $row->participant_ids_array as $pid ) {
+                if ( ! empty( $pid ) ) {
+                    if ( $row->participant_type === 'student' ) {
+                        $student_participant_ids[] = $pid;
+                    } elseif ( $row->participant_type === 'child' ) {
+                        $child_participant_ids[] = $pid;
+                    }
+                }
+            }
+            // Add fallback participant_id to the collection as well
+            if ( ! empty( $row->participant_id ) ) {
+                if ( $row->participant_type === 'student' ) {
+                    $student_participant_ids[] = $row->participant_id;
+                } elseif ( $row->participant_type === 'child' ) {
+                    $child_participant_ids[] = $row->participant_id;
+                }
+            }
+        }
+
+        // Batch query names for families
+        $family_names = [];
+        if ( ! empty( $family_payer_ids ) ) {
+            $family_payer_ids = array_unique( $family_payer_ids );
+            $families_table = $wpdb->prefix . 'olama_families';
+            $uids_only = [];
+            $ids_only = [];
+            foreach ( $family_payer_ids as $fid ) {
+                if ( is_numeric( $fid ) ) {
+                    $ids_only[] = (int) $fid;
+                }
+                $uids_only[] = (string) $fid;
+            }
+            $prepare_args = [];
+            $where_parts = [];
+            if ( ! empty( $uids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $uids_only ), '%s' ) );
+                $where_parts[] = "family_uid IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $uids_only );
+            }
+            if ( ! empty( $ids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $ids_only ), '%d' ) );
+                $where_parts[] = "id IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $ids_only );
+            }
+            if ( ! empty( $where_parts ) ) {
+                $where_clause = implode( ' OR ', $where_parts );
+                $f_rows = $wpdb->get_results( $wpdb->prepare(
+                    "SELECT id, family_uid, family_name FROM {$families_table} WHERE {$where_clause}",
+                    ...$prepare_args
+                ) );
+                foreach ( $f_rows as $f_row ) {
+                    $family_names[ $f_row->id ] = $f_row->family_name;
+                    $family_names[ $f_row->family_uid ] = $f_row->family_name;
+                }
+            }
+        }
+
+        // Batch query names for customers
+        $customer_names = [];
+        if ( ! empty( $customer_payer_ids ) ) {
+            $customer_payer_ids = array_unique( $customer_payer_ids );
+            $customers_table = $wpdb->prefix . 'olama_customers';
+            $uids_only = [];
+            $ids_only = [];
+            foreach ( $customer_payer_ids as $cid ) {
+                if ( is_numeric( $cid ) ) {
+                    $ids_only[] = (int) $cid;
+                }
+                $uids_only[] = (string) $cid;
+            }
+            $prepare_args = [];
+            $where_parts = [];
+            if ( ! empty( $uids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $uids_only ), '%s' ) );
+                $where_parts[] = "customer_uid IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $uids_only );
+            }
+            if ( ! empty( $ids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $ids_only ), '%d' ) );
+                $where_parts[] = "id IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $ids_only );
+            }
+            if ( ! empty( $where_parts ) ) {
+                $where_clause = implode( ' OR ', $where_parts );
+                $c_rows = $wpdb->get_results( $wpdb->prepare(
+                    "SELECT id, customer_uid, customer_name FROM {$customers_table} WHERE {$where_clause}",
+                    ...$prepare_args
+                ) );
+                foreach ( $c_rows as $c_row ) {
+                    $customer_names[ $c_row->id ] = $c_row->customer_name;
+                    $customer_names[ $c_row->customer_uid ] = $c_row->customer_name;
+                }
+            }
+        }
+
+        // Batch query names for students (participants)
+        $student_names = [];
+        if ( ! empty( $student_participant_ids ) ) {
+            $student_participant_ids = array_unique( $student_participant_ids );
+            $students_table = $wpdb->prefix . 'olama_students';
+            $uids_only = [];
+            $ids_only = [];
+            foreach ( $student_participant_ids as $sid ) {
+                if ( is_numeric( $sid ) ) {
+                    $ids_only[] = (int) $sid;
+                }
+                $uids_only[] = (string) $sid;
+            }
+            $prepare_args = [];
+            $where_parts = [];
+            if ( ! empty( $uids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $uids_only ), '%s' ) );
+                $where_parts[] = "student_uid IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $uids_only );
+            }
+            if ( ! empty( $ids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $ids_only ), '%d' ) );
+                $where_parts[] = "id IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $ids_only );
+            }
+            if ( ! empty( $where_parts ) ) {
+                $where_clause = implode( ' OR ', $where_parts );
+                $s_rows = $wpdb->get_results( $wpdb->prepare(
+                    "SELECT id, student_uid, student_name FROM {$students_table} WHERE {$where_clause}",
+                    ...$prepare_args
+                ) );
+                foreach ( $s_rows as $s_row ) {
+                    $student_names[ $s_row->id ] = $s_row->student_name;
+                    $student_names[ $s_row->student_uid ] = $s_row->student_name;
+                }
+            }
+        }
+
+        // Batch query names for children (participants)
+        $child_names = [];
+        if ( ! empty( $child_participant_ids ) ) {
+            $child_participant_ids = array_unique( $child_participant_ids );
+            $children_table = $wpdb->prefix . 'olama_customer_children';
+            $uids_only = [];
+            $ids_only = [];
+            foreach ( $child_participant_ids as $cid ) {
+                if ( is_numeric( $cid ) ) {
+                    $ids_only[] = (int) $cid;
+                }
+                $uids_only[] = (string) $cid;
+            }
+            $prepare_args = [];
+            $where_parts = [];
+            if ( ! empty( $uids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $uids_only ), '%s' ) );
+                $where_parts[] = "child_uid IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $uids_only );
+            }
+            if ( ! empty( $ids_only ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $ids_only ), '%d' ) );
+                $where_parts[] = "id IN ($placeholders)";
+                $prepare_args = array_merge( $prepare_args, $ids_only );
+            }
+            if ( ! empty( $where_parts ) ) {
+                $where_clause = implode( ' OR ', $where_parts );
+                $ch_rows = $wpdb->get_results( $wpdb->prepare(
+                    "SELECT id, child_uid, child_name FROM {$children_table} WHERE {$where_clause}",
+                    ...$prepare_args
+                ) );
+                foreach (ch_rows as $ch_row ) {
+                    $child_names[ $ch_row->id ] = $ch_row->child_name;
+                    $child_names[ $ch_row->child_uid ] = $ch_row->child_name;
+                }
+            }
+        }
+
+        // Populate rows with names
+        foreach ( $results as $row ) {
+            // Payer name
+            if ( $row->payer_type === 'family' ) {
+                $row->payer_name = isset( $family_names[ $row->payer_id ] ) ? $family_names[ $row->payer_id ] : 'Unknown Family';
+            } elseif ( $row->payer_type === 'customer' ) {
+                $row->payer_name = isset( $customer_names[ $row->payer_id ] ) ? $customer_names[ $row->payer_id ] : 'Unknown Customer';
+            } else {
+                $row->payer_name = '';
             }
 
+            // Participant names
             $names = [];
             foreach ( $row->participant_ids_array as $pid ) {
                 if ( ! empty( $pid ) ) {
-                    $names[] = self::resolve_participant_name( $row->participant_type, (string)$pid );
+                    if ( $row->participant_type === 'student' ) {
+                        $names[] = isset( $student_names[ $pid ] ) ? $student_names[ $pid ] : 'Unknown Student';
+                    } elseif ( $row->participant_type === 'child' ) {
+                        $names[] = isset( $child_names[ $pid ] ) ? $child_names[ $pid ] : 'Unknown Child';
+                    }
                 }
             }
-            $row->participant_name = !empty($names) ? implode( ' ، ', $names ) : self::resolve_participant_name( $row->participant_type, (string)$row->participant_id );
+
+            if ( ! empty( $names ) ) {
+                $row->participant_name = implode( ' ، ', $names );
+            } else {
+                // Fallback to participant_id
+                $pid = $row->participant_id;
+                if ( $row->participant_type === 'student' ) {
+                    $row->participant_name = isset( $student_names[ $pid ] ) ? $student_names[ $pid ] : 'Unknown Student';
+                } elseif ( $row->participant_type === 'child' ) {
+                    $row->participant_name = isset( $child_names[ $pid ] ) ? $child_names[ $pid ] : 'Unknown Child';
+                } else {
+                    $row->participant_name = '';
+                }
+            }
         }
 
         return $results;

@@ -281,6 +281,14 @@ class Olama_Reg_Agreement_Amendment {
         self::write_audit( $diff >= 0 ? 'agreement_amount_increased' : 'agreement_amount_decreased', (int) $amendment->agreement_id, null, self::get( $amendment_id ) );
         $wpdb->query( 'COMMIT' );
 
+        $payer_id = $wpdb->get_var($wpdb->prepare(
+            "SELECT payer_id FROM " . self::t( 'olama_agreements' ) . " WHERE id = %d AND payer_type = 'family'",
+            (int) $amendment->agreement_id
+        ));
+        if ( class_exists( 'Olama_Reg_Family_Financial_Summary' ) && ! empty( $payer_id ) ) {
+            Olama_Reg_Family_Financial_Summary::invalidate_snapshot( $payer_id, 0 );
+        }
+
         return true;
     }
 
@@ -538,6 +546,10 @@ class Olama_Reg_Agreement_Amendment {
         $needs_recalculate = false;
 
         foreach ( $amendments as $amendment ) {
+            if ( $amendment->amendment_type === 'add_fee' ) {
+                continue;
+            }
+
             $found = false;
             foreach ( $existing_labels as $label ) {
                 if ( strpos( (string) $label, $amendment->amendment_no ) !== false ) {
