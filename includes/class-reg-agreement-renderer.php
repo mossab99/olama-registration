@@ -477,9 +477,13 @@ class Olama_Reg_Agreement_Renderer {
                 'target' => '_blank',
             ];
             if ( ! $is_cancelled && ! $has_invoices ) {
+                $cancel_url = wp_nonce_url(
+                    admin_url( 'admin.php?page=olama-registration-agreements&action=cancel&id=' . $agreement->id ),
+                    'olama_cancel_agreement_' . $agreement->id
+                );
                 $actions['cancel'] = [
                     'label' => __( 'إلغاء', 'olama-registration' ),
-                    'url'   => admin_url( 'admin.php?page=olama-registration-agreements&action=cancel&id=' . $agreement->id ),
+                    'url'   => $cancel_url,
                     'class' => 'button button-small',
                     'style' => 'color:#d63638; text-decoration:none;',
                     'onclick' => "return confirm('" . esc_js( __( 'هل أنت متأكد من إلغاء وحذف هذا العقد؟', 'olama-registration' ) ) . "');",
@@ -499,9 +503,13 @@ class Olama_Reg_Agreement_Renderer {
                 'target' => '_blank',
             ];
             if ( ! $is_cancelled && ! $has_invoices ) {
+                $cancel_url = wp_nonce_url(
+                    add_query_arg( 'redirect_to', 'hub', admin_url( 'admin.php?page=olama-registration-agreements&action=cancel&id=' . $agreement->id ) ),
+                    'olama_cancel_agreement_' . $agreement->id
+                );
                 $actions['cancel'] = [
                     'label' => __( 'إلغاء', 'olama-registration' ),
-                    'url'   => add_query_arg( 'redirect_to', 'hub', admin_url( 'admin.php?page=olama-registration-agreements&action=cancel&id=' . $agreement->id ) ),
+                    'url'   => $cancel_url,
                     'class' => 'button button-small',
                     'style' => 'color:#d63638; text-decoration:none;',
                     'onclick' => "return confirm('" . esc_js( __( 'هل أنت متأكد من إلغاء وحذف هذا العقد؟', 'olama-registration' ) ) . "');",

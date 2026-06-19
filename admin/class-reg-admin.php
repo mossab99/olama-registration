@@ -399,6 +399,7 @@ class Olama_Reg_Admin {
                 wp_die( __( 'Unauthorized', 'olama-registration' ) );
             }
             $id = (int) ( $_GET['id'] ?? 0 );
+            check_admin_referer( 'olama_cancel_agreement_' . $id );
             global $wpdb;
             if ($id) {
                 $cancelled = Olama_Reg_Agreement::change_status($id, 'cancelled');

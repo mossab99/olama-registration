@@ -418,7 +418,7 @@ class Olama_Reg_Agreement {
                     "SELECT id, child_uid, child_name FROM {$children_table} WHERE {$where_clause}",
                     ...$prepare_args
                 ) );
-                foreach (ch_rows as $ch_row ) {
+                foreach ( $ch_rows as $ch_row ) {
                     $child_names[ $ch_row->id ] = $ch_row->child_name;
                     $child_names[ $ch_row->child_uid ] = $ch_row->child_name;
                 }

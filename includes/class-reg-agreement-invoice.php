@@ -166,6 +166,14 @@ class Olama_Reg_Agreement_Invoice {
             return new \WP_Error( 'not_found', __( 'العقد غير موجود.', 'olama-registration' ) );
         }
 
+        if ( $agreement->status === 'cancelled' ) {
+            return new \WP_Error( 'agreement_cancelled', __( 'لا يمكن إكمال عقد ملغى.', 'olama-registration' ) );
+        }
+
+        if ( $agreement->status === 'completed' ) {
+            return new \WP_Error( 'agreement_already_completed', __( 'تم إكمال هذا العقد مسبقاً.', 'olama-registration' ) );
+        }
+
         $errors = [];
         if ( empty( $agreement->payer_id ) ) {
             $errors[] = __( 'يجب اختيار الجهة الدافعة.', 'olama-registration' );
@@ -222,7 +230,6 @@ class Olama_Reg_Agreement_Invoice {
 
         $validation = self::validate_completion( $agreement_id );
         if ( is_wp_error( $validation ) ) {
-            Olama_Reg_Agreement::update( $agreement_id, [ 'status' => 'draft' ] );
             return $validation;
         }
 
@@ -231,7 +238,6 @@ class Olama_Reg_Agreement_Invoice {
 
         if ( is_wp_error( $invoice_id ) ) {
             $wpdb->query( 'ROLLBACK' );
-            Olama_Reg_Agreement::update( $agreement_id, [ 'status' => 'draft' ] );
             return $invoice_id;
         }
 
