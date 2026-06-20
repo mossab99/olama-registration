@@ -221,10 +221,28 @@ class Olama_Reg_Billing_Payment {
             return new \WP_Error( 'already_reversed', __( 'السند معكوس مسبقاً.', 'olama-registration' ) );
         }
 
+        $reversal_cash_session_id = null;
+        if ( (string) $payment->method === 'cash' ) {
+            $reversal_date = current_time( 'Y-m-d' );
+            $account_id    = isset( $payment->account_id ) ? (int) $payment->account_id : 0;
+            if ( ! $account_id ) {
+                $account_id = Olama_Reg_Cash_Bank_Movement::get_default_account_id_for_method( 'cash' );
+            }
+
+            if ( $account_id ) {
+                $open_session = Olama_Reg_Cash_Session::get_open_session( $account_id, get_current_user_id(), $reversal_date );
+                if ( $open_session ) {
+                    $reversal_cash_session_id = (int) $open_session->id;
+                } elseif ( get_option( 'olama_require_cash_session', '0' ) === '1' ) {
+                    return new \WP_Error( 'missing_cash_session', __( 'Cash receipt reversals require an open cash session for today.', 'olama-registration' ) );
+                }
+            }
+        }
+
         $payload = [
             'payment_no'     => null,
             'account_id'     => isset( $payment->account_id ) ? (int) $payment->account_id : null,
-            'cash_session_id'=> isset( $payment->cash_session_id ) ? (int) $payment->cash_session_id : null,
+            'cash_session_id'=> $reversal_cash_session_id,
             'invoice_id'     => $payment->invoice_id,
             'installment_id' => $payment->installment_id,
             'family_uid'     => $payment->family_uid,

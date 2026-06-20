@@ -18,11 +18,17 @@ class Olama_Reg_Cash_Session {
         $account_id = absint( $data['account_id'] ?? 0 );
         $cashier_id = absint( $data['cashier_id'] ?? get_current_user_id() );
         $date = self::sanitize_date( $data['session_date'] ?? current_time( 'Y-m-d' ) );
-        $opening = round( (float) ( $data['opening_balance'] ?? 0 ), 2 );
+        $opening_raw = isset( $data['opening_balance'] ) ? trim( (string) $data['opening_balance'] ) : '';
+        $opening = $opening_raw === ''
+            ? self::get_default_opening_balance( $account_id, $date )
+            : round( (float) $opening_raw, 2 );
         $notes = sanitize_textarea_field( $data['notes'] ?? '' );
 
         if ( ! $account_id || ! $cashier_id ) {
             return new \WP_Error( 'missing_session_data', __( 'Cash account and cashier are required.', 'olama-registration' ) );
+        }
+        if ( $opening < 0 ) {
+            return new \WP_Error( 'invalid_opening_balance', __( 'Opening balance cannot be negative.', 'olama-registration' ) );
         }
 
         $account = self::get_account( $account_id );
@@ -35,7 +41,7 @@ class Olama_Reg_Cash_Session {
             return $policy;
         }
 
-        $existing = self::get_open_session( $account_id, $cashier_id, $date );
+        $existing = self::get_open_session( $account_id, $cashier_id );
         if ( $existing ) {
             return new \WP_Error( 'session_already_open', __( 'There is already an open cash session for this cashier and cash account.', 'olama-registration' ) );
         }
@@ -87,6 +93,9 @@ class Olama_Reg_Cash_Session {
 
         $totals = self::calculate_totals( $session_id );
         $actual = round( $actual_closing_balance, 2 );
+        if ( $actual < 0 ) {
+            return new \WP_Error( 'invalid_actual_balance', __( 'Actual closing balance cannot be negative.', 'olama-registration' ) );
+        }
         $difference = round( $actual - $totals['expected'], 2 );
 
         $updated = $wpdb->update(
@@ -162,11 +171,12 @@ class Olama_Reg_Cash_Session {
         }
 
         $account_id = (int) ( $payment->account_id ?: Olama_Reg_Cash_Bank_Movement::get_default_account_id( 'cash' ) );
-        $session = self::get_open_session( $account_id, (int) $payment->received_by );
+        $payment_date = self::sanitize_date( (string) ( $payment->payment_date ?? current_time( 'Y-m-d' ) ) );
+        $session = self::get_open_session( $account_id, (int) $payment->received_by, $payment_date );
 
         if ( ! $session ) {
             if ( get_option( 'olama_require_cash_session', '0' ) === '1' ) {
-                return new \WP_Error( 'missing_cash_session', __( 'Cash receipts require an open cash session.', 'olama-registration' ) );
+                return new \WP_Error( 'missing_cash_session', __( 'Cash receipts require an open cash session for the receipt date.', 'olama-registration' ) );
             }
             return true;
         }
@@ -314,6 +324,15 @@ class Olama_Reg_Cash_Session {
             "SELECT * FROM " . self::t( 'olama_financial_accounts' ) . " WHERE id = %d AND is_active = 1",
             $account_id
         ) ) ?: null;
+    }
+
+    private static function get_default_opening_balance( int $account_id, string $session_date ): float {
+        if ( ! $account_id ) {
+            return 0.0;
+        }
+
+        $previous_day = date( 'Y-m-d', strtotime( $session_date . ' -1 day' ) );
+        return Olama_Reg_Cash_Bank_Movement::get_account_balance( $account_id, $previous_day );
     }
 
     private static function sanitize_date( string $date ): string {

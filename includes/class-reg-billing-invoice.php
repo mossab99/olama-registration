@@ -289,6 +289,8 @@ class Olama_Reg_Billing_Invoice
                 ]);
             }
             self::recalculate_totals($id);
+        } elseif (isset($data['discount']) || isset($data['status'])) {
+            self::recalculate_totals($id);
         }
 
         self::log_audit('invoice', $id, 'updated', $before, self::get_invoice($id));
@@ -555,7 +557,7 @@ class Olama_Reg_Billing_Invoice
             return new \WP_Error('not_found', __('Invoice not found.', 'olama-registration'));
         }
 
-        if ((float) $inv->amount_paid > 0) {
+        if ((float) $inv->amount_paid > 0 || self::has_payment_records($id)) {
             return new \WP_Error('has_payments', __('لا يمكن إلغاء الفاتورة لأنها تحتوي على سندات قبض. يجب عكس السندات أولاً.', 'olama-registration'));
         }
 
@@ -750,7 +752,7 @@ class Olama_Reg_Billing_Invoice
         if ((string) ($invoice->status ?? '') === 'cancelled') {
             return new \WP_Error('invoice_cancelled', __('لا يمكن تعديل فاتورة ملغاة.', 'olama-registration'));
         }
-        if ((float) ($invoice->amount_paid ?? 0) > 0) {
+        if ((float) ($invoice->amount_paid ?? 0) > 0 || self::has_payment_records((int) ($invoice->id ?? 0))) {
             return new \WP_Error('financial_locked', __(self::FINANCIAL_UPDATE_ERROR, 'olama-registration'));
         }
         if (!in_array((string) ($invoice->status ?? ''), ['draft', 'issued'], true)) {
@@ -772,7 +774,7 @@ class Olama_Reg_Billing_Invoice
         if ((string) ($invoice->status ?? '') === 'cancelled') {
             return new \WP_Error('already_cancelled', __('الفاتورة ملغاة مسبقاً.', 'olama-registration'));
         }
-        if ((float) ($invoice->amount_paid ?? 0) > 0) {
+        if ((float) ($invoice->amount_paid ?? 0) > 0 || self::has_payment_records((int) ($invoice->id ?? 0))) {
             return new \WP_Error('has_payments', __('لا يمكن إلغاء الفاتورة لأنها تحتوي على سندات قبض. يجب عكس السندات أولاً.', 'olama-registration'));
         }
         if (self::has_active_adjustments((int) $invoice->id)) {
@@ -1074,6 +1076,22 @@ class Olama_Reg_Billing_Invoice
         global $wpdb;
         return (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM " . self::t('olama_invoice_adjustments') . " WHERE invoice_id = %d AND status = 'issued'",
+            $invoice_id
+        )) > 0;
+    }
+
+    private static function has_payment_records(int $invoice_id): bool
+    {
+        global $wpdb;
+        if ($invoice_id <= 0) {
+            return false;
+        }
+
+        return (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*)
+             FROM " . self::t('olama_payments') . "
+             WHERE invoice_id = %d
+               AND COALESCE(status, 'posted') NOT IN ('cancelled','failed')",
             $invoice_id
         )) > 0;
     }

@@ -104,18 +104,23 @@ class Olama_Reg_Customer {
 
         if ( $search !== '' ) {
             $like    = '%' . $wpdb->esc_like( $search ) . '%';
-            $where  .= " AND ( customer_name LIKE %s OR phone LIKE %s OR customer_uid LIKE %s )";
+            $where  .= " AND ( c.customer_name LIKE %s OR c.phone LIKE %s OR c.customer_uid LIKE %s
+                              OR EXISTS (
+                                  SELECT 1 FROM {$wpdb->prefix}olama_customer_children ch2
+                                  WHERE ch2.customer_id = c.id AND ch2.child_name LIKE %s
+                              ) )";
+            $params[] = $like;
             $params[] = $like;
             $params[] = $like;
             $params[] = $like;
         }
 
         if ( $active !== null ) {
-            $where   .= ' AND is_active = %d';
+            $where   .= ' AND c.is_active = %d';
             $params[] = $active ? 1 : 0;
         }
 
-        $sql = "SELECT COUNT(*) FROM " . self::t() . " WHERE {$where}";
+        $sql = "SELECT COUNT(*) FROM " . self::t() . " c WHERE {$where}";
         return (int) ( empty( $params )
             ? $wpdb->get_var( $sql )
             : $wpdb->get_var( $wpdb->prepare( $sql, ...$params ) )
@@ -225,9 +230,11 @@ class Olama_Reg_Customer {
         }
 
         // Check whether any invoices are linked to this customer
+        $customer_uid = $customer->customer_uid ?: 'CUST-' . str_pad( $id, 4, '0', STR_PAD_LEFT );
         $has_invoices = (int) $wpdb->get_var( $wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE ext_customer_id = %d",
-            $id
+            "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices WHERE ext_customer_id = %d OR family_uid = %s",
+            $id,
+            $customer_uid
         ) );
 
         if ( $has_invoices === 0 ) {

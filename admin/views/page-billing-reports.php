@@ -753,7 +753,7 @@ function olama_reg_statement_text( string $key ): string {
                     <label><?php esc_html_e( 'ط§ظ„ط­ط§ظ„ط©', 'olama-registration' ); ?></label>
                     <select name="status">
                         <option value=""><?php esc_html_e( 'ط¬ظ…ظٹط¹ ط§ظ„ط­ط§ظ„ط§طھ', 'olama-registration' ); ?></option>
-                        <?php foreach ( [ 'posted', 'pending', 'reversed', 'cancelled' ] as $status_key ) : ?>
+                        <?php foreach ( [ 'posted', 'pending_review', 'reversed', 'cancelled' ] as $status_key ) : ?>
                             <option value="<?php echo esc_attr( $status_key ); ?>" <?php selected( $receipt_report['filters']['status'], $status_key ); ?>><?php echo esc_html( Olama_Reg_Billing_Payment::get_status_label( $status_key ) ); ?></option>
                         <?php endforeach; ?>
                     </select>

@@ -454,17 +454,20 @@ if ($filter_method) {
 }
 if ($search_q) {
     $like = '%' . $wpdb->esc_like($search_q) . '%';
-    $where .= " AND (p.payment_no LIKE %s OR p.family_uid LIKE %s OR i.invoice_number LIKE %s OR f.family_name LIKE %s)";
+    $where .= " AND (p.payment_no LIKE %s OR p.family_uid LIKE %s OR i.invoice_number LIKE %s OR f.family_name LIKE %s OR c.customer_name LIKE %s OR c.customer_uid LIKE %s)";
+    $params[] = $like;
+    $params[] = $like;
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
 }
 
-$query = "SELECT p.*, i.invoice_number, f.family_name AS father_first_name, '' AS father_family_name, u.display_name AS received_by_name, a.account_name, cs.session_no
+$query = "SELECT p.*, i.invoice_number, COALESCE(f.family_name, c.customer_name, '') AS father_first_name, '' AS father_family_name, u.display_name AS received_by_name, a.account_name, cs.session_no
           FROM " . $wpdb->prefix . "olama_payments p
           LEFT JOIN " . $wpdb->prefix . "olama_invoices i ON i.id = p.invoice_id
           LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = p.family_uid
+          LEFT JOIN " . $wpdb->prefix . "olama_customers c ON c.customer_uid = p.family_uid OR c.id = i.ext_customer_id
           LEFT JOIN {$wpdb->users} u ON u.ID = p.received_by
           LEFT JOIN " . $wpdb->prefix . "olama_financial_accounts a ON a.id = p.account_id
           LEFT JOIN " . $wpdb->prefix . "olama_cash_sessions cs ON cs.id = p.cash_session_id
@@ -479,9 +482,16 @@ if (!empty($params)) {
 ?>
 <?php
 // Aggregate totals for the current filter
-$_pay_total = $wpdb->get_var(
-    "SELECT COALESCE(SUM(amount),0) FROM {$wpdb->prefix}olama_payments"
-);
+$_pay_total_query = "SELECT COALESCE(SUM(p.amount),0)
+          FROM " . $wpdb->prefix . "olama_payments p
+          LEFT JOIN " . $wpdb->prefix . "olama_invoices i ON i.id = p.invoice_id
+          LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = p.family_uid
+          LEFT JOIN " . $wpdb->prefix . "olama_customers c ON c.customer_uid = p.family_uid OR c.id = i.ext_customer_id
+          WHERE {$where}
+            AND (p.status IS NULL OR p.status = '' OR p.status IN ('posted','reversed'))";
+$_pay_total = ! empty( $params )
+    ? $wpdb->get_var( $wpdb->prepare( $_pay_total_query, ...$params ) )
+    : $wpdb->get_var( $_pay_total_query );
 ?>
 <div class="wrap olama-reg-wrap" dir="rtl">
 

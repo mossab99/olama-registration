@@ -24,7 +24,7 @@ class Olama_Reg_Billing_Reports {
         global $wpdb;
 
         $params = [];
-        $where  = "status != 'cancelled'";
+        $where  = "status NOT IN ('draft', 'cancelled')";
         if ( $year_id > 0 ) {
             $where .= " AND academic_year_id = %d";
             $params[] = $year_id;
@@ -35,7 +35,7 @@ class Olama_Reg_Billing_Reports {
             COALESCE(SUM(i.amount_paid), 0) AS total_collected,
             COALESCE(SUM(i.balance), 0) AS total_receivables,
             COALESCE(SUM(i.discount), 0) AS total_discount,
-            COALESCE(SUM(CASE WHEN i.due_date < CURDATE() AND i.balance > 0 AND i.status NOT IN ('paid', 'cancelled') THEN i.balance ELSE 0 END), 0) AS total_overdue
+            COALESCE(SUM(CASE WHEN i.due_date < CURDATE() AND i.balance > 0 AND i.status NOT IN ('paid', 'draft', 'cancelled') THEN i.balance ELSE 0 END), 0) AS total_overdue
             FROM " . self::t( 'olama_invoices' ) . " i
             LEFT JOIN (
                 SELECT invoice_id,
@@ -68,15 +68,15 @@ class Olama_Reg_Billing_Reports {
     public static function get_monthly_collections( int $year_id ): array {
         global $wpdb;
 
-        $params = [];
-        $join = "";
-        $where = "1=1";
+		$params = [];
+		$join = "";
+		$where = "(p.status IS NULL OR p.status = '' OR p.status IN ('posted','reversed'))";
 
-        if ( $year_id > 0 ) {
-            $join = " LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id";
-            $where = "i.academic_year_id = %d";
-            $params[] = $year_id;
-        }
+		if ( $year_id > 0 ) {
+			$join = " LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id";
+			$where .= " AND i.academic_year_id = %d";
+			$params[] = $year_id;
+		}
 
         $query = "SELECT 
             DATE_FORMAT(p.payment_date, '%Y-%m') AS month_label,
@@ -110,24 +110,33 @@ class Olama_Reg_Billing_Reports {
     public static function get_payment_method_breakdown( int $year_id ): array {
         global $wpdb;
 
-        $params = [];
-        $join = "";
-        $where = "1=1";
+		$params = [];
+		$join = " LEFT JOIN " . self::t( 'olama_payments' ) . " orig ON orig.id = p.reversed_payment_id";
+		$where = "(p.status IS NULL OR p.status = '' OR p.status IN ('posted','reversed'))";
 
-        if ( $year_id > 0 ) {
-            $join = " LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id";
-            $where = "i.academic_year_id = %d";
-            $params[] = $year_id;
-        }
+		if ( $year_id > 0 ) {
+			$join .= " LEFT JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id";
+			$where .= " AND i.academic_year_id = %d";
+			$params[] = $year_id;
+		}
 
         $query = "SELECT 
-            p.method,
+            COALESCE(
+                NULLIF(
+                    CASE
+                        WHEN p.method = 'reversal' OR p.amount < 0 THEN orig.method
+                        ELSE p.method
+                    END,
+                    ''
+                ),
+                'other'
+            ) AS method,
             SUM(p.amount) AS total_amount,
             COUNT(*) AS transaction_count
             FROM " . self::t( 'olama_payments' ) . " p
             {$join}
             WHERE {$where}
-            GROUP BY p.method";
+            GROUP BY method";
 
         if ( ! empty( $params ) ) {
             $results = $wpdb->get_results( $wpdb->prepare( $query, ...$params ) );
@@ -154,7 +163,7 @@ class Olama_Reg_Billing_Reports {
         global $wpdb;
 
         $params = [];
-        $where = "i.status NOT IN ('paid','cancelled') AND (inst.amount_due - inst.amount_paid) > 0 AND inst.due_date < CURDATE()";
+        $where = "i.status NOT IN ('paid','draft','cancelled') AND (inst.amount_due - inst.amount_paid) > 0 AND inst.due_date < CURDATE()";
         if ( $year_id > 0 ) {
             $where .= " AND i.academic_year_id = %d";
             $params[] = $year_id;
@@ -237,7 +246,7 @@ class Olama_Reg_Billing_Reports {
         $method      = sanitize_text_field( $filters['method'] ?? '' );
         $cashier_id  = absint( $filters['cashier_id'] ?? 0 );
 
-        $where  = [ "p.amount > 0", "p.method != 'reversal'" ];
+		$where  = [ "p.amount > 0", "p.method != 'reversal'", "(p.status IS NULL OR p.status = '' OR p.status = 'posted')" ];
         $params = [];
 
         if ( $year_id > 0 ) {
@@ -379,10 +388,35 @@ class Olama_Reg_Billing_Reports {
             : ( $wpdb->get_results( $query ) ?: [] );
 
         $running = [];
+        $opening_by_account = [];
+        if ( $date_from ) {
+            $opening_where  = [ 'm.movement_date < %s' ];
+            $opening_params = [ $date_from ];
+            if ( $account_id > 0 ) {
+                $opening_where[]  = 'a.id = %d';
+                $opening_params[] = $account_id;
+            }
+
+            $opening_sql = "SELECT
+                    a.id AS account_id,
+                    (COALESCE(a.opening_balance, 0) + COALESCE(SUM(CASE WHEN m.direction = 'out' THEN -1 * m.amount ELSE m.amount END), 0)) AS opening_balance
+                FROM " . self::t( 'olama_financial_accounts' ) . " a
+                LEFT JOIN " . self::t( 'olama_cash_bank_movements' ) . " m
+                    ON m.account_id = a.id AND " . implode( ' AND ', $opening_where ) . "
+                GROUP BY a.id";
+
+            $opening_rows = $wpdb->get_results( $wpdb->prepare( $opening_sql, ...$opening_params ) ) ?: [];
+            foreach ( $opening_rows as $opening_row ) {
+                $opening_by_account[ (int) $opening_row->account_id ] = (float) $opening_row->opening_balance;
+            }
+        }
+
         foreach ( $rows as $row ) {
             $aid = (int) $row->account_id;
             if ( ! isset( $running[ $aid ] ) ) {
-                $running[ $aid ] = (float) ( $row->opening_balance ?? 0 );
+                $running[ $aid ] = array_key_exists( $aid, $opening_by_account )
+                    ? (float) $opening_by_account[ $aid ]
+                    : (float) ( $row->opening_balance ?? 0 );
             }
             $running[ $aid ] += (string) $row->direction === 'out' ? -1 * (float) $row->amount : (float) $row->amount;
             $row->running_balance = round( $running[ $aid ], 2 );
@@ -406,6 +440,9 @@ class Olama_Reg_Billing_Reports {
         $method     = sanitize_text_field( $filters['method'] ?? '' );
         $status     = sanitize_key( $filters['status'] ?? '' );
         $account_id = absint( $filters['account_id'] ?? 0 );
+        if ( $status === 'pending' ) {
+            $status = 'pending_review';
+        }
 
         $where = [ '1=1' ];
         $params = [];
@@ -464,7 +501,7 @@ class Olama_Reg_Billing_Reports {
             $params[] = $date_to;
         }
 
-        $query = "SELECT pa.*, p.payment_no, p.method, p.status AS payment_status,
+        $query = "SELECT pa.*, pa.amount AS amount_allocated, p.payment_no, p.method, p.status AS payment_status,
                 i.invoice_number, inst.installment_no, inst.due_date, inst.amount_due
             FROM " . self::t( 'olama_payment_allocations' ) . " pa
             LEFT JOIN " . self::t( 'olama_payments' ) . " p ON p.id = pa.payment_id
@@ -571,13 +608,14 @@ class Olama_Reg_Billing_Reports {
             }
         }
 
-        $conditions = [ "i.status != 'cancelled'" ];
+        $conditions = [ "i.status NOT IN ('draft', 'cancelled')" ];
         $params     = [];
 
         if ( $uid !== '' ) {
             if ( $entity_type === 'external' ) {
-                $conditions[] = 'i.ext_customer_id = %d';
+                $conditions[] = '(i.ext_customer_id = %d OR i.family_uid = %s)';
                 $params[]     = $customer_id > 0 ? $customer_id : -1;
+                $params[]     = $uid;
             } else {
                 $conditions[] = 'i.family_uid = %s';
                 $params[]     = $uid;
@@ -632,24 +670,24 @@ class Olama_Reg_Billing_Reports {
                 p.payment_date AS movement_date,
                 p.created_at AS created_at,
                 CASE
-                    WHEN p.status = 'reversed' OR p.method = 'reversal' OR p.amount < 0 THEN 'payment_reversal'
+                    WHEN p.method = 'reversal' OR p.amount < 0 OR p.reversed_payment_id IS NOT NULL THEN 'payment_reversal'
                     ELSE 'payment'
                 END AS entry_type,
                 COALESCE(p.payment_no, CONCAT('#', p.id)) AS reference_no,
                 COALESCE(p.notes, p.reference, '') AS details,
                 CASE
-                    WHEN p.status = 'reversed' OR p.method = 'reversal' OR p.amount < 0 THEN ABS(CAST(p.amount AS DECIMAL(18,2)))
+                    WHEN p.method = 'reversal' OR p.amount < 0 OR p.reversed_payment_id IS NOT NULL THEN ABS(CAST(p.amount AS DECIMAL(18,2)))
                     ELSE 0.00
                 END AS debit_amount,
                 CASE
-                    WHEN p.status = 'reversed' OR p.method = 'reversal' OR p.amount < 0 THEN 0.00
+                    WHEN p.method = 'reversal' OR p.amount < 0 OR p.reversed_payment_id IS NOT NULL THEN 0.00
                     ELSE ABS(CAST(p.amount AS DECIMAL(18,2)))
                 END AS credit_amount,
                 p.id AS sort_id
             FROM " . self::t( 'olama_payments' ) . " p
             INNER JOIN " . self::t( 'olama_invoices' ) . " i ON i.id = p.invoice_id
             WHERE {$where_sql}{$student_where_p}
-              AND COALESCE(p.status, 'posted') NOT IN ('cancelled', 'failed')";
+			  AND (p.status IS NULL OR p.status = '' OR p.status IN ('posted','reversed'))";
 
         $union_sql = "{$invoice_sql} UNION ALL {$adjustment_sql} UNION ALL {$payment_sql}";
         $outer_sql = "SELECT *

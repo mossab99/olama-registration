@@ -131,10 +131,15 @@
             // Update type badge in lookup panel
             TypeBadge.update(type);
 
-            // Show/Hide Add New Customer button based on currentType
-            if (type === 'external') {
-                $('#cust_btn_add_new').show();
+            // Show the relevant creation shortcut for the selected contact type.
+            if (type === 'family') {
+                $('#family_btn_add_new').css('display', 'flex');
+                $('#cust_btn_add_new').hide();
+            } else if (type === 'external') {
+                $('#family_btn_add_new').hide();
+                $('#cust_btn_add_new').css('display', 'flex');
             } else {
+                $('#family_btn_add_new').hide();
                 $('#cust_btn_add_new').hide();
             }
 
@@ -251,6 +256,88 @@
     // ══════════════════════════════════════════════════════════════════════════
     // SearchModule — Phase 2 placeholder (wired up next phase)
     // ══════════════════════════════════════════════════════════════════════════
+    var FamilyCreateModal = {
+        open: function () {
+            var form = document.getElementById('family-modal-form');
+            if (form) form.reset();
+            this.notice('');
+            $('#family-modal-overlay').css('display', 'flex');
+            setTimeout(function () { $('#family-modal-name').focus(); }, 80);
+        },
+
+        close: function () {
+            $('#family-modal-overlay').hide();
+        },
+
+        notice: function (message, isError) {
+            var $notice = $('#family-modal-notice');
+            if (!message) {
+                $notice.hide().text('');
+                return;
+            }
+
+            $notice
+                .text(message)
+                .css({
+                    display: 'block',
+                    background: isError ? '#fee2e2' : '#dcfce7',
+                    color: isError ? '#991b1b' : '#166534',
+                    border: '1px solid ' + (isError ? '#fecaca' : '#bbf7d0')
+                });
+        },
+
+        init: function () {
+            var self = this;
+
+            $(document).on('click', '#family-modal-close, #family-modal-cancel', function () {
+                self.close();
+            });
+
+            $(document).on('click', '#family-modal-overlay', function (e) {
+                if (e.target === this) self.close();
+            });
+
+            $(document).on('submit', '#family-modal-form', function (e) {
+                e.preventDefault();
+
+                var $form = $(this);
+                var $btn = $('#family-modal-save');
+                var familyName = $('#family-modal-name').val().trim();
+                if (!familyName) {
+                    $('#family-modal-name').focus();
+                    self.notice('اسم العائلة مطلوب.', true);
+                    return;
+                }
+
+                $btn.prop('disabled', true).text('جاري الحفظ...');
+
+                $.post(AJAX_URL, {
+                    action: 'os_hub_add_family',
+                    nonce: NONCE,
+                    family_uid: $('#family-modal-uid').val().trim(),
+                    family_name: familyName,
+                    father_mobile: $('#family-modal-father-mobile').val().trim(),
+                    mother_mobile: $('#family-modal-mother-mobile').val().trim(),
+                    address: $('#family-modal-address').val().trim()
+                }).done(function (response) {
+                    if (!response || !response.success) {
+                        self.notice((response && response.data && response.data.message) || I18N.errorGeneric, true);
+                        return;
+                    }
+
+                    self.notice(response.data.message || 'تم حفظ العائلة.', false);
+                    self.close();
+                    CustomerHub.loadCustomer(response.data.customer);
+                    $form[0].reset();
+                }).fail(function () {
+                    self.notice(I18N.networkError || I18N.errorGeneric, true);
+                }).always(function () {
+                    $btn.prop('disabled', false).text('حفظ العائلة');
+                });
+            });
+        }
+    };
+
     var SearchModule = {
 
         _timer: null,
@@ -329,13 +416,27 @@
                 CustomerHub.loadCustomer(customer);
             });
 
-            // Click add new customer/family button
-            $(document).on('click', '#os-hub-add-new-btn', function () {
-                if (state.currentType === 'family') {
-                    window.location.href = ADMIN_URL + 'admin.php?page=olama-registration&view=families&action=new';
-                } else {
-                    window.location.href = ADMIN_URL + 'admin.php?page=olama-registration&view=customers#add-new';
+            // Route the generic empty-state button to the active contact type.
+            $(document).on('click', '#cust_btn_add_new, #os-hub-add-new-btn', function (e) {
+                if (this.id === 'os-hub-add-new-btn' && state.currentType === 'family') {
+                    e.preventDefault();
+                    $('#family_btn_add_new').trigger('click');
+                    return;
                 }
+
+                if (state.currentType !== 'external') {
+                    e.preventDefault();
+                    return;
+                }
+
+                if (this.id === 'os-hub-add-new-btn') {
+                    e.preventDefault();
+                    $('#cust_btn_add_new').trigger('click');
+                }
+            });
+
+            $(document).on('click', '#family_btn_add_new', function () {
+                FamilyCreateModal.open();
             });
         },
 
@@ -426,7 +527,7 @@
                 '<span class="os-hub-notice__body">' + escHtml(query) + '</span>' +
                 '<div class="os-hub-notice__actions">' +
                 '<button type="button" class="button" id="os-hub-add-new-btn">' +
-                I18N.addNewCustomer + '</button>' +
+                (state.currentType === 'family' ? 'إضافة عائلة جديدة' : I18N.addNewCustomer) + '</button>' +
                 '</div></li>'
             );
         },
@@ -844,6 +945,7 @@
             $(document).on('click', '#os-hub-back-to-type', function () {
                 state.currentType     = null;
                 state.currentCustomer = null;
+                $('#family_btn_add_new').hide();
                 $('#cust_btn_add_new').hide();
                 PanelManager.show('type');
 
@@ -857,9 +959,14 @@
             // Back to search
             $(document).on('click', '#os-hub-back-to-search', function () {
                 TileManager.collapseAll();
-                if (state.currentType === 'external') {
-                    $('#cust_btn_add_new').show();
+                if (state.currentType === 'family') {
+                    $('#family_btn_add_new').css('display', 'flex');
+                    $('#cust_btn_add_new').hide();
+                } else if (state.currentType === 'external') {
+                    $('#family_btn_add_new').hide();
+                    $('#cust_btn_add_new').css('display', 'flex');
                 } else {
+                    $('#family_btn_add_new').hide();
                     $('#cust_btn_add_new').hide();
                 }
                 PanelManager.show('lookup');
@@ -1434,6 +1541,7 @@
     $(function () {
         TypeSelector.init();
         RecentLookups.init();
+        FamilyCreateModal.init();
         SearchModule.init();
         TileManager.init();
         Navigation.init();
@@ -1556,7 +1664,7 @@
                     action:           'olama_reg_get_family_billing',
                     nonce:            REG_NONCE,
                     family_uid:       customer.uid,
-                    academic_year_id: 0
+                    academic_year_id: state.currentYearId || 0
                 }, function (res) {
                     $invSelect.empty().append('<option value="">-- اختر الفاتورة --</option>');
                     if (res.success && res.data.invoices) {
@@ -1618,7 +1726,7 @@
                     action:           'olama_reg_get_family_billing',
                     nonce:            REG_NONCE,
                     family_uid:       customer.uid,
-                    academic_year_id: 0
+                    academic_year_id: state.currentYearId || 0
                 }, function (res) {
                     $invSelect.empty().append('<option value="">-- اختر الفاتورة --</option>');
                     if (res.success && res.data.invoices) {

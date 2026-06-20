@@ -93,6 +93,7 @@ class Olama_Reg_Ajax
         add_action('wp_ajax_os_hub_save_profile', [$this, 'hub_save_profile']);
         add_action('wp_ajax_os_hub_toggle_active',[$this, 'hub_toggle_active']);
         add_action('wp_ajax_os_hub_add_child',    [$this, 'hub_add_child']);
+        add_action('wp_ajax_os_hub_add_family',   [$this, 'hub_add_family']);
         add_action('wp_ajax_os_hub_load_form',    [$this, 'hub_load_form']);
     }
 
@@ -168,6 +169,7 @@ class Olama_Reg_Ajax
              LEFT JOIN {$ctable} ch ON ch.customer_id = c.id AND ch.is_active = 1
              WHERE c.is_active = 1
                AND ( c.customer_name LIKE %s OR c.phone LIKE %s OR c.customer_uid LIKE %s OR ch.child_name LIKE %s )
+             ORDER BY c.customer_name ASC
              LIMIT 20",
             $like,
             $like,
@@ -1050,21 +1052,35 @@ class Olama_Reg_Ajax
             wp_send_json_error(['message' => $invoice_id->get_error_message()]);
         }
 
+        $created_invoice = Olama_Reg_Billing_Invoice::get_invoice((int) $invoice_id);
+        $payment_amount = $created_invoice ? round((float) $created_invoice->balance, 2) : 0.0;
+        if ($payment_amount <= 0) {
+            Olama_Reg_Billing_Invoice::cancel((int) $invoice_id);
+            wp_send_json_error(['message' => __('لا يمكن إصدار سند بقيمة صفرية. يرجى مراجعة قيمة الخدمة والخصم.', 'olama-registration')]);
+        }
+
         // 2. Record a single Payment
         $payment_id = Olama_Reg_Billing_Payment::record([
             'family_uid' => $family_uid,
             'invoice_id' => $invoice_id,
-            'amount' => $total_amount,
+            'amount' => $payment_amount,
             'payment_date' => date('Y-m-d'),
             'method' => $payment_meth,
             'notes' => $is_external ? 'دفعة: ' . $service_type : 'دفعة مقبوضة عن خدمات إضافية: ' . $service_type,
         ]);
 
         if (is_wp_error($payment_id)) {
+            Olama_Reg_Billing_Invoice::cancel((int) $invoice_id);
             wp_send_json_error(['message' => $payment_id->get_error_message()]);
         }
 
 
+
+        $payment_status = (string) $wpdb->get_var($wpdb->prepare(
+            "SELECT status FROM {$wpdb->prefix}olama_payments WHERE id = %d",
+            (int) $payment_id
+        ));
+        $fee_paid_status = $payment_status === 'posted' ? 'paid' : 'invoiced';
 
         if ($linked_agreement_id && !empty($linked_fee_ids)) {
             $agreement = Olama_Reg_Agreement::get($linked_agreement_id);
@@ -1072,7 +1088,7 @@ class Olama_Reg_Ajax
                 foreach ($linked_fee_ids as $fid) {
                     $wpdb->update(
                         $wpdb->prefix . 'olama_agreement_fees',
-                        ['paid_status' => 'paid', 'invoice_id' => $invoice_id],
+                        ['paid_status' => $fee_paid_status, 'invoice_id' => $invoice_id],
                         ['id' => $fid, 'agreement_id' => $linked_agreement_id]
                     );
                 }
@@ -1083,7 +1099,8 @@ class Olama_Reg_Ajax
                     foreach ($all_fees as $f) {
                         // After update, we need to check the updated state or just skip the ones we just updated
                         // The get_by_agreement will fetch new state if caching allows, but to be safe:
-                        if (!in_array($f->id, $linked_fee_ids) && $f->paid_status === 'unpaid') {
+                        $current_status = in_array((int) $f->id, $linked_fee_ids, true) ? $fee_paid_status : (string) $f->paid_status;
+                        if ($current_status !== 'paid') {
                             $all_paid = false;
                             break;
                         }
@@ -2058,15 +2075,17 @@ class Olama_Reg_Ajax
                 FROM {$wpdb->prefix}olama_customers c
                 LEFT JOIN {$wpdb->prefix}olama_customer_children ch
                     ON ch.customer_id = c.id AND ch.is_active = 1
-                WHERE c.customer_name LIKE %s
-                   OR c.customer_uid  LIKE %s
-                   OR c.phone         LIKE %s
+                WHERE c.is_active = 1
+                  AND ( c.customer_name LIKE %s
+                     OR c.customer_uid  LIKE %s
+                     OR c.phone         LIKE %s
+                     OR ch.child_name   LIKE %s )
                 GROUP BY c.id
                 ORDER BY c.customer_name
                 LIMIT 20";
 
         return $wpdb->get_results(
-            $wpdb->prepare($sql, $like, $like, $like)
+            $wpdb->prepare($sql, $like, $like, $like, $like)
         ) ?: [];
     }
 
@@ -2108,11 +2127,14 @@ class Olama_Reg_Ajax
             }
 
             // Agreements
-            $agreements = (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_agreements
-                  WHERE payer_type = 'family' AND payer_id = %s",
-                $uid
-            ));
+            $agr_sql  = "SELECT COUNT(*) FROM {$wpdb->prefix}olama_agreements
+                          WHERE payer_type = 'family' AND payer_id = %s";
+            $agr_args = [$uid];
+            if ($year) {
+                $agr_sql .= ' AND academic_year_id = %d';
+                $agr_args[] = $year;
+            }
+            $agreements = (int) $wpdb->get_var($wpdb->prepare($agr_sql, $agr_args));
 
             // Invoices (current year or all)
             $inv_sql = "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices
@@ -2142,12 +2164,36 @@ class Olama_Reg_Ajax
                 $uid
             ));
 
-            // History / audit
-            $history = (int) $wpdb->get_var($wpdb->prepare(
+            // History / audit: count the financial records shown in the history tile.
+            $hist_year_clause         = $year ? ' AND academic_year_id = %d' : '';
+            $hist_payment_year_clause = $year ? ' AND i.academic_year_id = %d' : '';
+            $hist_year_args           = $year ? [$year] : [];
+            $invoice_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_invoices
+                  WHERE family_uid = %s {$hist_year_clause}",
+                array_merge([$uid], $hist_year_args)
+            )) ?: [0];
+            $payment_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT p.id FROM {$wpdb->prefix}olama_payments p
+                  INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
+                  WHERE p.family_uid = %s {$hist_payment_year_clause}",
+                array_merge([$uid], $hist_year_args)
+            )) ?: [0];
+            $agreement_ids = $wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_agreements
+                  WHERE payer_type = 'family' AND payer_id = %s {$hist_year_clause}",
+                array_merge([$uid], $hist_year_args)
+            )) ?: [0];
+
+            $invoice_ids_str   = implode(',', array_map('intval', $invoice_ids)) ?: '0';
+            $payment_ids_str   = implode(',', array_map('intval', $payment_ids)) ?: '0';
+            $agreement_ids_str = implode(',', array_map('intval', $agreement_ids)) ?: '0';
+            $history = (int) $wpdb->get_var(
                 "SELECT COUNT(*) FROM {$wpdb->prefix}olama_billing_audit
-                  WHERE entity_type = 'family' AND entity_id = %s",
-                $uid
-            ));
+                 WHERE (entity_type = 'invoice' AND entity_id IN ($invoice_ids_str))
+                    OR (entity_type = 'payment' AND entity_id IN ($payment_ids_str))
+                    OR (entity_type = 'agreement' AND entity_id IN ($agreement_ids_str))"
+            );
 
             // Settlements (families only)
             $settle_sql = "SELECT COUNT(*) FROM {$wpdb->prefix}olama_settlement_receipts
@@ -2206,24 +2252,44 @@ class Olama_Reg_Ajax
             }
             $cid = (int) $customer->id;
 
-            $agreements = $cid ? (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_agreements
-                  WHERE payer_type = 'customer' AND payer_id = %d",
-                $cid
-            )) : 0;
+            $year_clause = '';
+            $payment_year_clause = '';
+            $year_args   = [];
+            if ($year) {
+                $year_clause = ' AND academic_year_id = %d';
+                $payment_year_clause = ' AND i.academic_year_id = %d';
+                $year_args[] = $year;
+            }
 
-            $invoices = $cid ? (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices
-                  WHERE ext_customer_id = %d AND status != 'cancelled'",
-                $cid
-            )) : 0;
+            $agreements = 0;
+            if ($cid) {
+                $agreements = (int) $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->prefix}olama_agreements
+                      WHERE payer_type = 'customer' AND payer_id = %d {$year_clause}",
+                    array_merge([$cid], $year_args)
+                ));
+            }
 
-            $payments = $cid ? (int) $wpdb->get_var($wpdb->prepare(
-                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_payments p
-                  INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
-                  WHERE i.ext_customer_id = %d",
-                $cid
-            )) : 0;
+            $invoices = 0;
+            if ($cid) {
+                $invoices = (int) $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->prefix}olama_invoices
+                      WHERE (ext_customer_id = %d OR family_uid = %s)
+                        AND status != 'cancelled' {$year_clause}",
+                    array_merge([$cid, $uid], $year_args)
+                ));
+            }
+
+            $payments = 0;
+            if ($cid) {
+                $payments = (int) $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->prefix}olama_payments p
+                      INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
+                      WHERE (i.ext_customer_id = %d OR i.family_uid = %s OR p.family_uid = %s)
+                        {$payment_year_clause}",
+                    array_merge([$cid, $uid, $uid], $year_args)
+                ));
+            }
 
             $children = $cid ? (int) $wpdb->get_var($wpdb->prepare(
                 "SELECT COUNT(*) FROM {$wpdb->prefix}olama_customer_children
@@ -2231,7 +2297,33 @@ class Olama_Reg_Ajax
                 $cid
             )) : 0;
 
-            $history      = 0; // Phase 5 will query audit for external
+            $invoice_ids = $cid ? ($wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_invoices
+                  WHERE (ext_customer_id = %d OR family_uid = %s) {$year_clause}",
+                array_merge([$cid, $uid], $year_args)
+            )) ?: [0]) : [0];
+            $payment_ids = $cid ? ($wpdb->get_col($wpdb->prepare(
+                "SELECT p.id FROM {$wpdb->prefix}olama_payments p
+                  INNER JOIN {$wpdb->prefix}olama_invoices i ON i.id = p.invoice_id
+                  WHERE (i.ext_customer_id = %d OR i.family_uid = %s OR p.family_uid = %s)
+                    {$payment_year_clause}",
+                array_merge([$cid, $uid, $uid], $year_args)
+            )) ?: [0]) : [0];
+            $agreement_ids = $cid ? ($wpdb->get_col($wpdb->prepare(
+                "SELECT id FROM {$wpdb->prefix}olama_agreements
+                  WHERE payer_type = 'customer' AND payer_id = %d {$year_clause}",
+                array_merge([$cid], $year_args)
+            )) ?: [0]) : [0];
+
+            $invoice_ids_str   = implode(',', array_map('intval', $invoice_ids)) ?: '0';
+            $payment_ids_str   = implode(',', array_map('intval', $payment_ids)) ?: '0';
+            $agreement_ids_str = implode(',', array_map('intval', $agreement_ids)) ?: '0';
+            $history = (int) $wpdb->get_var(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}olama_billing_audit
+                 WHERE (entity_type = 'invoice' AND entity_id IN ($invoice_ids_str))
+                    OR (entity_type = 'payment' AND entity_id IN ($payment_ids_str))
+                    OR (entity_type = 'agreement' AND entity_id IN ($agreement_ids_str))"
+            );
             $financial    = null;
             $statement    = $invoices + $payments;
             $settlements  = null; // Not applicable for external customers
@@ -2577,8 +2669,8 @@ class Olama_Reg_Ajax
                 $uid
             ));
             $cid    = $c ? (int) $c->id : 0;
-            $where  = 'i.ext_customer_id = %d';
-            $args   = [$cid];
+            $where  = '(i.ext_customer_id = %d OR i.family_uid = %s)';
+            $args   = [$cid, $uid];
         }
 
         if ($year) {
@@ -2586,7 +2678,7 @@ class Olama_Reg_Ajax
             $args[] = $year;
         }
 
-        $query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_name,
+        $query = "SELECT i.*, COALESCE(f.family_name, c.customer_name, '') AS father_first_name, '' AS father_family_name,
                          ft.template_name AS fee_template_name,
                          ft.subject_type AS fee_subject_type,
                          ft.subject_value AS fee_subject_value,
@@ -2595,6 +2687,7 @@ class Olama_Reg_Ajax
                          ec.child_name AS direct_child_name
                   FROM " . $wpdb->prefix . "olama_invoices i
                   LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = i.family_uid
+                  LEFT JOIN " . $wpdb->prefix . "olama_customers c ON c.id = i.ext_customer_id OR c.customer_uid = i.family_uid
                   LEFT JOIN " . $wpdb->prefix . "olama_fee_templates ft ON ft.id = i.fee_template_id
                   LEFT JOIN " . $wpdb->prefix . "olama_agreements a ON a.id = i.agreement_id
                   LEFT JOIN " . $wpdb->prefix . "olama_students s ON s.student_uid = i.student_uid
@@ -2673,7 +2766,9 @@ class Olama_Reg_Ajax
             }, $covered_children))));
         }
 
-        $new_invoice_url = admin_url('admin.php?page=olama-registration-invoices&action=new&type=' . $type . '&uid=' . $uid);
+        $new_invoice_url = $type === 'family'
+            ? admin_url('admin.php?page=olama-registration-invoices&action=new&family_uid=' . rawurlencode($uid))
+            : admin_url('admin.php?page=olama-registration-invoices&action=new&ext_customer_uid=' . rawurlencode($uid));
 
         if (!$invoices) {
             $html = $this->hub_empty_state(
@@ -2689,7 +2784,9 @@ class Olama_Reg_Ajax
 
         $total_balance = 0;
         foreach ($invoices as $inv) {
-            $total_balance += (float) $inv->balance;
+            if (!in_array((string) ($inv->status ?? ''), ['draft', 'cancelled'], true)) {
+                $total_balance += (float) $inv->balance;
+            }
         }
 
         ob_start();
@@ -2723,8 +2820,8 @@ class Olama_Reg_Ajax
                 $uid
             ));
             $cid        = $c ? (int) $c->id : 0;
-            $join_where = 'i.ext_customer_id = %d';
-            $args       = [$cid];
+            $join_where = '(i.ext_customer_id = %d OR i.family_uid = %s OR p.family_uid = %s)';
+            $args       = [$cid, $uid, $uid];
         }
 
         if ($year) {
@@ -2734,8 +2831,8 @@ class Olama_Reg_Ajax
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT p.id, p.invoice_id, p.payment_date, p.amount, p.method, p.reference,
-                        p.received_by, p.notes, p.family_uid,
+                "SELECT p.id, p.payment_no, p.invoice_id, p.payment_date, p.amount, p.method, p.status, p.reference,
+                        p.reversed_payment_id, p.received_by, p.notes, p.family_uid,
                         i.invoice_number, p.amount AS payment_amount,
                         u.display_name AS received_by_name
                  FROM {$wpdb->prefix}olama_payments p
@@ -2774,7 +2871,9 @@ class Olama_Reg_Ajax
 
         $reversed_ids = [];
         foreach ($rows as $row_pay) {
-            if (strpos($row_pay->reference ?? '', 'REVERSAL-') === 0) {
+            if (!empty($row_pay->reversed_payment_id)) {
+                $reversed_ids[] = (int) $row_pay->reversed_payment_id;
+            } elseif (strpos($row_pay->reference ?? '', 'REVERSAL-') === 0) {
                 $reversed_ids[] = (int) str_replace('REVERSAL-', '', $row_pay->reference);
             }
         }
@@ -2796,6 +2895,7 @@ class Olama_Reg_Ajax
         $html .= '<th>' . __('رقم الملف', 'olama-registration') . '</th>';
         $html .= '<th>' . __('ولي الأمر', 'olama-registration') . '</th>';
         $html .= '<th>' . __('القيمة المقبوضة', 'olama-registration') . '</th>';
+        $html .= '<th>' . __('الحالة', 'olama-registration') . '</th>';
         $html .= '<th>' . __('طريقة الدفع', 'olama-registration') . '</th>';
         $html .= '<th>' . __('رقم المرجع / الشيك', 'olama-registration') . '</th>';
         $html .= '<th>' . __('المستلم', 'olama-registration') . '</th>';
@@ -2803,20 +2903,23 @@ class Olama_Reg_Ajax
         $html .= '</tr></thead><tbody>';
 
         foreach ($rows as $r) {
-            $total_paid += (float) $r->amount;
+            if (in_array((string) ($r->status ?? ''), ['', 'posted', 'reversed'], true)) {
+                $total_paid += (float) $r->amount;
+            }
             $m = $method_cfg[$r->method] ?? ['label' => $r->method, 'class' => 'reg-method-pill--cash'];
             $is_reversal = (float) $r->amount < 0;
 
             $print_url = admin_url('admin.php?page=olama-registration-payments&action=print_receipt&id=' . (int) $r->id);
 
             $html .= '<tr' . ($is_reversal ? ' class="os-hub-row--reversal"' : '') . '>';
-            $html .= '<td><span style="font-weight:700; color:var(--reg-text-muted);">#' . (int) $r->id . '</span></td>';
+            $html .= '<td><span style="font-weight:700; color:var(--reg-text-muted);">' . esc_html(Olama_Reg_Billing_Payment::get_receipt_number($r)) . '</span></td>';
             $html .= '<td style="color:var(--reg-text-muted);">' . esc_html($r->payment_date) . '</td>';
             $html .= '<td><strong>' . esc_html($r->invoice_number ?: '—') . '</strong></td>';
             $html .= '<td><span class="olama-reg-uid-badge">' . esc_html($r->family_uid) . '</span></td>';
             $html .= '<td>' . esc_html($payer_name) . '</td>';
             $html .= '<td style="' . ($is_reversal ? 'color:#d63638;' : 'color:var(--reg-success);') . ' font-weight:800; font-size:15px;" dir="ltr">';
             $html .= number_format((float)$r->amount, 2) . '</td>';
+            $html .= '<td>' . esc_html(Olama_Reg_Billing_Payment::get_status_label($r)) . '</td>';
             $html .= '<td>';
             $html .= '<span class="reg-method-pill ' . esc_attr($m['class']) . '">';
             $html .= esc_html($m['label']);
@@ -2829,7 +2932,7 @@ class Olama_Reg_Ajax
             $html .= '<span class="dashicons dashicons-printer"></span>';
             $html .= '</a>';
             if ((float) $r->amount > 0 && $r->method !== 'reversal') {
-                $is_already_reversed = in_array((int) $r->id, $reversed_ids, true);
+                $is_already_reversed = in_array((int) $r->id, $reversed_ids, true) || (string)($r->status ?? '') === 'reversed';
                 if ($is_already_reversed) {
                     $html .= '<button type="button" class="button button-small" disabled style="opacity:0.5; cursor:not-allowed;" title="' . esc_attr__('هذا السند معكوس مسبقاً', 'olama-registration') . '">';
                     $html .= '<span class="dashicons dashicons-undo"></span>';
@@ -2976,14 +3079,21 @@ class Olama_Reg_Ajax
             ));
             $cid = $c ? (int) $c->id : 0;
 
+            $summary_args = [$cid, $uid];
+            $year_clause = '';
+            if ($year) {
+                $year_clause = ' AND academic_year_id = %d';
+                $summary_args[] = $year;
+            }
+
             $summary = $cid ? $wpdb->get_row($wpdb->prepare(
                 "SELECT
                      COALESCE(SUM(total), 0) AS billed,
                      COALESCE(SUM(amount_paid), 0) AS paid,
-                     COALESCE(SUM(balance), 0) AS balance
+                 COALESCE(SUM(balance), 0) AS balance
                  FROM {$wpdb->prefix}olama_invoices
-                 WHERE ext_customer_id = %d AND status != 'cancelled'",
-                $cid
+                 WHERE (ext_customer_id = %d OR family_uid = %s) AND status != 'cancelled' {$year_clause}",
+                $summary_args
             )) : null;
 
             $billed  = $summary ? (float) $summary->billed  : 0;
@@ -3784,6 +3894,76 @@ class Olama_Reg_Ajax
     // ══════════════════════════════════════════════════════════════════════════
     // PHASE 3: Interactive Profile Actions
     // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Create a core Olama School family from the contacts hub.
+     *
+     * POST: family_uid (optional), family_name, father_mobile, mother_mobile, address
+     */
+    public function hub_add_family(): void
+    {
+        $this->hub_guard();
+        $this->hub_require_caps(['olama_manage_registration_families']);
+
+        global $wpdb;
+
+        $family_uid    = sanitize_text_field($_POST['family_uid'] ?? '');
+        $family_name   = sanitize_text_field($_POST['family_name'] ?? '');
+        $father_mobile = sanitize_text_field($_POST['father_mobile'] ?? '');
+        $mother_mobile = sanitize_text_field($_POST['mother_mobile'] ?? '');
+        $address       = sanitize_textarea_field($_POST['address'] ?? '');
+
+        if ($family_name === '') {
+            wp_send_json_error(['message' => __('اسم العائلة مطلوب.', 'olama-registration')]);
+        }
+
+        if ($family_uid === '') {
+            $family_uid = (string) ((int) $wpdb->get_var(
+                "SELECT COALESCE(MAX(CAST(family_uid AS UNSIGNED)), 0) + 1 FROM {$wpdb->prefix}olama_families WHERE family_uid REGEXP '^[0-9]+$'"
+            ));
+        }
+
+        if ($family_uid === '' || ! preg_match('/^[A-Za-z0-9_-]+$/', $family_uid)) {
+            wp_send_json_error(['message' => __('رقم العائلة غير صالح.', 'olama-registration')]);
+        }
+
+        $exists = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}olama_families WHERE family_uid = %s LIMIT 1",
+            $family_uid
+        ));
+        if ($exists) {
+            wp_send_json_error(['message' => __('رقم العائلة موجود مسبقاً.', 'olama-registration')]);
+        }
+
+        $inserted = $wpdb->insert(
+            $wpdb->prefix . 'olama_families',
+            [
+                'family_uid'    => $family_uid,
+                'family_name'   => $family_name,
+                'father_mobile' => $father_mobile,
+                'mother_mobile' => $mother_mobile,
+                'address'       => $address,
+            ],
+            ['%s', '%s', '%s', '%s', '%s']
+        );
+
+        if (! $inserted) {
+            wp_send_json_error(['message' => __('حدث خطأ أثناء حفظ العائلة.', 'olama-registration') . ' ' . $wpdb->last_error]);
+        }
+
+        wp_send_json_success([
+            'message' => __('تمت إضافة العائلة بنجاح.', 'olama-registration'),
+            'family_uid' => $family_uid,
+            'customer' => [
+                'uid'       => $family_uid,
+                'name'      => $family_name,
+                'phone'     => $father_mobile ?: $mother_mobile,
+                'type'      => 'family',
+                'is_active' => 1,
+                'count'     => 0,
+            ],
+        ]);
+    }
 
     /**
      * Save profile edits for family or external customer.

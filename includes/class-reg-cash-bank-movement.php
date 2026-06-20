@@ -63,7 +63,7 @@ class Olama_Reg_Cash_Bank_Movement {
 
         return self::record_movement( [
             'account_id'      => $account_id,
-            'cash_session_id' => (int) ( $reversal->cash_session_id ?? $original->cash_session_id ?? 0 ) ?: null,
+            'cash_session_id' => (int) ( $reversal->cash_session_id ?? 0 ) ?: null,
             'movement_type'   => 'receipt_reversal',
             'source_type'     => 'payment',
             'source_id'       => $reversal_payment_id,

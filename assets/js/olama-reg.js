@@ -2398,13 +2398,7 @@
         const amount = parseFloat($('#cp_amount').val()) || 0;
         const discount = parseFloat($('#cp_discount').val()) || 0;
 
-        let hasTemplate = $('#cp_fee_template').val() ? true : false;
-        let total = 0;
-        if (hasTemplate || window.OS_LINKED_AGREEMENT) {
-            total = count * amount;
-        } else {
-            total = Math.max(0, (count * amount) - (count * discount));
-        }
+        let total = Math.max(0, (count * amount) - (count * discount));
 
         $('#cp_total_display').text(total.toFixed(2) + ' د.أ');
         if (count > 0) $('#cp_students_error').hide();
@@ -2710,8 +2704,8 @@
 
                     if (childCount === 0) childCount = 1;
 
-                    let perChild = parseFloat(agr.amount);
-                    let perChildDiscount = parseFloat(agr.discount);
+                    let perChild = childCount > 0 ? (parseFloat(agr.amount) / childCount) : parseFloat(agr.amount);
+                    let perChildDiscount = childCount > 0 ? (parseFloat(agr.discount) / childCount) : parseFloat(agr.discount);
 
                     $('#cp_amount').val(perChild.toFixed(2));
                     $('#cp_discount').val(perChildDiscount.toFixed(2));

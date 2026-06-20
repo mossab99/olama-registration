@@ -103,7 +103,7 @@ $money = static function ( $amount ): string {
             </div>
             <div class="olama-reg-field">
                 <label><?php esc_html_e( 'رصيد الافتتاح', 'olama-registration' ); ?></label>
-                <input type="number" name="opening_balance" value="0.00" step="0.01" min="0">
+                <input type="number" name="opening_balance" value="" step="0.01" min="0" placeholder="<?php esc_attr_e( 'تلقائي', 'olama-registration' ); ?>">
             </div>
             <div class="olama-reg-field">
                 <label><?php esc_html_e( 'ملاحظات', 'olama-registration' ); ?></label>

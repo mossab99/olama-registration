@@ -35,6 +35,19 @@ if ( $action === 'print' && $id ) {
         "SELECT * FROM {$wpdb->prefix}olama_families WHERE family_uid = %s",
         $invoice->family_uid
     ) );
+
+    $customer = null;
+    if ( ! empty( $invoice->ext_customer_id ) || strpos( (string) $invoice->family_uid, 'CUST-' ) === 0 ) {
+        $customer = $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}olama_customers WHERE id = %d OR customer_uid = %s LIMIT 1",
+            (int) $invoice->ext_customer_id,
+            $invoice->family_uid
+        ) );
+    }
+
+    $payer_name = $customer
+        ? (string) $customer->customer_name
+        : ( $family ? trim( (string) $family->father_first_name . ' ' . (string) $family->father_family_name ) : (string) $invoice->family_uid );
     
     $student = null;
     if ( $invoice->student_uid ) {
@@ -127,8 +140,8 @@ if ( $action === 'print' && $id ) {
 
             <table class="meta-table">
                 <tr>
-                    <td class="label"><?php echo ($invoice->ext_customer_id || strpos($invoice->family_uid, 'CUST-') === 0) ? '' : esc_html__('اسم ولي الأمر:', 'olama-registration'); ?></td>
-                    <td><?php echo ($invoice->ext_customer_id || strpos($invoice->family_uid, 'CUST-') === 0) ? '' : esc_html( $family ? $family->father_first_name . ' ' . $family->father_family_name : $invoice->family_uid ); ?></td>
+                    <td class="label"><?php esc_html_e( 'اسم ولي الأمر:', 'olama-registration' ); ?></td>
+                    <td><?php echo esc_html( $payer_name ); ?></td>
                     <td class="label">تاريخ الإصدار:</td>
                     <td><?php echo esc_html( $invoice->issue_date ); ?></td>
                 </tr>
@@ -309,7 +322,9 @@ if ( $filter_year ) {
 }
 if ( $search_q ) {
     $like = '%' . $wpdb->esc_like( $search_q ) . '%';
-    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.family_name LIKE %s OR ft.template_name LIKE %s OR a.agreement_number LIKE %s)";
+    $where .= " AND (i.invoice_number LIKE %s OR i.family_uid LIKE %s OR f.family_name LIKE %s OR c.customer_name LIKE %s OR c.customer_uid LIKE %s OR ft.template_name LIKE %s OR a.agreement_number LIKE %s)";
+    $params[] = $like;
+    $params[] = $like;
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
@@ -317,7 +332,7 @@ if ( $search_q ) {
     $params[] = $like;
 }
 
-$query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_name,
+$query = "SELECT i.*, COALESCE(f.family_name, c.customer_name, '') AS father_first_name, '' AS father_family_name,
                  ft.template_name AS fee_template_name,
                  ft.subject_type AS fee_subject_type,
                  ft.subject_value AS fee_subject_value,
@@ -326,6 +341,7 @@ $query = "SELECT i.*, f.family_name AS father_first_name, '' AS father_family_na
                  ec.child_name AS direct_child_name
           FROM " . $wpdb->prefix . "olama_invoices i
           LEFT JOIN " . $wpdb->prefix . "olama_families f ON f.family_uid = i.family_uid
+          LEFT JOIN " . $wpdb->prefix . "olama_customers c ON c.id = i.ext_customer_id OR c.customer_uid = i.family_uid
           LEFT JOIN " . $wpdb->prefix . "olama_fee_templates ft ON ft.id = i.fee_template_id
           LEFT JOIN " . $wpdb->prefix . "olama_agreements a ON a.id = i.agreement_id
           LEFT JOIN " . $wpdb->prefix . "olama_students s ON s.student_uid = i.student_uid
